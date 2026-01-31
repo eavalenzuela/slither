@@ -390,7 +390,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument(
         "--cjk-sample-size",
         type=int,
-        default=120,
+        default=555,
         help="How many random CJK ideographs to sample into the pool (CJK block is huge).",
     )
 
