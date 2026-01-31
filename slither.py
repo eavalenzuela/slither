@@ -269,6 +269,14 @@ def random_ascii_string(rng: random.Random, min_len: int, max_len: int) -> str:
     return "".join(rng.choice(alphabet) for _ in range(length))
 
 
+def clamp_delay_range(min_delay: float, max_delay: float) -> Tuple[float, float]:
+    lo = max(0.0, min_delay)
+    hi = max(0.0, max_delay)
+    if lo > hi:
+        lo, hi = hi, lo
+    return lo, hi
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(prog="slither", description="Randomize ASCII into Unicode glyphs (chaos-first).")
 
@@ -280,6 +288,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         type=int,
         default=10,
         help="Number of lines to auto-type (0 for endless).",
+    )
+    p.add_argument(
+        "--convo-forever",
+        action="store_true",
+        help="Run auto-typing conversation mode indefinitely.",
     )
     p.add_argument(
         "--convo-min-len",
@@ -304,6 +317,47 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         type=float,
         default=1.5,
         help="Maximum delay (seconds) between typed characters.",
+    )
+    p.add_argument(
+        "--convo-burst",
+        action="store_true",
+        help="Enable burst typing (clusters of faster keystrokes with longer pauses).",
+    )
+    p.add_argument(
+        "--convo-burst-min",
+        type=int,
+        default=3,
+        help="Minimum burst length in characters.",
+    )
+    p.add_argument(
+        "--convo-burst-max",
+        type=int,
+        default=8,
+        help="Maximum burst length in characters.",
+    )
+    p.add_argument(
+        "--convo-burst-fast-min-mult",
+        type=float,
+        default=0.2,
+        help="Multiplier for min delay during bursts (relative to base min delay).",
+    )
+    p.add_argument(
+        "--convo-burst-fast-max-mult",
+        type=float,
+        default=0.6,
+        help="Multiplier for max delay during bursts (relative to base max delay).",
+    )
+    p.add_argument(
+        "--convo-burst-pause-min-mult",
+        type=float,
+        default=1.5,
+        help="Multiplier for min pause delay between bursts (relative to base min delay).",
+    )
+    p.add_argument(
+        "--convo-burst-pause-max-mult",
+        type=float,
+        default=3.0,
+        help="Multiplier for max pause delay between bursts (relative to base max delay).",
     )
     p.add_argument(
         "--mode",
@@ -343,6 +397,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
     if ns.convo_lines < 0:
         print("error: --convo-lines must be >= 0", file=sys.stderr)
+        return 2
+    if ns.convo_burst_min < 1 or ns.convo_burst_max < 1:
+        print("error: --convo-burst-min/--convo-burst-max must be >= 1", file=sys.stderr)
+        return 2
+    if ns.convo_burst_min > ns.convo_burst_max:
+        print("error: --convo-burst-min must be <= --convo-burst-max", file=sys.stderr)
+        return 2
+    if ns.convo_burst_fast_min_mult < 0 or ns.convo_burst_fast_max_mult < 0:
+        print("error: --convo-burst-fast-*-mult must be >= 0", file=sys.stderr)
+        return 2
+    if ns.convo_burst_fast_min_mult > ns.convo_burst_fast_max_mult:
+        print("error: --convo-burst-fast-min-mult must be <= --convo-burst-fast-max-mult", file=sys.stderr)
+        return 2
+    if ns.convo_burst_pause_min_mult < 0 or ns.convo_burst_pause_max_mult < 0:
+        print("error: --convo-burst-pause-*-mult must be >= 0", file=sys.stderr)
+        return 2
+    if ns.convo_burst_pause_min_mult > ns.convo_burst_pause_max_mult:
+        print("error: --convo-burst-pause-min-mult must be <= --convo-burst-pause-max-mult", file=sys.stderr)
         return 2
     if ns.convo_min_len < 0 or ns.convo_max_len < 0:
         print("error: --convo-min-len/--convo-max-len must be >= 0", file=sys.stderr)
@@ -386,17 +458,41 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     cache: Dict[str, str] = {}
 
     if ns.convo:
+        if ns.convo_forever:
+            ns.convo_lines = 0
+        if opt.transform == "all":
+            opt.preserve = set(opt.preserve)
+            opt.preserve.update({" ", "\t", "\n", "\r"})
+        base_min_delay, base_max_delay = clamp_delay_range(ns.convo_min_delay, ns.convo_max_delay)
+        fast_min_delay, fast_max_delay = clamp_delay_range(
+            base_min_delay * ns.convo_burst_fast_min_mult,
+            base_max_delay * ns.convo_burst_fast_max_mult,
+        )
+        pause_min_delay, pause_max_delay = clamp_delay_range(
+            base_min_delay * ns.convo_burst_pause_min_mult,
+            base_max_delay * ns.convo_burst_pause_max_mult,
+        )
+
         line_count = 0
+        burst_remaining = 0
         while ns.convo_lines == 0 or line_count < ns.convo_lines:
             raw_line = random_ascii_string(rng, ns.convo_min_len, ns.convo_max_len)
             transformed = transform_text(raw_line, pool, opt, rng, cache)
-            for ch in transformed:
+            for i, ch in enumerate(transformed):
                 sys.stdout.write(ch)
                 sys.stdout.flush()
-                time.sleep(rng.uniform(ns.convo_min_delay, ns.convo_max_delay))
+                if ns.convo_burst:
+                    if burst_remaining == 0:
+                        burst_remaining = rng.randint(ns.convo_burst_min, ns.convo_burst_max)
+                    time.sleep(rng.uniform(fast_min_delay, fast_max_delay))
+                    burst_remaining -= 1
+                    if burst_remaining == 0 and i != len(transformed) - 1:
+                        time.sleep(rng.uniform(pause_min_delay, pause_max_delay))
+                else:
+                    time.sleep(rng.uniform(base_min_delay, base_max_delay))
             sys.stdout.write("\n")
             sys.stdout.flush()
-            time.sleep(rng.uniform(ns.convo_min_delay, ns.convo_max_delay))
+            time.sleep(rng.uniform(base_min_delay, base_max_delay))
             line_count += 1
         return 0
 
