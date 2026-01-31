@@ -14,6 +14,7 @@ Usage examples:
   echo "hello world" | ./slither.py
   ./slither.py "status: ok" --seed 42 --consistent
   ./slither.py --prob 0.35 --transform alnum file.txt
+  ./slither.py --convo --convo-lines 5 --convo-min-delay 0.2 --convo-max-delay 0.6
 """
 
 from __future__ import annotations
@@ -21,7 +22,9 @@ from __future__ import annotations
 import argparse
 import os
 import random
+import string
 import sys
+import time
 import unicodedata
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
@@ -260,11 +263,48 @@ def iter_input_sources(args: Sequence[str]) -> Iterable[Tuple[str, Optional[str]
             yield ("literal", a)
 
 
+def random_ascii_string(rng: random.Random, min_len: int, max_len: int) -> str:
+    length = rng.randint(min_len, max_len)
+    alphabet = string.ascii_letters + string.digits
+    return "".join(rng.choice(alphabet) for _ in range(length))
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(prog="slither", description="Randomize ASCII into Unicode glyphs (chaos-first).")
 
     p.add_argument("inputs", nargs="*", help='Text literals and/or file paths. Use "-" or no args for stdin.')
     p.add_argument("--seed", type=int, default=None, help="Seed for reproducible output.")
+    p.add_argument("--convo", action="store_true", help="Enable auto-typing conversation mode.")
+    p.add_argument(
+        "--convo-lines",
+        type=int,
+        default=10,
+        help="Number of lines to auto-type (0 for endless).",
+    )
+    p.add_argument(
+        "--convo-min-len",
+        type=int,
+        default=5,
+        help="Minimum length of generated input lines.",
+    )
+    p.add_argument(
+        "--convo-max-len",
+        type=int,
+        default=75,
+        help="Maximum length of generated input lines.",
+    )
+    p.add_argument(
+        "--convo-min-delay",
+        type=float,
+        default=0.3,
+        help="Minimum delay (seconds) between typed characters.",
+    )
+    p.add_argument(
+        "--convo-max-delay",
+        type=float,
+        default=1.5,
+        help="Maximum delay (seconds) between typed characters.",
+    )
     p.add_argument(
         "--mode",
         choices=["chaos", "safe"],
@@ -301,6 +341,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if ns.cjk_sample_size < 0:
         print("error: --cjk-sample-size must be >= 0", file=sys.stderr)
         return 2
+    if ns.convo_lines < 0:
+        print("error: --convo-lines must be >= 0", file=sys.stderr)
+        return 2
+    if ns.convo_min_len < 0 or ns.convo_max_len < 0:
+        print("error: --convo-min-len/--convo-max-len must be >= 0", file=sys.stderr)
+        return 2
+    if ns.convo_min_len > ns.convo_max_len:
+        print("error: --convo-min-len must be <= --convo-max-len", file=sys.stderr)
+        return 2
+    if ns.convo_min_delay < 0 or ns.convo_max_delay < 0:
+        print("error: --convo-min-delay/--convo-max-delay must be >= 0", file=sys.stderr)
+        return 2
+    if ns.convo_min_delay > ns.convo_max_delay:
+        print("error: --convo-min-delay must be <= --convo-max-delay", file=sys.stderr)
+        return 2
 
     scripts = [s.strip().lower() for s in ns.scripts.split(",") if s.strip()]
     # Keep only known scripts; ignore unknowns to avoid surprise crashes
@@ -329,6 +384,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
 
     cache: Dict[str, str] = {}
+
+    if ns.convo:
+        line_count = 0
+        while ns.convo_lines == 0 or line_count < ns.convo_lines:
+            raw_line = random_ascii_string(rng, ns.convo_min_len, ns.convo_max_len)
+            transformed = transform_text(raw_line, pool, opt, rng, cache)
+            for ch in transformed:
+                sys.stdout.write(ch)
+                sys.stdout.flush()
+                time.sleep(rng.uniform(ns.convo_min_delay, ns.convo_max_delay))
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            time.sleep(rng.uniform(ns.convo_min_delay, ns.convo_max_delay))
+            line_count += 1
+        return 0
 
     # stdin mode
     if not ns.inputs or "-" in ns.inputs:
