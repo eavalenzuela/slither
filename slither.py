@@ -277,6 +277,13 @@ def clamp_delay_range(min_delay: float, max_delay: float) -> Tuple[float, float]
     return lo, hi
 
 
+def clear_terminal() -> None:
+    if not sys.stdout.isatty():
+        return
+    sys.stdout.write("\033[2J\033[H")
+    sys.stdout.flush()
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(prog="slither", description="Randomize ASCII into Unicode glyphs (chaos-first).")
 
@@ -383,7 +390,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument(
         "--cjk-sample-size",
         type=int,
-        default=2048,
+        default=120,
         help="How many random CJK ideographs to sample into the pool (CJK block is huge).",
     )
 
@@ -456,6 +463,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
 
     cache: Dict[str, str] = {}
+
+    clear_terminal()
 
     if ns.convo:
         if ns.convo_forever:
