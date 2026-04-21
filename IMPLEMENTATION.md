@@ -329,7 +329,7 @@ Data flow: `collector → enricher → ruleengine → output` as an in-process c
 
 ### 3.2 eBPF programs
 
-Three C files in `agent/internal/bpf/`, compiled via `bpf2go`. All programs are CO-RE (BPF type format) compatible via `vmlinux.h` embedded in the build.
+Three C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs are CO-RE (BPF type format) compatible via `vmlinux.h` embedded in the build. Sources live in a `src/` subdirectory (not the package root) so the Go toolchain doesn't reject `.c` files in a non-cgo package — `gen.go` references them as `src/*.bpf.c -I./src/headers`, and bpf2go writes the generated Go + `.o` back into the package root.
 
 **`process.bpf.c`** — process lifecycle.
 - Hooks: `tracepoint/sched/sched_process_exec`, `tracepoint/sched/sched_process_exit`, `tracepoint/sched/sched_process_fork`.
@@ -461,7 +461,7 @@ BTF availability is the hard floor. Kernels without `/sys/kernel/btf/vmlinux` ar
 ### 3.11 Phase 1 task breakdown
 
 1. ✅ Scaffold `agent/internal/` subpackages with interfaces only, empty implementations. *(Completed 2026-04-21: pipeline/config/telemetry/bpf/collector/enricher/ruleengine/output/app packages; orchestrator wired under a cancellable context; main takes `--config`/`--version`.)*
-2. Write `process.bpf.c`, `bpf2go` integration, minimal collector that prints raw events.
+2. ✅ Write `process.bpf.c`, `bpf2go` integration, minimal collector that prints raw events. *(Completed 2026-04-21: sched_process_{exec,exit,fork} tracepoints → 4MB ringbuf; bpf2go wired via `make gen-bpf`; vendored `bpf_helpers.h` + bpftool-generated `vmlinux.h` under `agent/internal/bpf/src/` so Go toolchain ignores `.c` files in the package; collector loads/attaches/drains with select-default drop onto `RawProcessEvent` channel.)*
 3. Flesh out process-event enricher (process cache + parent chain), emit OCSF `process_activity`.
 4. Build `pkg/ruleast/` Sigma compiler for the stateless subset + golden tests.
 5. Wire rule engine into pipeline; emit `detection_finding` events.
