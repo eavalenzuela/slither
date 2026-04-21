@@ -71,9 +71,16 @@ gen-vmlinux: ## Regenerate agent/internal/bpf/src/headers/vmlinux.h from /sys/ke
 .PHONY: verify-gen
 verify-gen: ## Fail if `make gen` would produce a diff (CI guard)
 	@$(MAKE) --no-print-directory gen
-	@if ! git diff --quiet --exit-code -- proto server/internal/console agent/internal/bpf; then \
+	@# bpf2go emits ELF .o files whose bytes depend on clang version + build
+	@# path, so they're not reproducible across machines. The Go wrappers
+	@# and embedded bytecode loader are, so we diff those and ignore the .o.
+	@# If the wrapper is out of date, this still catches it.
+	@if ! git diff --quiet --exit-code -- \
+			proto server/internal/console agent/internal/bpf \
+			':(exclude)agent/internal/bpf/*.o'; then \
 		echo "ERROR: generated code is out of date. Run 'make gen' and commit the result."; \
-		git --no-pager diff -- proto server/internal/console agent/internal/bpf; \
+		git --no-pager diff -- proto server/internal/console agent/internal/bpf \
+			':(exclude)agent/internal/bpf/*.o'; \
 		exit 1; \
 	fi
 
