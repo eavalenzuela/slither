@@ -1,0 +1,31 @@
+{
+  "category": "process_creation",
+  "condition": "selection",
+  "cost": 2,
+  "description": "chmod 777 / 666 / o+w on files — rare during normal operation, common in attacker scripts.",
+  "id": "8b7c4d00-0001-4000-8000-000000000008",
+  "level": "medium",
+  "selections": [
+    {
+      "fields": [
+        {
+          "field": "CommandLine",
+          "op": "regex",
+          "values": [
+            "\\s(777|666|0?(7|6)7(7|6))\\s",
+            "\\so\\+w\\b"
+          ]
+        },
+        {
+          "field": "Image",
+          "op": "endswith",
+          "values": [
+            "/chmod"
+          ]
+        }
+      ],
+      "name": "selection"
+    }
+  ],
+  "title": "chmod opening world-writable bits"
+}

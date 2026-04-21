@@ -1,0 +1,18 @@
+title: Python one-liner opening a socket
+id: 8b7c4d00-0001-4000-8000-000000000004
+description: python/python3 -c with socket import, a common reverse-shell payload.
+level: high
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith:
+      - /python
+      - /python3
+    CommandLine|contains: ' -c '
+  payload:
+    CommandLine|contains:
+      - 'import socket'
+      - 'socket.socket'
+  condition: selection and payload

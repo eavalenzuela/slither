@@ -1,0 +1,39 @@
+{
+  "category": "process_creation",
+  "condition": "(downloader and pipe_to_shell)",
+  "cost": 2,
+  "description": "curl / wget piped directly into a shell interpreter.",
+  "id": "8b7c4d00-0001-4000-8000-000000000003",
+  "level": "high",
+  "selections": [
+    {
+      "fields": [
+        {
+          "field": "Image",
+          "op": "endswith",
+          "values": [
+            "/curl",
+            "/wget"
+          ]
+        }
+      ],
+      "name": "downloader"
+    },
+    {
+      "fields": [
+        {
+          "field": "CommandLine",
+          "op": "contains",
+          "values": [
+            "| sh",
+            "| bash",
+            "|sh",
+            "|bash"
+          ]
+        }
+      ],
+      "name": "pipe_to_shell"
+    }
+  ],
+  "title": "Download and pipe to shell"
+}

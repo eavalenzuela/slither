@@ -1,0 +1,9 @@
+title: Condition references missing selection
+id: invalid-0005
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image: x
+  condition: selection and nope

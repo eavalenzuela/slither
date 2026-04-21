@@ -1,0 +1,8 @@
+title: No id field
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image: x
+  condition: selection

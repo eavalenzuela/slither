@@ -1,0 +1,9 @@
+title: Empty condition string
+id: invalid-0010
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image: x
+  condition: ''

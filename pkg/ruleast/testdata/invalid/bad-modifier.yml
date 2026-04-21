@@ -1,0 +1,9 @@
+title: Uses unsupported base64 modifier
+id: invalid-0003
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    CommandLine|base64contains: 'YWJj'
+  condition: selection

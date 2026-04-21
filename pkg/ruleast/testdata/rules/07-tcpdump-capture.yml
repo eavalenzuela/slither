@@ -1,0 +1,16 @@
+title: tcpdump writing capture file
+id: 8b7c4d00-0001-4000-8000-000000000007
+description: tcpdump/tshark with -w suggests on-host traffic capture — often legitimate, sometimes attacker recon.
+level: low
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith:
+      - /tcpdump
+      - /tshark
+    CommandLine|contains:
+      - ' -w '
+      - ' --write-file='
+  condition: selection

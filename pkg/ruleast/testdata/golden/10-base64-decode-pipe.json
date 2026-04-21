@@ -1,0 +1,39 @@
+{
+  "category": "process_creation",
+  "condition": "(sh_selection and payload)",
+  "cost": 2,
+  "description": "echo … | base64 -d | sh — a frequent LOLBAS-style obfuscation on Linux droppers.",
+  "id": "8b7c4d00-0001-4000-8000-00000000000a",
+  "level": "high",
+  "selections": [
+    {
+      "fields": [
+        {
+          "field": "CommandLine",
+          "op": "contains",
+          "values": [
+            "base64 -d",
+            "base64 --decode",
+            "openssl enc -base64 -d"
+          ]
+        }
+      ],
+      "name": "payload"
+    },
+    {
+      "fields": [
+        {
+          "field": "Image",
+          "op": "endswith",
+          "values": [
+            "/sh",
+            "/bash",
+            "/dash"
+          ]
+        }
+      ],
+      "name": "sh_selection"
+    }
+  ],
+  "title": "Base64 payload decoded straight into a shell"
+}

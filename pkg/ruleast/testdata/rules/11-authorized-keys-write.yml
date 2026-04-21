@@ -1,0 +1,15 @@
+title: Write to SSH authorized_keys
+id: 8b7c4d00-0001-4000-8000-00000000000b
+description: Any process writing .ssh/authorized_keys (outside sshd / systemd).
+level: high
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection:
+    TargetFilename|contains: '/.ssh/authorized_keys'
+  benign:
+    Image|endswith:
+      - /sshd
+      - /systemd
+  condition: selection and not benign

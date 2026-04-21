@@ -1,0 +1,40 @@
+{
+  "category": "file_event",
+  "condition": "(selection and (not allowed))",
+  "cost": 2,
+  "description": "Read/write to /etc/shadow by anything other than core auth utilities.",
+  "id": "8b7c4d00-0001-4000-8000-00000000000d",
+  "level": "high",
+  "selections": [
+    {
+      "fields": [
+        {
+          "field": "Image",
+          "op": "endswith",
+          "values": [
+            "/passwd",
+            "/chage",
+            "/usermod",
+            "/sshd",
+            "/pam_unix.so",
+            "/login"
+          ]
+        }
+      ],
+      "name": "allowed"
+    },
+    {
+      "fields": [
+        {
+          "field": "TargetFilename",
+          "op": "equals",
+          "values": [
+            "/etc/shadow"
+          ]
+        }
+      ],
+      "name": "selection"
+    }
+  ],
+  "title": "/etc/shadow accessed outside core utilities"
+}

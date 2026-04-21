@@ -1,0 +1,24 @@
+{
+  "category": "network_connection",
+  "condition": "selection",
+  "cost": 1,
+  "description": "SSRF / IMDS harvesting on cloud VMs.",
+  "id": "8b7c4d00-0001-4000-8000-000000000012",
+  "level": "high",
+  "selections": [
+    {
+      "fields": [
+        {
+          "field": "DestinationIp",
+          "op": "equals",
+          "values": [
+            "169.254.169.254",
+            "fd00:ec2::254"
+          ]
+        }
+      ],
+      "name": "selection"
+    }
+  ],
+  "title": "Egress to cloud metadata endpoint"
+}

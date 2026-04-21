@@ -1,0 +1,19 @@
+title: ssh outbound from unusual process
+id: 8b7c4d00-0001-4000-8000-000000000013
+description: ssh/sftp connections made by shells or editors — often attacker lateral movement.
+level: medium
+logsource:
+  product: linux
+  category: network_connection
+detection:
+  ssh_port:
+    DestinationPort: 22
+    Initiated: 'true'
+  spawner:
+    Image|endswith:
+      - /sh
+      - /bash
+      - /vi
+      - /vim
+      - /nano
+  condition: ssh_port and spawner

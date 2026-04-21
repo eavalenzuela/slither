@@ -1,0 +1,9 @@
+title: Unsupported category
+id: invalid-0002
+logsource:
+  product: linux
+  category: auth
+detection:
+  selection:
+    User: root
+  condition: selection

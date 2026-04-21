@@ -1,0 +1,35 @@
+{
+  "category": "network_connection",
+  "condition": "selection",
+  "cost": 2,
+  "description": "Connections to historically beaconing ports (Tor default, legacy IRC, Metasploit defaults).",
+  "id": "8b7c4d00-0001-4000-8000-000000000011",
+  "level": "medium",
+  "selections": [
+    {
+      "fields": [
+        {
+          "field": "DestinationPort",
+          "op": "equals",
+          "values": [
+            "4444",
+            "6666",
+            "6667",
+            "9001",
+            "9030",
+            "31337"
+          ]
+        },
+        {
+          "field": "Initiated",
+          "op": "equals",
+          "values": [
+            "true"
+          ]
+        }
+      ],
+      "name": "selection"
+    }
+  ],
+  "title": "Outbound to uncommon/known-bad port"
+}

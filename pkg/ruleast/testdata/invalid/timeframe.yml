@@ -1,0 +1,10 @@
+title: Uses timeframe (stateful, Phase 3+)
+id: invalid-0007
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image: x
+  condition: selection
+  timeframe: 5m

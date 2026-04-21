@@ -1,0 +1,27 @@
+{
+  "category": "file_event",
+  "condition": "selection",
+  "cost": 1,
+  "description": "Writes to common rc files outside user editors.",
+  "id": "8b7c4d00-0001-4000-8000-00000000000e",
+  "level": "medium",
+  "selections": [
+    {
+      "fields": [
+        {
+          "field": "TargetFilename",
+          "op": "endswith",
+          "values": [
+            "/.bashrc",
+            "/.zshrc",
+            "/.profile",
+            "/.bash_profile",
+            "/.bash_logout"
+          ]
+        }
+      ],
+      "name": "selection"
+    }
+  ],
+  "title": "Shell rc-file modification"
+}

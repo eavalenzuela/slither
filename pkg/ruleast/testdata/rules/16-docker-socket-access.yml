@@ -1,0 +1,17 @@
+title: Process accessing /var/run/docker.sock
+id: 8b7c4d00-0001-4000-8000-000000000010
+description: Non-docker processes touching the docker control socket can escape containers or manipulate infra.
+level: high
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection:
+    TargetFilename: /var/run/docker.sock
+  allowed:
+    Image|endswith:
+      - /docker
+      - /dockerd
+      - /containerd
+      - /containerd-shim
+  condition: selection and not allowed

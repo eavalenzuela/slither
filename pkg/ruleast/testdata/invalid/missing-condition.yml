@@ -1,0 +1,8 @@
+title: No condition
+id: invalid-0004
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image: x

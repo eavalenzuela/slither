@@ -1,0 +1,28 @@
+{
+  "category": "file_event",
+  "condition": "selection",
+  "cost": 1,
+  "description": "Persistence via cron dropfile.",
+  "id": "8b7c4d00-0001-4000-8000-00000000000c",
+  "level": "high",
+  "selections": [
+    {
+      "fields": [
+        {
+          "field": "TargetFilename",
+          "op": "startswith",
+          "values": [
+            "/etc/cron.d/",
+            "/etc/cron.daily/",
+            "/etc/cron.hourly/",
+            "/etc/cron.monthly/",
+            "/etc/cron.weekly/",
+            "/var/spool/cron/"
+          ]
+        }
+      ],
+      "name": "selection"
+    }
+  ],
+  "title": "Edit under /etc/cron.*"
+}

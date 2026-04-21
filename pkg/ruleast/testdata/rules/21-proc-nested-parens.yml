@@ -1,0 +1,17 @@
+title: Nested boolean condition exercise
+id: 8b7c4d00-0001-4000-8000-000000000015
+description: Exists to cover the parser's parenthesised-or-inside-and path — and/or/not mixed.
+level: informational
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  a:
+    Image|endswith: /sh
+  b:
+    CommandLine|contains: 'curl '
+  c:
+    CommandLine|contains: 'wget '
+  d:
+    User: root
+  condition: (a and (b or c)) and not d

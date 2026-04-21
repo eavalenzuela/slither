@@ -1,0 +1,14 @@
+title: Kernel module loaded
+id: 8b7c4d00-0001-4000-8000-000000000009
+description: insmod / modprobe usage.
+level: medium
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith:
+      - /insmod
+      - /modprobe
+      - /kmod
+  condition: selection

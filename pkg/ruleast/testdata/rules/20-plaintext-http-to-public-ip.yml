@@ -1,0 +1,21 @@
+title: Plaintext HTTP to public destination
+id: 8b7c4d00-0001-4000-8000-000000000014
+description: Port 80 outbound from anything that isn't a known package manager.
+level: low
+logsource:
+  product: linux
+  category: network_connection
+detection:
+  http:
+    DestinationPort: 80
+    Initiated: 'true'
+  pkg_mgr:
+    Image|endswith:
+      - /apt
+      - /apt-get
+      - /yum
+      - /dnf
+      - /zypper
+      - /curl
+      - /wget
+  condition: http and not pkg_mgr

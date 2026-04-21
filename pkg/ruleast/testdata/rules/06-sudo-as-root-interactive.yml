@@ -1,0 +1,18 @@
+title: Non-root user invoking sudo to a shell
+id: 8b7c4d00-0001-4000-8000-000000000006
+description: Interactive shell spawned via sudo. Noisy on workstations; useful on server fleets where admins use distinct tooling.
+level: low
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  sudo:
+    Image|endswith: /sudo
+    CommandLine|contains:
+      - ' -i'
+      - ' su -'
+      - ' bash'
+      - ' sh'
+  not_root:
+    User|contains: ''
+  condition: sudo and not not_root

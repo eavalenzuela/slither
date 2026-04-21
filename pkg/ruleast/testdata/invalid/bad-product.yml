@@ -1,0 +1,9 @@
+title: Non-linux product
+id: invalid-0001
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  selection:
+    Image: x
+  condition: selection

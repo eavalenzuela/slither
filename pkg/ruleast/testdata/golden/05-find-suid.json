@@ -1,0 +1,32 @@
+{
+  "category": "process_creation",
+  "condition": "selection",
+  "cost": 2,
+  "description": "find -perm -4000 is a canonical privilege-escalation reconnaissance pattern.",
+  "id": "8b7c4d00-0001-4000-8000-000000000005",
+  "level": "medium",
+  "selections": [
+    {
+      "fields": [
+        {
+          "field": "CommandLine",
+          "op": "contains",
+          "values": [
+            "-perm -4000",
+            "-perm -u+s",
+            "-perm -2000"
+          ]
+        },
+        {
+          "field": "Image",
+          "op": "endswith",
+          "values": [
+            "/find"
+          ]
+        }
+      ],
+      "name": "selection"
+    }
+  ],
+  "title": "find with suid permission search"
+}

@@ -1,0 +1,46 @@
+{
+  "category": "network_connection",
+  "condition": "(ssh_port and spawner)",
+  "cost": 3,
+  "description": "ssh/sftp connections made by shells or editors — often attacker lateral movement.",
+  "id": "8b7c4d00-0001-4000-8000-000000000013",
+  "level": "medium",
+  "selections": [
+    {
+      "fields": [
+        {
+          "field": "Image",
+          "op": "endswith",
+          "values": [
+            "/sh",
+            "/bash",
+            "/vi",
+            "/vim",
+            "/nano"
+          ]
+        }
+      ],
+      "name": "spawner"
+    },
+    {
+      "fields": [
+        {
+          "field": "DestinationPort",
+          "op": "equals",
+          "values": [
+            "22"
+          ]
+        },
+        {
+          "field": "Initiated",
+          "op": "equals",
+          "values": [
+            "true"
+          ]
+        }
+      ],
+      "name": "ssh_port"
+    }
+  ],
+  "title": "ssh outbound from unusual process"
+}

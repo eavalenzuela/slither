@@ -1,0 +1,11 @@
+title: Uses unsupported "1 of" form
+id: invalid-0006
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  sel_1:
+    Image: a
+  sel_2:
+    Image: b
+  condition: 1 of sel_*

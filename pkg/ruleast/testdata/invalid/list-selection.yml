@@ -1,0 +1,10 @@
+title: List-of-maps selection form (Phase 3+ OR-of-ANDs)
+id: invalid-0009
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    - Image: a
+    - Image: b
+  condition: selection

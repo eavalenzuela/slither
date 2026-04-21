@@ -1,0 +1,19 @@
+title: Download and pipe to shell
+id: 8b7c4d00-0001-4000-8000-000000000003
+description: curl / wget piped directly into a shell interpreter.
+level: high
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  downloader:
+    Image|endswith:
+      - /curl
+      - /wget
+  pipe_to_shell:
+    CommandLine|contains:
+      - '| sh'
+      - '| bash'
+      - '|sh'
+      - '|bash'
+  condition: downloader and pipe_to_shell

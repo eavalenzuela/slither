@@ -1,0 +1,16 @@
+title: Shell rc-file modification
+id: 8b7c4d00-0001-4000-8000-00000000000e
+description: Writes to common rc files outside user editors.
+level: medium
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection:
+    TargetFilename|endswith:
+      - /.bashrc
+      - /.zshrc
+      - /.profile
+      - /.bash_profile
+      - /.bash_logout
+  condition: selection

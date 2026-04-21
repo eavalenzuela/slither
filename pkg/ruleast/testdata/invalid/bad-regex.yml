@@ -1,0 +1,9 @@
+title: Regex fails to compile
+id: invalid-0008
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    CommandLine|regex: '[unterminated'
+  condition: selection

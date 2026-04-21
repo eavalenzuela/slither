@@ -1,0 +1,39 @@
+{
+  "category": "process_creation",
+  "condition": "(selection_nc and flags)",
+  "cost": 2,
+  "description": "nc / ncat / socat invoked with -e or shell-spawn flags.",
+  "id": "8b7c4d00-0001-4000-8000-000000000002",
+  "level": "high",
+  "selections": [
+    {
+      "fields": [
+        {
+          "field": "CommandLine",
+          "op": "contains",
+          "values": [
+            " -e /bin/",
+            " --exec ",
+            "EXEC:"
+          ]
+        }
+      ],
+      "name": "flags"
+    },
+    {
+      "fields": [
+        {
+          "field": "Image",
+          "op": "endswith",
+          "values": [
+            "/nc",
+            "/ncat",
+            "/socat"
+          ]
+        }
+      ],
+      "name": "selection_nc"
+    }
+  ],
+  "title": "Netcat reverse shell"
+}

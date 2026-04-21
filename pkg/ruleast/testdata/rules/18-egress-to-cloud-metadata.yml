@@ -1,0 +1,13 @@
+title: Egress to cloud metadata endpoint
+id: 8b7c4d00-0001-4000-8000-000000000012
+description: SSRF / IMDS harvesting on cloud VMs.
+level: high
+logsource:
+  product: linux
+  category: network_connection
+detection:
+  selection:
+    DestinationIp:
+      - 169.254.169.254
+      - fd00:ec2::254
+  condition: selection

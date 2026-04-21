@@ -1,0 +1,19 @@
+title: Base64 payload decoded straight into a shell
+id: 8b7c4d00-0001-4000-8000-00000000000a
+description: echo … | base64 -d | sh — a frequent LOLBAS-style obfuscation on Linux droppers.
+level: high
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  sh_selection:
+    Image|endswith:
+      - /sh
+      - /bash
+      - /dash
+  payload:
+    CommandLine|contains:
+      - 'base64 -d'
+      - 'base64 --decode'
+      - 'openssl enc -base64 -d'
+  condition: sh_selection and payload

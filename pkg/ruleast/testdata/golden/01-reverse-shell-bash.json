@@ -1,0 +1,36 @@
+{
+  "category": "process_creation",
+  "condition": "selection",
+  "cost": 2,
+  "description": "Detects bash invoked with a /dev/tcp redirection, the classic reverse-shell primitive.",
+  "id": "8b7c4d00-0001-4000-8000-000000000001",
+  "level": "high",
+  "selections": [
+    {
+      "fields": [
+        {
+          "field": "CommandLine",
+          "op": "contains",
+          "values": [
+            "/dev/tcp/",
+            "/dev/udp/"
+          ]
+        },
+        {
+          "field": "Image",
+          "op": "endswith",
+          "values": [
+            "/bash",
+            "/sh"
+          ]
+        }
+      ],
+      "name": "selection"
+    }
+  ],
+  "tags": [
+    "attack.execution",
+    "attack.t1059.004"
+  ],
+  "title": "Bash reverse shell via /dev/tcp"
+}

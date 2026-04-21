@@ -1,0 +1,20 @@
+title: Netcat reverse shell
+id: 8b7c4d00-0001-4000-8000-000000000002
+status: experimental
+description: nc / ncat / socat invoked with -e or shell-spawn flags.
+level: high
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection_nc:
+    Image|endswith:
+      - /nc
+      - /ncat
+      - /socat
+  flags:
+    CommandLine|contains:
+      - ' -e /bin/'
+      - ' --exec '
+      - 'EXEC:'
+  condition: selection_nc and flags

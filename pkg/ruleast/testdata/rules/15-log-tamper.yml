@@ -1,0 +1,18 @@
+title: Log tampering
+id: 8b7c4d00-0001-4000-8000-00000000000f
+description: Truncation/removal of common audit logs.
+level: high
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection:
+    TargetFilename|startswith:
+      - /var/log/
+    TargetFilename|regex:
+      - 'wtmp$'
+      - 'btmp$'
+      - 'lastlog$'
+      - 'auth\.log$'
+      - 'secure$'
+  condition: selection
