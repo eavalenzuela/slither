@@ -49,9 +49,14 @@ func run() error {
 		if !errors.Is(err, config.ErrNotImplemented) {
 			return fmt.Errorf("config: %w", err)
 		}
-		// Phase 1 scaffold: proceed with an empty config so the pipeline
-		// can still be exercised end-to-end. Task #24 replaces this.
-		cfg = &config.Config{}
+		// Phase 1 scaffold: proceed with a minimal default that enables the
+		// process collector so the pipeline is actually exercised. Task
+		// #24 replaces this with real YAML loading + validation.
+		cfg = &config.Config{
+			Collectors: config.Collectors{
+				Process: config.ProcessCollector{Enabled: true},
+			},
+		}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -1,8 +1,11 @@
+//go:build linux
+
 // Package collector loads eBPF programs and drains their ringbuffers into
 // typed raw-event channels consumed by the enricher.
 //
 // Each collector (process, file, net) owns its reader goroutine and its
-// output channel. The aggregate is wired by Group.
+// output channel. The aggregate is wired by Group. The whole package is
+// Linux-only per ADR-0001.
 package collector
 
 import (

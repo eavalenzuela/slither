@@ -46,7 +46,7 @@ which-tools: ## Print paths to installed tools
 # ----------------------------------------------------------------------------
 
 .PHONY: gen
-gen: gen-proto gen-templ ## Run all code generators
+gen: gen-proto gen-templ gen-bpf ## Run all code generators
 
 .PHONY: gen-proto
 gen-proto: ## Regenerate protobuf + gRPC bindings
@@ -56,12 +56,24 @@ gen-proto: ## Regenerate protobuf + gRPC bindings
 gen-templ: ## Regenerate templ components (Phase 2+)
 	@if [ -d server/internal/console/templates ]; then templ generate -path server/internal/console/templates; fi
 
+.PHONY: gen-bpf
+gen-bpf: ## Regenerate eBPF Go wrappers + bytecode via bpf2go
+	@command -v clang >/dev/null || { echo "error: clang required for eBPF codegen"; exit 1; }
+	@cd agent && go generate ./internal/bpf/...
+
+.PHONY: gen-vmlinux
+gen-vmlinux: ## Regenerate agent/internal/bpf/src/headers/vmlinux.h from /sys/kernel/btf/vmlinux
+	@command -v bpftool >/dev/null || { echo "error: bpftool required"; exit 1; }
+	@test -r /sys/kernel/btf/vmlinux || { echo "error: kernel BTF not available at /sys/kernel/btf/vmlinux"; exit 1; }
+	@bpftool btf dump file /sys/kernel/btf/vmlinux format c > agent/internal/bpf/src/headers/vmlinux.h
+	@echo "wrote agent/internal/bpf/src/headers/vmlinux.h"
+
 .PHONY: verify-gen
 verify-gen: ## Fail if `make gen` would produce a diff (CI guard)
 	@$(MAKE) --no-print-directory gen
-	@if ! git diff --quiet --exit-code -- proto server/internal/console; then \
+	@if ! git diff --quiet --exit-code -- proto server/internal/console agent/internal/bpf; then \
 		echo "ERROR: generated code is out of date. Run 'make gen' and commit the result."; \
-		git --no-pager diff -- proto server/internal/console; \
+		git --no-pager diff -- proto server/internal/console agent/internal/bpf; \
 		exit 1; \
 	fi
 
