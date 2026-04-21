@@ -36,8 +36,11 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		Device:              deviceIdentity(cfg),
 	})
 
-	// Compiled rules load during Phase 1 task #19; empty set for now.
-	eng := ruleengine.New(nil, telem)
+	rules, err := loadRules(cfg)
+	if err != nil {
+		return fmt.Errorf("app: %w", err)
+	}
+	eng := ruleengine.New(rules, telem)
 
 	sink := output.NewStdoutJSONL(os.Stdout)
 

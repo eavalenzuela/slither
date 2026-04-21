@@ -10,13 +10,18 @@ package ruleengine
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
+	"time"
 
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
 	"github.com/t3rmit3/slither/pkg/ocsf"
 )
 
-// ErrNotImplemented is returned by evaluation paths that aren't wired yet.
-var ErrNotImplemented = errors.New("ruleengine: not yet implemented")
+// ErrDetectionQueueFull is returned by Run when the output channel refuses a
+// DetectionFinding within the bounded wait. Per IMPLEMENTATION.md §3.5,
+// detections are never dropped — we surface a diagnostic instead.
+var ErrDetectionQueueFull = errors.New("ruleengine: detection queue full — sink not draining")
 
 // Engine is the interface exposed to the pipeline orchestrator.
 type Engine interface {
@@ -40,21 +45,135 @@ type CompiledRule interface {
 	Cost() int
 }
 
+// detectionBlockWait bounds how long Run waits for a DetectionFinding send
+// before declaring the sink broken. 200 ms is long enough to absorb a jittery
+// downstream flush, short enough that the diagnostic fires before operators
+// mistake a stalled agent for a quiet one.
+const detectionBlockWait = 200 * time.Millisecond
+
 // New returns an Engine loaded with the given compiled rules.
 func New(rules []CompiledRule, telem *telemetry.Counters) Engine {
-	return &engine{rules: rules, telem: telem, out: make(chan ocsf.Event, 2048)}
+	return &engine{
+		index: indexByClass(rules),
+		telem: telem,
+		out:   make(chan ocsf.Event, 2048),
+		now:   time.Now,
+	}
 }
 
 type engine struct {
-	rules []CompiledRule
+	index map[ocsf.ClassID][]CompiledRule
 	telem *telemetry.Counters
 	out   chan ocsf.Event
+	now   func() time.Time
 }
 
 func (e *engine) Output() <-chan ocsf.Event { return e.out }
 
-// Run: Phase 1 task #20 fills this in.
+// Run pumps events through the rule index. Every event is forwarded to the
+// sink; each match also produces a DetectionFinding on the same channel.
 func (e *engine) Run(ctx context.Context, in <-chan ocsf.Event) error {
-	<-ctx.Done()
-	return ctx.Err()
+	defer close(e.out)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case ev, ok := <-in:
+			if !ok {
+				return nil
+			}
+			if err := e.processEvent(ctx, ev); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// processEvent emits ev, then any findings it triggers. Event-priority sends
+// are non-blocking; detection sends block up to detectionBlockWait and return
+// ErrDetectionQueueFull if the sink is still full.
+func (e *engine) processEvent(ctx context.Context, ev ocsf.Event) error {
+	e.telem.IncEvents()
+
+	select {
+	case e.out <- ev:
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		// Event priority: drop and move on. Detection priority gets its own
+		// path below.
+		e.telem.IncDrops()
+	}
+
+	rules := e.index[ev.ClassID()]
+	for _, r := range rules {
+		if !r.Match(ev) {
+			continue
+		}
+		finding := e.findingFor(r, ev)
+		if finding == nil {
+			continue
+		}
+		if err := e.emitDetection(ctx, finding); err != nil {
+			return err
+		}
+		e.telem.IncDetections()
+	}
+	return nil
+}
+
+// findingFor builds a DetectionFinding from a match. sigmaCompiledRule exposes
+// its underlying ruleast rule; external CompiledRule implementations would
+// need their own path, but Phase 1 ships only the sigma adapter.
+func (e *engine) findingFor(r CompiledRule, ev ocsf.Event) *ocsf.DetectionFinding {
+	scr, ok := r.(*sigmaCompiledRule)
+	if !ok {
+		// Non-sigma rule type shipped from elsewhere — skip rather than
+		// invent metadata. Not expected in Phase 1.
+		return nil
+	}
+	return buildFinding(scr.rule(), ev, e.now())
+}
+
+func (e *engine) emitDetection(ctx context.Context, f *ocsf.DetectionFinding) error {
+	select {
+	case e.out <- f:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	t := time.NewTimer(detectionBlockWait)
+	defer t.Stop()
+	select {
+	case e.out <- f:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return fmt.Errorf("%w (capacity %d)", ErrDetectionQueueFull, cap(e.out))
+	}
+}
+
+// indexByClass groups rules per OCSF class and pre-sorts each bucket
+// cheap-first. Sorting once at construction keeps the hot loop branch-free.
+func indexByClass(rules []CompiledRule) map[ocsf.ClassID][]CompiledRule {
+	out := make(map[ocsf.ClassID][]CompiledRule)
+	for _, r := range rules {
+		if r == nil {
+			continue
+		}
+		for _, c := range r.AppliesTo() {
+			out[c] = append(out[c], r)
+		}
+	}
+	for c := range out {
+		bucket := out[c]
+		sort.SliceStable(bucket, func(i, j int) bool {
+			return bucket[i].Cost() < bucket[j].Cost()
+		})
+		out[c] = bucket
+	}
+	return out
 }
