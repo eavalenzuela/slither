@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/t3rmit3/slither/agent/internal/collector"
 	"github.com/t3rmit3/slither/agent/internal/config"
@@ -13,6 +14,7 @@ import (
 	"github.com/t3rmit3/slither/agent/internal/output"
 	"github.com/t3rmit3/slither/agent/internal/ruleengine"
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
+	"github.com/t3rmit3/slither/pkg/ocsf"
 )
 
 // Run assembles every stage described in IMPLEMENTATION.md §3.1 and blocks
@@ -31,6 +33,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		ParentChainDepth:    8,
 		HashWorkers:         4,
 		HashInlineTimeoutMs: 100,
+		Device:              deviceIdentity(cfg),
 	})
 
 	// Compiled rules load during Phase 1 task #19; empty set for now.
@@ -64,4 +67,21 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 func isCancelled(err error, ctx context.Context) bool {
 	return ctx.Err() != nil && (err == ctx.Err() || err == context.Canceled || err == context.DeadlineExceeded)
+}
+
+// deviceIdentity builds the OCSF Device stamp used in every emitted event.
+// Phase 1 seeds it from os.Hostname + runtime so events validate; richer
+// fields (host_id file, os release parsing, BTF kernel release) land with
+// the full config loader in task #24.
+func deviceIdentity(_ *config.Config) ocsf.Device {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unknown"
+	}
+	return ocsf.Device{
+		HostID:   host,
+		Hostname: host,
+		OSName:   runtime.GOOS,
+		Arch:     runtime.GOARCH,
+	}
 }
