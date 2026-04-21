@@ -1,0 +1,60 @@
+# Slither dev stack.
+# Single-node deploy of the data tier. Agent + server binaries are run
+# directly from `make build` for faster iteration; this compose file covers
+# only the stateful dependencies.
+#
+# Usage:
+#   make compose-up     # bring up
+#   make compose-logs   # tail
+#   make compose-down   # tear down (wipes volumes via -v)
+#
+# Credentials below are dev-only. Rotate before any non-local use.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: slither-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: slither
+      POSTGRES_USER: slither
+      POSTGRES_PASSWORD: slither-dev
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ../migrations/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "slither", "-d", "slither"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    container_name: slither-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: slither
+      CLICKHOUSE_USER: slither
+      CLICKHOUSE_PASSWORD: slither-dev
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "127.0.0.1:8123:8123"   # HTTP
+      - "127.0.0.1:9000:9000"   # native TCP
+    volumes:
+      - ch-data:/var/lib/clickhouse
+      - ../migrations/clickhouse:/docker-entrypoint-initdb.d:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pg-data:
+  ch-data:

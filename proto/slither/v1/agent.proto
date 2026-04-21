@@ -1,0 +1,78 @@
+// Agent↔Server session service.
+syntax = "proto3";
+
+package slither.v1;
+
+import "slither/v1/common.proto";
+import "slither/v1/control.proto";
+
+// AgentService is the long-lived session between a single agent and the server.
+service AgentService {
+  // Enroll exchanges a single-use enrollment token for a per-host client cert.
+  // Called once by unenrolled agents; subsequent connections use mTLS.
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+
+  // Session is a bidirectional stream. Agent emits events and heartbeats;
+  // server emits control messages (ruleset updates, response requests, hunt queries).
+  rpc Session(stream ClientMessage) returns (stream ServerMessage);
+}
+
+message EnrollRequest {
+  // Single-use token issued by an operator via the server admin UI.
+  string enrollment_token = 1;
+
+  // PEM-encoded CSR. Server signs it with the slither CA, returns the cert.
+  bytes csr_pem = 2;
+
+  // Agent-provided host fingerprint — hostname, machine-id, os-release.
+  HostFingerprint fingerprint = 3;
+}
+
+message EnrollResponse {
+  // PEM-encoded client cert signed by the slither CA.
+  bytes client_cert_pem = 1;
+
+  // PEM-encoded CA cert chain for verifying the server.
+  bytes ca_cert_pem = 2;
+
+  // Stable host_id assigned by server; agent stores this to disk.
+  string host_id = 3;
+}
+
+message HostFingerprint {
+  string hostname = 1;
+  string machine_id = 2;     // /etc/machine-id
+  string os_name = 3;        // /etc/os-release ID
+  string os_version = 4;     // /etc/os-release VERSION_ID
+  string kernel_version = 5; // uname -r
+  string arch = 6;           // amd64, arm64
+}
+
+// ClientMessage is the union of everything an agent may send during Session.
+message ClientMessage {
+  oneof kind {
+    Envelope event = 1;
+    Heartbeat heartbeat = 2;
+    Ack ack = 3;
+    DiagReport diag = 4;
+  }
+}
+
+// ServerMessage is the union of everything a server may send during Session.
+message ServerMessage {
+  oneof kind {
+    RuleSet rule_set = 1;
+    ResponseRequest response_request = 2;
+    HuntQuery hunt_query = 3;           // Phase 6; skeleton for v1 freeze
+    ConfigUpdate config_update = 4;
+  }
+}
+
+// DiagReport is a periodic or on-demand snapshot of agent internals.
+// Sent on shutdown with cumulative counters; on-demand when the server
+// requests via ConfigUpdate.diag_request.
+message DiagReport {
+  string host_id = 1;
+  AgentHealth health = 2;
+  repeated string warnings = 3;
+}

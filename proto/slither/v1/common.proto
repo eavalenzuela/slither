@@ -1,0 +1,98 @@
+// Common types shared across all slither v1 services.
+//
+// Wire protocol version: v1 (frozen). Field additions are permitted under buf's
+// wire-compatibility rules. Removals or type changes require slither.v2.
+syntax = "proto3";
+
+package slither.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// OcsfClassId enumerates the OCSF 1.3 event classes slither emits.
+// Values are the official OCSF class UIDs; do not renumber.
+enum OcsfClassId {
+  OCSF_CLASS_ID_UNSPECIFIED = 0;
+  OCSF_CLASS_ID_FILE_SYSTEM_ACTIVITY = 1001;
+  OCSF_CLASS_ID_KERNEL_ACTIVITY = 1003;
+  OCSF_CLASS_ID_PROCESS_ACTIVITY = 1007;
+  OCSF_CLASS_ID_DETECTION_FINDING = 2004;
+  OCSF_CLASS_ID_AUTHENTICATION = 3002;
+  OCSF_CLASS_ID_NETWORK_ACTIVITY = 4001;
+  OCSF_CLASS_ID_DNS_ACTIVITY = 4003;
+  OCSF_CLASS_ID_CONTAINER_LIFECYCLE = 6000;
+}
+
+// Severity mirrors OCSF severity_id.
+enum Severity {
+  SEVERITY_UNSPECIFIED = 0;
+  SEVERITY_INFORMATIONAL = 1;
+  SEVERITY_LOW = 2;
+  SEVERITY_MEDIUM = 3;
+  SEVERITY_HIGH = 4;
+  SEVERITY_CRITICAL = 5;
+  SEVERITY_FATAL = 6;
+}
+
+// Envelope wraps every OCSF event in transit between agent and server.
+// The OCSF payload itself is encoded as bytes (canonical JSON); the envelope
+// carries routing, identity, and ordering metadata that is not part of OCSF.
+message Envelope {
+  // UUIDv7 for natural time ordering. Assigned by agent on event creation.
+  string event_id = 1;
+
+  // Agent-stable UUID assigned at enrollment. Survives agent restart.
+  string host_id = 2;
+
+  // Semver of the emitting agent.
+  string agent_version = 3;
+
+  // Which OCSF class the payload conforms to.
+  OcsfClassId class_id = 4;
+
+  // Kernel-observed time of the underlying event (nanosecond precision).
+  google.protobuf.Timestamp observed_at = 5;
+
+  // Agent stamp of when the event was built (nanosecond precision).
+  // Difference from observed_at measures agent pipeline latency + skew.
+  google.protobuf.Timestamp collected_at = 6;
+
+  // OCSF payload, canonical JSON encoding. Contained schema is determined
+  // by class_id; see pkg/ocsf for Go types.
+  bytes payload = 7;
+
+  // Internal priority class for backpressure drop policy (see PROJECT.md §3.6).
+  // Not forwarded to storage.
+  Priority priority = 8;
+}
+
+enum Priority {
+  PRIORITY_UNSPECIFIED = 0;
+  PRIORITY_HEARTBEAT = 1;
+  PRIORITY_EVENT = 2;
+  PRIORITY_DETECTION = 3;
+}
+
+// Heartbeat is emitted at configurable cadence (default 30s).
+// The server marks a host stale after 3 consecutive misses.
+message Heartbeat {
+  string host_id = 1;
+  google.protobuf.Timestamp sent_at = 2;
+  AgentHealth health = 3;
+}
+
+message AgentHealth {
+  uint64 events_emitted_total = 1;
+  uint64 events_dropped_total = 2;
+  uint64 detections_emitted_total = 3;
+  uint64 ringbuf_overruns_total = 4;
+  float cpu_percent = 5;
+  uint64 rss_bytes = 6;
+}
+
+// Ack acknowledges receipt of a control message. Control messages are
+// idempotent; acks carry the control_id that was received.
+message Ack {
+  string control_id = 1;
+  google.protobuf.Timestamp acked_at = 2;
+  string error = 3;  // populated iff the control could not be applied
+}

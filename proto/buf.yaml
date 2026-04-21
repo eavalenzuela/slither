@@ -1,0 +1,17 @@
+version: v2
+modules:
+  - path: .
+    name: buf.build/t3rmit3/slither
+lint:
+  use:
+    - STANDARD
+  except:
+    # Bidirectional streams use oneof-based ClientMessage/ServerMessage and
+    # Envelope types rather than the StandardRequest/Response naming STANDARD
+    # prescribes. The oneof pattern is the idiomatic gRPC bidi-stream shape.
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
+breaking:
+  use:
+    - WIRE_JSON

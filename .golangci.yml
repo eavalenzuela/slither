@@ -1,0 +1,109 @@
+# Slither — golangci-lint configuration.
+# Curated: catch real problems, avoid style-bike-shedding linters.
+# Every linter listed has a concrete reason to be on.
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  default: none
+  enable:
+    # Correctness
+    - govet          # stdlib checks (shadowing, printf, atomics, etc.)
+    - staticcheck    # the big one; subsumes SA, ST, QF checks
+    - errcheck       # flag unchecked errors
+    - ineffassign    # unused assignments
+    - unused         # dead code
+
+    # Security-adjacent
+    - gosec          # common insecure patterns (exec, weak crypto, hardcoded creds)
+    - bodyclose      # leaked http response bodies
+    - rowserrcheck   # database rows.Err() not checked
+    - sqlclosecheck  # sql resources not closed
+
+    # Consistency that actually matters
+    - gocritic       # opinionated, tuned below
+    - misspell       # typos in identifiers / comments
+    - unconvert      # unnecessary type conversions
+    - unparam        # unused parameters (with lenient settings)
+
+    # Context handling (server correctness)
+    - contextcheck   # non-inherited context usage
+    - noctx          # http requests without context
+
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment   # noisy; revisit if memory matters
+
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+      # os.Stdout / Stderr writes, fmt.Fprintf to stdout/stderr, etc.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+      disabled-checks:
+        - hugeParam       # triggers on struct value receivers; we accept that cost
+        - rangeValCopy    # same
+        - ifElseChain     # style opinion
+
+    gosec:
+      excludes:
+        - G115   # integer overflow in conversions — too many false positives; we audit manually
+
+    unparam:
+      check-exported: false
+
+    misspell:
+      locale: US
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      # Test files get lenience on a few style checks.
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+          - unparam
+      # Generated protobuf / templ files.
+      - path: \.pb\.go$
+        linters:
+          - staticcheck
+          - govet
+          - unused
+          - unconvert
+      - path: _templ\.go$
+        linters:
+          - staticcheck
+          - govet
+          - unused
+          - unconvert
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/t3rmit3/slither

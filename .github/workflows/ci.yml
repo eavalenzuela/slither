@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-lint:
+    name: build / test / lint (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both kernel matrix entries from IMPLEMENTATION.md §3.10.
+        # 22.04 ships kernel 5.15; 24.04 ships 6.8.
+        os: [ubuntu-22.04, ubuntu-24.04]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+          cache-dependency-path: |
+            agent/go.sum
+            server/go.sum
+            pkg/go.sum
+            tools/go.sum
+
+      - name: Install system packages (eBPF toolchain reserved for Phase 1+)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libbpf-dev
+
+      - name: Install Go tools
+        run: make tools
+
+      - name: Verify generated code is up to date
+        run: make verify-gen
+
+      - name: Build
+        run: make build
+
+      - name: Unit tests
+        run: make test
+
+      - name: Lint + vulncheck
+        run: make lint
+
+  integration:
+    name: integration tests (privileged)
+    runs-on: ubuntu-24.04
+    # Integration tests load eBPF programs and require root + kernel BTF.
+    # Gated: will activate in Phase 1 when //go:build integration tests land.
+    if: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Verify BTF available
+        run: test -f /sys/kernel/btf/vmlinux
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libbpf-dev linux-headers-$(uname -r)
+
+      - name: Install Go tools
+        run: make tools
+
+      - name: Integration tests
+        run: sudo -E env "PATH=$PATH" make test-integration

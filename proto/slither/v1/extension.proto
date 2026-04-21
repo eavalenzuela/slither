@@ -1,0 +1,58 @@
+// Agent↔Extension interface (Phase 6).
+//
+// Defined in v1 so the wire contract is frozen from day one. Implementations
+// land in Phase 6; see PROJECT.md §4.4 for the execution model and
+// security properties (signature-checked, capability-gated, supervised,
+// unix-socket transport).
+syntax = "proto3";
+
+package slither.v1;
+
+import "slither/v1/common.proto";
+
+// ExtensionService is implemented by out-of-process extensions.
+// The agent is the client: it dials the extension's unix socket,
+// sends Tasks, and receives Events.
+service ExtensionService {
+  // Hello is called once after process start; the extension declares its
+  // identity and capability set. Agent refuses connections from extensions
+  // whose declared capabilities exceed what the agent config allows.
+  rpc Hello(HelloRequest) returns (HelloResponse);
+
+  // Events is a server-stream from the extension to the agent.
+  // Extensions emit OCSF envelopes that are merged into the agent's pipeline.
+  rpc Events(EventsRequest) returns (stream Envelope);
+
+  // Execute dispatches a task to the extension (e.g. run an osquery query).
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+}
+
+message HelloRequest {
+  // Agent identity handed to extension so it can correlate logs.
+  string agent_host_id = 1;
+  string agent_version = 2;
+}
+
+message HelloResponse {
+  string extension_id = 1;            // e.g. "osquery-bridge"
+  string extension_version = 2;
+  repeated string capabilities = 3;   // e.g. ["emit:process_activity", "execute:osquery"]
+  repeated OcsfClassId emits = 4;
+}
+
+message EventsRequest {
+  // Empty; reserved for future filters.
+}
+
+message ExecuteRequest {
+  string task_id = 1;
+  string task_kind = 2;               // e.g. "osquery.sql"
+  bytes payload = 3;                  // kind-specific
+}
+
+message ExecuteResponse {
+  string task_id = 1;
+  bool ok = 2;
+  string error = 3;
+  bytes result = 4;                   // kind-specific
+}

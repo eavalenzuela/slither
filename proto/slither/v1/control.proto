@@ -1,0 +1,95 @@
+// Control-plane messages pushed from server to agents over Session.
+syntax = "proto3";
+
+package slither.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// RuleSet is a versioned bundle of compiled edge rules pushed to agents.
+// Agents swap their active ruleset atomically.
+message RuleSet {
+  string control_id = 1;
+  string version = 2;           // monotonic server-assigned
+  google.protobuf.Timestamp compiled_at = 3;
+  repeated EdgeRule rules = 4;
+
+  // Small-IOC feeds (hashes, IPs, domains) for on-edge matching.
+  // Full-size feeds (>100k) stay server-side; see PROJECT.md §3.6.
+  repeated IocFeed ioc_feeds = 5;
+}
+
+// EdgeRule is the wire form of a Sigma rule compiled for agent-side evaluation.
+// The concrete match-AST shape is defined in pkg/ruleast and versioned with
+// the RuleSet.version rather than the protobuf schema.
+message EdgeRule {
+  string rule_id = 1;
+  string name = 2;
+  uint32 severity = 3;          // maps to Severity enum
+  bool auto_respond = 4;
+  bool immediate = 5;           // §3.6 immediate response coupling
+  repeated string mitre_ids = 6;
+
+  // Opaque serialized AST. Agents compiled against the same ruleast version
+  // as the server decode this; on version mismatch the agent rejects the ruleset
+  // and reports via DiagReport.
+  bytes compiled_ast = 7;
+  uint32 ast_version = 8;
+}
+
+message IocFeed {
+  string feed_id = 1;
+  FeedKind kind = 2;
+  repeated string entries = 3;
+}
+
+enum FeedKind {
+  FEED_KIND_UNSPECIFIED = 0;
+  FEED_KIND_SHA256 = 1;
+  FEED_KIND_IPV4 = 2;
+  FEED_KIND_IPV6 = 3;
+  FEED_KIND_DOMAIN = 4;
+  FEED_KIND_FILENAME = 5;
+}
+
+// ResponseRequest asks the agent to perform a response action on a specific
+// target. Requests are audited on the server before dispatch.
+message ResponseRequest {
+  string control_id = 1;
+  string operator_id = 2;
+  ResponseAction action = 3;
+  string target = 4;            // pid, path, host_id depending on action
+  google.protobuf.Timestamp deadline = 5;
+}
+
+enum ResponseAction {
+  RESPONSE_ACTION_UNSPECIFIED = 0;
+  RESPONSE_ACTION_KILL_PROCESS = 1;
+  RESPONSE_ACTION_KILL_PROCESS_TREE = 2;
+  RESPONSE_ACTION_QUARANTINE_FILE = 3;
+  RESPONSE_ACTION_ISOLATE_HOST = 4;
+  RESPONSE_ACTION_UNISOLATE_HOST = 5;
+  RESPONSE_ACTION_COLLECT_ARTIFACTS = 6;
+}
+
+// HuntQuery distributes a one-shot query to matching hosts.
+// Phase 6 — skeleton message for v1 wire freeze.
+message HuntQuery {
+  string control_id = 1;
+  string operator_id = 2;
+  HuntBackend backend = 3;
+  string query = 4;             // backend-specific query text
+  google.protobuf.Timestamp deadline = 5;
+}
+
+enum HuntBackend {
+  HUNT_BACKEND_UNSPECIFIED = 0;
+  HUNT_BACKEND_OSQUERY = 1;
+}
+
+// ConfigUpdate pushes agent-side config changes without requiring restart.
+message ConfigUpdate {
+  string control_id = 1;
+  map<string, string> settings = 2;
+  bool diag_request = 3;
+  bool request_shutdown = 4;
+}

@@ -1,0 +1,37 @@
+# Build output
+/bin/
+/dist/
+*.test
+*.out
+
+# Go
+vendor/
+
+# Generated code verification uses git diff; do not gitignore generated files.
+# proto/slither/v1/gen/ and *_templ.go are checked in on purpose.
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Env + secrets
+.env
+.env.local
+*.pem
+*.key
+*.crt
+certs/
+
+# Compose runtime data
+deploy/compose/data/
+
+# Coverage
+coverage.out
+coverage.html
+
+# Tools (installed by install-tools.sh into GOBIN; gitignore if GOBIN is in repo)
+/tools/bin/
