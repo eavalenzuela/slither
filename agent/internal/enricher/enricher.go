@@ -35,6 +35,8 @@ type Enricher interface {
 	Run(ctx context.Context) error
 	// Events returns the channel of enriched OCSF events.
 	Events() <-chan ocsf.Event
+	// ReloadFileFilter atomically swaps the file-path include/exclude globs.
+	ReloadFileFilter(fc config.FileCollector)
 }
 
 // Options parameterises the enricher's caches and workers.
@@ -89,28 +91,49 @@ func (o *Options) applyDefaults() {
 func New(cg *collector.Group, telem *telemetry.Counters, opts Options) Enricher {
 	opts.applyDefaults()
 	return &enricher{
-		cg:         cg,
-		telem:      telem,
-		opts:       opts,
-		out:        make(chan ocsf.Event, 2048),
-		cache:      newProcCache(),
-		users:      newUserResolver(opts.PasswdPath),
-		proc:       newProcReader(opts.ProcRoot),
-		fileFilter: newPathGlob(opts.FileFilter.IncludePaths, opts.FileFilter.ExcludePaths),
-		hasher:     newHasher(opts.HashWorkers),
+		cg:             cg,
+		telem:          telem,
+		opts:           opts,
+		out:            make(chan ocsf.Event, 2048),
+		cache:          newProcCache(),
+		users:          newUserResolver(opts.PasswdPath),
+		proc:           newProcReader(opts.ProcRoot),
+		fileFilter:     newPathGlob(opts.FileFilter.IncludePaths, opts.FileFilter.ExcludePaths),
+		hasher:         newHasher(opts.HashWorkers),
+		reloadFilterCh: make(chan config.FileCollector, 1),
+	}
+}
+
+// ReloadFileFilter swaps the file-path include/exclude globs used by the
+// enricher. Applied on the Run loop so reads stay race-free; calls made
+// before Run is up or while a prior reload is still pending are coalesced.
+func (e *enricher) ReloadFileFilter(fc config.FileCollector) {
+	select {
+	case e.reloadFilterCh <- fc:
+	default:
+		// Drain and replace so only the latest config survives.
+		select {
+		case <-e.reloadFilterCh:
+		default:
+		}
+		select {
+		case e.reloadFilterCh <- fc:
+		default:
+		}
 	}
 }
 
 type enricher struct {
-	cg         *collector.Group
-	telem      *telemetry.Counters
-	opts       Options
-	out        chan ocsf.Event
-	cache      *procCache
-	users      *userResolver
-	proc       *procReader
-	fileFilter *pathGlob
-	hasher     *hasher
+	cg             *collector.Group
+	telem          *telemetry.Counters
+	opts           Options
+	out            chan ocsf.Event
+	cache          *procCache
+	users          *userResolver
+	proc           *procReader
+	fileFilter     *pathGlob
+	hasher         *hasher
+	reloadFilterCh chan config.FileCollector
 }
 
 func (e *enricher) Events() <-chan ocsf.Event { return e.out }
@@ -151,6 +174,8 @@ func (e *enricher) Run(ctx context.Context) error {
 			return ctx.Err()
 		case <-sighup:
 			e.users.reload()
+		case fc := <-e.reloadFilterCh:
+			e.fileFilter = newPathGlob(fc.IncludePaths, fc.ExcludePaths)
 		case <-sweep.C:
 			e.cache.evictExpired(e.opts.Now(), e.opts.CacheEvictionGrace)
 		case raw, ok := <-procIn:

@@ -46,23 +46,13 @@ func run() error {
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		if !errors.Is(err, config.ErrNotImplemented) {
-			return fmt.Errorf("config: %w", err)
-		}
-		// Phase 1 scaffold: proceed with a minimal default that enables the
-		// process collector so the pipeline is actually exercised. Task
-		// #24 replaces this with real YAML loading + validation.
-		cfg = &config.Config{
-			Collectors: config.Collectors{
-				Process: config.ProcessCollector{Enabled: true},
-			},
-		}
+		return fmt.Errorf("config: %w", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := app.Run(ctx, cfg); err != nil && !errors.Is(err, context.Canceled) {
+	if err := app.Run(ctx, cfg, *configPath); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("agent: %w", err)
 	}
 	return nil

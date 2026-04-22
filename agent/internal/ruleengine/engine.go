@@ -30,6 +30,8 @@ type Engine interface {
 	Run(ctx context.Context, in <-chan ocsf.Event) error
 	// Output returns the channel of events + findings destined for the sink.
 	Output() <-chan ocsf.Event
+	// ReplaceRules atomically swaps the compiled rule set.
+	ReplaceRules(rules []CompiledRule)
 }
 
 // CompiledRule is a rule that has been compiled by pkg/ruleast and classified
@@ -54,18 +56,39 @@ const detectionBlockWait = 200 * time.Millisecond
 // New returns an Engine loaded with the given compiled rules.
 func New(rules []CompiledRule, telem *telemetry.Counters) Engine {
 	return &engine{
-		index: indexByClass(rules),
-		telem: telem,
-		out:   make(chan ocsf.Event, 2048),
-		now:   time.Now,
+		index:   indexByClass(rules),
+		telem:   telem,
+		out:     make(chan ocsf.Event, 2048),
+		now:     time.Now,
+		replace: make(chan map[ocsf.ClassID][]CompiledRule, 1),
 	}
 }
 
 type engine struct {
-	index map[ocsf.ClassID][]CompiledRule
-	telem *telemetry.Counters
-	out   chan ocsf.Event
-	now   func() time.Time
+	index   map[ocsf.ClassID][]CompiledRule
+	telem   *telemetry.Counters
+	out     chan ocsf.Event
+	now     func() time.Time
+	replace chan map[ocsf.ClassID][]CompiledRule
+}
+
+// ReplaceRules swaps in a freshly-compiled rule set. The Run loop applies
+// the swap before evaluating the next event; calls made concurrently or
+// before Run starts are coalesced to the latest.
+func (e *engine) ReplaceRules(rules []CompiledRule) {
+	idx := indexByClass(rules)
+	select {
+	case e.replace <- idx:
+	default:
+		select {
+		case <-e.replace:
+		default:
+		}
+		select {
+		case e.replace <- idx:
+		default:
+		}
+	}
 }
 
 func (e *engine) Output() <-chan ocsf.Event { return e.out }
@@ -76,9 +99,19 @@ func (e *engine) Run(ctx context.Context, in <-chan ocsf.Event) error {
 	defer close(e.out)
 
 	for {
+		// Pending replace always wins over the next event so reloads apply
+		// deterministically even when the input channel is backed up.
+		select {
+		case idx := <-e.replace:
+			e.index = idx
+		default:
+		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case idx := <-e.replace:
+			e.index = idx
 		case ev, ok := <-in:
 			if !ok {
 				return nil

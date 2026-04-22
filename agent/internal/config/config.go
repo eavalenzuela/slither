@@ -7,6 +7,13 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"sort"
+	"strconv"
+	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Config is the root agent configuration.
@@ -57,17 +64,214 @@ type Output struct {
 	Kind string `yaml:"kind"`
 }
 
-// ErrNotImplemented is returned by loaders that are not yet wired up.
-var ErrNotImplemented = errors.New("config: loader not yet implemented")
+// ErrInvalidConfig is returned when validation fails. Callers can use
+// errors.Is to distinguish user-config errors from IO errors.
+var ErrInvalidConfig = errors.New("config: invalid")
 
-// Load reads and validates a YAML file at path.
-// Phase 1 scaffold: signature only.
+// validLogLevels are the log levels accepted by agent.log_level.
+var validLogLevels = []string{"debug", "info", "warn", "error"}
+
+// validOutputKinds are the sink kinds recognised today. stdout is the only
+// Phase 1 implementation; grpc lands with the server handshake work.
+var validOutputKinds = []string{"stdout"}
+
+// topLevelKeys is the authoritative set of root keys for typo suggestions.
+var topLevelKeys = []string{"agent", "collectors", "rules", "output"}
+
+// Load reads, decodes, env-overrides, and validates the YAML file at path.
+// Top-level unknown keys come back as "did you mean X?" errors; every other
+// structural mismatch is surfaced with the offending path.
 func Load(path string) (*Config, error) {
-	return nil, fmt.Errorf("%w: Load(%q)", ErrNotImplemented, path)
+	f, err := os.Open(path) //nolint:gosec // operator-supplied config path
+	if err != nil {
+		return nil, fmt.Errorf("config: open %q: %w", path, err)
+	}
+	defer f.Close()
+
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("config: read %q: %w", path, err)
+	}
+
+	if err := checkTopLevel(raw); err != nil {
+		return nil, err
+	}
+
+	var cfg Config
+	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidConfig, cleanYAMLError(err))
+	}
+
+	cfg.applyEnv()
+
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
 }
 
-// Validate returns nil if the config is internally consistent.
-// Phase 1 scaffold: signature only.
+// checkTopLevel decodes the document into a map so we can flag unknown
+// top-level keys with a "did you mean?" suggestion before strict decode
+// gives a less friendly error.
+func checkTopLevel(raw []byte) error {
+	var top map[string]yaml.Node
+	if err := yaml.Unmarshal(raw, &top); err != nil {
+		// Structural errors are better-surfaced by the strict pass.
+		return nil
+	}
+	for k := range top {
+		if known(topLevelKeys, k) {
+			continue
+		}
+		if sug := suggest(topLevelKeys, k); sug != "" {
+			return fmt.Errorf("%w: unknown key %q — did you mean %q?", ErrInvalidConfig, k, sug)
+		}
+		return fmt.Errorf("%w: unknown key %q (valid: %s)", ErrInvalidConfig, k, strings.Join(topLevelKeys, ", "))
+	}
+	return nil
+}
+
+// Validate returns nil if the config is internally consistent. It runs after
+// YAML decode and env overrides.
 func (c *Config) Validate() error {
-	return ErrNotImplemented
+	if c == nil {
+		return fmt.Errorf("%w: nil config", ErrInvalidConfig)
+	}
+	if c.Agent.LogLevel == "" {
+		c.Agent.LogLevel = "info"
+	}
+	if !known(validLogLevels, c.Agent.LogLevel) {
+		return fmt.Errorf("%w: agent.log_level %q (valid: %s)",
+			ErrInvalidConfig, c.Agent.LogLevel, strings.Join(validLogLevels, ", "))
+	}
+	if c.Output.Kind == "" {
+		c.Output.Kind = "stdout"
+	}
+	if !known(validOutputKinds, c.Output.Kind) {
+		return fmt.Errorf("%w: output.kind %q (valid: %s)",
+			ErrInvalidConfig, c.Output.Kind, strings.Join(validOutputKinds, ", "))
+	}
+	if !c.Collectors.Process.Enabled && !c.Collectors.File.Enabled && !c.Collectors.Net.Enabled {
+		return fmt.Errorf("%w: no collectors enabled", ErrInvalidConfig)
+	}
+	for i, p := range c.Rules.Paths {
+		if strings.TrimSpace(p) == "" {
+			return fmt.Errorf("%w: rules.paths[%d] is empty", ErrInvalidConfig, i)
+		}
+	}
+	return nil
+}
+
+// applyEnv applies a small, explicit set of env-var overrides. Unknown or
+// empty env vars are silently ignored; malformed booleans fall back to the
+// YAML value so a stray shell export doesn't take the agent down.
+func (c *Config) applyEnv() {
+	if v := os.Getenv("SLITHER_AGENT_LOG_LEVEL"); v != "" {
+		c.Agent.LogLevel = v
+	}
+	if v := os.Getenv("SLITHER_AGENT_HOST_ID_FILE"); v != "" {
+		c.Agent.HostIDFile = v
+	}
+	if v := os.Getenv("SLITHER_OUTPUT_KIND"); v != "" {
+		c.Output.Kind = v
+	}
+	if v := os.Getenv("SLITHER_COLLECTORS_PROCESS_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			c.Collectors.Process.Enabled = b
+		}
+	}
+	if v := os.Getenv("SLITHER_COLLECTORS_FILE_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			c.Collectors.File.Enabled = b
+		}
+	}
+	if v := os.Getenv("SLITHER_COLLECTORS_NET_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			c.Collectors.Net.Enabled = b
+		}
+	}
+	if v := os.Getenv("SLITHER_RULES_PATHS"); v != "" {
+		parts := strings.Split(v, ",")
+		paths := parts[:0]
+		for _, p := range parts {
+			if p = strings.TrimSpace(p); p != "" {
+				paths = append(paths, p)
+			}
+		}
+		c.Rules.Paths = paths
+	}
+}
+
+func known(set []string, s string) bool {
+	for _, v := range set {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// suggest returns the closest candidate by Levenshtein distance if it is
+// within edit-distance 2 of input, otherwise empty. Two is enough to catch
+// single-char typos and transpositions ("collecor" → "collectors") without
+// proposing wild guesses.
+func suggest(candidates []string, input string) string {
+	type scored struct {
+		s string
+		d int
+	}
+	scored_ := make([]scored, 0, len(candidates))
+	for _, c := range candidates {
+		scored_ = append(scored_, scored{c, editDistance(input, c)})
+	}
+	sort.Slice(scored_, func(i, j int) bool { return scored_[i].d < scored_[j].d })
+	if len(scored_) == 0 || scored_[0].d > 2 {
+		return ""
+	}
+	return scored_[0].s
+}
+
+func editDistance(a, b string) int {
+	if a == b {
+		return 0
+	}
+	ra, rb := []rune(a), []rune(b)
+	prev := make([]int, len(rb)+1)
+	curr := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		curr[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			curr[j] = min3(curr[j-1]+1, prev[j]+1, prev[j-1]+cost)
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(rb)]
+}
+
+func min3(a, b, c int) int {
+	m := a
+	if b < m {
+		m = b
+	}
+	if c < m {
+		m = c
+	}
+	return m
+}
+
+// cleanYAMLError strips the "yaml: " prefix and "line N:" noise yaml.v3
+// produces for strict-decode failures so the wrapped error reads cleanly.
+func cleanYAMLError(err error) string {
+	s := err.Error()
+	s = strings.TrimPrefix(s, "yaml: ")
+	return s
 }

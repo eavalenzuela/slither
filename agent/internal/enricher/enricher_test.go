@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/t3rmit3/slither/agent/internal/config"
 	"github.com/t3rmit3/slither/agent/internal/pipeline"
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
 	"github.com/t3rmit3/slither/pkg/ocsf"
@@ -231,15 +232,27 @@ func newTestEnricher(t *testing.T) *enricher {
 	}
 	opts.applyDefaults()
 	e := &enricher{
-		telem:      telemetry.NewCounters(),
-		opts:       opts,
-		out:        make(chan ocsf.Event, 16),
-		cache:      newProcCache(),
-		users:      newUserResolver(opts.PasswdPath),
-		proc:       newProcReader(opts.ProcRoot),
-		fileFilter: newPathGlob(nil, nil),
-		hasher:     newHasher(opts.HashWorkers),
+		telem:          telemetry.NewCounters(),
+		opts:           opts,
+		out:            make(chan ocsf.Event, 16),
+		cache:          newProcCache(),
+		users:          newUserResolver(opts.PasswdPath),
+		proc:           newProcReader(opts.ProcRoot),
+		fileFilter:     newPathGlob(nil, nil),
+		hasher:         newHasher(opts.HashWorkers),
+		reloadFilterCh: make(chan config.FileCollector, 1),
 	}
 	t.Cleanup(e.hasher.Close)
 	return e
+}
+
+func TestReloadFileFilterCoalesces(t *testing.T) {
+	e := newTestEnricher(t)
+	fc := config.FileCollector{IncludePaths: []string{"/etc/**"}}
+	for i := 0; i < 10; i++ {
+		e.ReloadFileFilter(fc)
+	}
+	if got := len(e.reloadFilterCh); got != 1 {
+		t.Errorf("pending reloads = %d, want 1", got)
+	}
 }
