@@ -129,7 +129,7 @@ func decodeProcessEvent(r bpfpkg.ProcessProcessEvent) pipeline.RawProcessEvent {
 		TGID:      r.Tgid,
 		UID:       r.Uid,
 		GID:       r.Gid,
-		Comm:      commToString(r.Comm[:]),
+		Comm:      cstr(r.Comm[:]),
 		Timestamp: time.Now(),
 		ExitCode:  r.ExitCode,
 	}
@@ -149,7 +149,9 @@ func decodeKind(k uint32) pipeline.RawProcessKind {
 	}
 }
 
-func commToString(b []int8) string {
+// cstr converts a fixed-length NUL-terminated int8 buffer (the shape bpf2go
+// emits for `char name[N]`) into a Go string. Used for comm fields and paths.
+func cstr(b []int8) string {
 	end := len(b)
 	for i, c := range b {
 		if c == 0 {

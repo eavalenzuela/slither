@@ -70,6 +70,17 @@ func (p *procReader) cmdline(pid uint32) string {
 	return string(b)
 }
 
+// cwd resolves /proc/<pid>/cwd. Used by the file enricher to absolutise
+// relative paths captured at syscall-entry (dfd-relative / AT_FDCWD-relative).
+// Returns "" when the process has exited or the link isn't readable.
+func (p *procReader) cwd(pid uint32) string {
+	link, err := os.Readlink(p.path(pid, "cwd"))
+	if err != nil {
+		return ""
+	}
+	return link
+}
+
 // ppid scans /proc/<pid>/status for the PPid field. Returns 0 on any failure
 // (including the process having exited).
 func (p *procReader) ppid(pid uint32) uint32 {

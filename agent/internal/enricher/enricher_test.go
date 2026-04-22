@@ -231,11 +231,12 @@ func newTestEnricher(t *testing.T) *enricher {
 	}
 	opts.applyDefaults()
 	return &enricher{
-		telem: telemetry.NewCounters(),
-		opts:  opts,
-		out:   make(chan ocsf.Event, 16),
-		cache: newProcCache(),
-		users: newUserResolver(opts.PasswdPath),
-		proc:  newProcReader(opts.ProcRoot),
+		telem:      telemetry.NewCounters(),
+		opts:       opts,
+		out:        make(chan ocsf.Event, 16),
+		cache:      newProcCache(),
+		users:      newUserResolver(opts.PasswdPath),
+		proc:       newProcReader(opts.ProcRoot),
+		fileFilter: newPathGlob(nil, nil),
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/t3rmit3/slither/agent/internal/collector"
+	"github.com/t3rmit3/slither/agent/internal/config"
 	"github.com/t3rmit3/slither/agent/internal/pipeline"
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
 	"github.com/t3rmit3/slither/pkg/ocsf"
@@ -55,6 +56,9 @@ type Options struct {
 	Device ocsf.Device
 	// Now overrides time.Now (tests).
 	Now func() time.Time
+	// FileFilter supplies the include/exclude glob lists applied to file
+	// events. Empty includes allow all; exclude always wins.
+	FileFilter config.FileCollector
 }
 
 func (o *Options) applyDefaults() {
@@ -85,24 +89,26 @@ func (o *Options) applyDefaults() {
 func New(cg *collector.Group, telem *telemetry.Counters, opts Options) Enricher {
 	opts.applyDefaults()
 	return &enricher{
-		cg:    cg,
-		telem: telem,
-		opts:  opts,
-		out:   make(chan ocsf.Event, 2048),
-		cache: newProcCache(),
-		users: newUserResolver(opts.PasswdPath),
-		proc:  newProcReader(opts.ProcRoot),
+		cg:         cg,
+		telem:      telem,
+		opts:       opts,
+		out:        make(chan ocsf.Event, 2048),
+		cache:      newProcCache(),
+		users:      newUserResolver(opts.PasswdPath),
+		proc:       newProcReader(opts.ProcRoot),
+		fileFilter: newPathGlob(opts.FileFilter.IncludePaths, opts.FileFilter.ExcludePaths),
 	}
 }
 
 type enricher struct {
-	cg    *collector.Group
-	telem *telemetry.Counters
-	opts  Options
-	out   chan ocsf.Event
-	cache *procCache
-	users *userResolver
-	proc  *procReader
+	cg         *collector.Group
+	telem      *telemetry.Counters
+	opts       Options
+	out        chan ocsf.Event
+	cache      *procCache
+	users      *userResolver
+	proc       *procReader
+	fileFilter *pathGlob
 }
 
 func (e *enricher) Events() <-chan ocsf.Event { return e.out }
@@ -114,7 +120,7 @@ func (e *enricher) Run(ctx context.Context) error {
 
 	// Nothing to do if the collector group isn't wired. Keep the stage alive
 	// until shutdown so the orchestrator's goroutine accounting stays simple.
-	if e.cg == nil || e.cg.Process == nil {
+	if e.cg == nil {
 		<-ctx.Done()
 		return ctx.Err()
 	}
@@ -126,6 +132,11 @@ func (e *enricher) Run(ctx context.Context) error {
 	sweep := time.NewTicker(5 * time.Second)
 	defer sweep.Stop()
 
+	// A nil channel in a select case is permanently non-ready, so we can
+	// always list both without branching on which collectors are enabled.
+	var procIn <-chan pipeline.RawProcessEvent = e.cg.Process
+	var fileIn <-chan pipeline.RawFileEvent = e.cg.File
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -134,11 +145,18 @@ func (e *enricher) Run(ctx context.Context) error {
 			e.users.reload()
 		case <-sweep.C:
 			e.cache.evictExpired(e.opts.Now(), e.opts.CacheEvictionGrace)
-		case raw, ok := <-e.cg.Process:
+		case raw, ok := <-procIn:
 			if !ok {
-				return nil
+				procIn = nil
+				continue
 			}
 			e.handleProcess(ctx, raw)
+		case raw, ok := <-fileIn:
+			if !ok {
+				fileIn = nil
+				continue
+			}
+			e.handleFile(ctx, raw)
 		}
 	}
 }

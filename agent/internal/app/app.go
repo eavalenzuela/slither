@@ -34,6 +34,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		HashWorkers:         4,
 		HashInlineTimeoutMs: 100,
 		Device:              deviceIdentity(cfg),
+		FileFilter:          cfg.Collectors.File,
 	})
 
 	rules, err := loadRules(cfg)
