@@ -119,6 +119,10 @@ test-integration: ## Run integration tests (requires root + kernel BTF)
 		(cd $$m && go test -tags=integration -count=1 ./...) || exit 1; \
 	done
 
+.PHONY: load-test
+load-test: build-agent ## Run stress-ng load baseline (requires root + stress-ng)
+	@bash scripts/load-test.sh
+
 .PHONY: cover
 cover: ## Produce coverage.out and coverage.html (agent + server combined)
 	@echo "mode: atomic" > coverage.out

@@ -63,18 +63,29 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	go func() { errs <- sink.Run(ctx, eng.Output()) }()
 
 	// Return on first non-cancellation error; otherwise wait for ctx.
+	var runErr error
 	for i := 0; i < 4; i++ {
 		select {
 		case err := <-errs:
 			if err != nil && !isCancelled(err, ctx) {
 				cancel()
-				return err
+				runErr = err
+				goto report
 			}
 		case <-ctx.Done():
-			return ctx.Err()
+			runErr = ctx.Err()
+			goto report
 		}
 	}
-	return nil
+report:
+	// Phase 1 DiagReport: dump the final counter snapshot to stderr on
+	// exit (exit-criterion #3 in §3.5). Load tests parse this to compute
+	// drop-rate baselines; operators use it for quick health checks.
+	snap := telem.Snapshot()
+	fmt.Fprintf(os.Stderr,
+		"telemetry: events=%d dropped=%d detections=%d ringbuf_overflows=%d\n",
+		snap.EventsProduced, snap.EventsDropped, snap.DetectionsFired, snap.RingbufOverflows)
+	return runErr
 }
 
 // watchReload listens for SIGHUP and applies the reloadable subset of the
