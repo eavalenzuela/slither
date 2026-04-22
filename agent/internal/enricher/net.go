@@ -60,6 +60,7 @@ func (e *enricher) buildNetOCSF(raw pipeline.RawNetEvent, ent procEntry) *ocsf.N
 			Product:   slitherProduct(),
 			LogName:   "net",
 			EventCode: netEventCode(raw.Kind),
+			UID:       ocsf.NewUID(),
 			OriginalT: ts,
 		},
 		ClassUID:   ocsf.ClassNetworkActivity,

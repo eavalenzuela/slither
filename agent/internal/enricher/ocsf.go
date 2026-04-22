@@ -57,6 +57,45 @@ func userType(uid uint32) string {
 	return "User"
 }
 
+// labelFollowup tags an event as a deferred enrichment of a prior event. The
+// rule engine short-circuits on this label so followups don't double-fire
+// rules that already evaluated against the original.
+const labelFollowup = "followup"
+
+// buildHashFollowup emits a minimal ProcessActivity that carries the SHA-256
+// of the original event's executable. It reuses the original's device, actor,
+// and process identity; Metadata.CorrelationUID links back to the original's
+// UID so the collector can stitch hash onto the in-DB event.
+func buildHashFollowup(orig *ocsf.ProcessActivity, hash string) *ocsf.ProcessActivity {
+	proc := orig.Process
+	if proc.File != nil {
+		f := *proc.File
+		f.HashesSHA256 = hash
+		proc.File = &f
+	}
+	return &ocsf.ProcessActivity{
+		Metadata: ocsf.Metadata{
+			Version:        ocsf.Version,
+			Product:        orig.Metadata.Product,
+			LogName:        orig.Metadata.LogName,
+			EventCode:      "hash_followup",
+			Labels:         []string{labelFollowup},
+			UID:            ocsf.NewUID(),
+			CorrelationUID: orig.Metadata.UID,
+			OriginalT:      orig.Metadata.OriginalT,
+		},
+		ClassUID:   ocsf.ClassProcessActivity,
+		ClassName:  ocsf.ClassProcessActivity.String(),
+		ActivityID: orig.ActivityID,
+		TypeUID:    orig.TypeUID,
+		Severity:   orig.Severity,
+		Time:       orig.Time,
+		Device:     orig.Device,
+		Actor:      orig.Actor,
+		Process:    proc,
+	}
+}
+
 // processFromEntry projects a cache entry into the OCSF Process field group.
 // The parent chain is filled in by the caller to avoid duplicating the
 // depth-bounded walk here.

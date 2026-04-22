@@ -230,7 +230,7 @@ func newTestEnricher(t *testing.T) *enricher {
 		Now:                func() time.Time { return time.Unix(1_700_000_000, 0) },
 	}
 	opts.applyDefaults()
-	return &enricher{
+	e := &enricher{
 		telem:      telemetry.NewCounters(),
 		opts:       opts,
 		out:        make(chan ocsf.Event, 16),
@@ -238,5 +238,8 @@ func newTestEnricher(t *testing.T) *enricher {
 		users:      newUserResolver(opts.PasswdPath),
 		proc:       newProcReader(opts.ProcRoot),
 		fileFilter: newPathGlob(nil, nil),
+		hasher:     newHasher(opts.HashWorkers),
 	}
+	t.Cleanup(e.hasher.Close)
+	return e
 }

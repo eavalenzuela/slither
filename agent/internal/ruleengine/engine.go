@@ -106,6 +106,14 @@ func (e *engine) processEvent(ctx context.Context, ev ocsf.Event) error {
 		e.telem.IncDrops()
 	}
 
+	// Followup events are deferred enrichments of prior events the engine has
+	// already evaluated. Running rules against them would double-count
+	// detections for a single logical action, so we pass them through to the
+	// sink without re-matching.
+	if isFollowup(ev) {
+		return nil
+	}
+
 	rules := e.index[ev.ClassID()]
 	for _, r := range rules {
 		if !r.Match(ev) {
@@ -121,6 +129,29 @@ func (e *engine) processEvent(ctx context.Context, ev ocsf.Event) error {
 		e.telem.IncDetections()
 	}
 	return nil
+}
+
+// isFollowup reports whether ev carries the "followup" metadata label. The
+// enricher tags its hash-followup emissions this way so the engine can skip
+// rule matching without needing a dedicated event type.
+func isFollowup(ev ocsf.Event) bool {
+	var labels []string
+	switch v := ev.(type) {
+	case *ocsf.ProcessActivity:
+		labels = v.Metadata.Labels
+	case *ocsf.FileSystemActivity:
+		labels = v.Metadata.Labels
+	case *ocsf.NetworkActivity:
+		labels = v.Metadata.Labels
+	default:
+		return false
+	}
+	for _, l := range labels {
+		if l == "followup" {
+			return true
+		}
+	}
+	return false
 }
 
 // findingFor builds a DetectionFinding from a match. sigmaCompiledRule exposes

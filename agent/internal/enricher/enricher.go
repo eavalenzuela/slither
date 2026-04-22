@@ -97,6 +97,7 @@ func New(cg *collector.Group, telem *telemetry.Counters, opts Options) Enricher 
 		users:      newUserResolver(opts.PasswdPath),
 		proc:       newProcReader(opts.ProcRoot),
 		fileFilter: newPathGlob(opts.FileFilter.IncludePaths, opts.FileFilter.ExcludePaths),
+		hasher:     newHasher(opts.HashWorkers),
 	}
 }
 
@@ -109,6 +110,7 @@ type enricher struct {
 	users      *userResolver
 	proc       *procReader
 	fileFilter *pathGlob
+	hasher     *hasher
 }
 
 func (e *enricher) Events() <-chan ocsf.Event { return e.out }
@@ -117,6 +119,11 @@ func (e *enricher) Events() <-chan ocsf.Event { return e.out }
 // emits on e.out. Returns when ctx is cancelled or the raw channel is closed.
 func (e *enricher) Run(ctx context.Context) error {
 	defer close(e.out)
+	defer func() {
+		if e.hasher != nil {
+			e.hasher.Close()
+		}
+	}()
 
 	// Nothing to do if the collector group isn't wired. Keep the stage alive
 	// until shutdown so the orchestrator's goroutine accounting stays simple.
@@ -220,15 +227,83 @@ func (e *enricher) handleProcess(ctx context.Context, raw pipeline.RawProcessEve
 
 	ev := e.buildOCSF(raw, merged)
 
-	// Phase 1 queue policy (IMPLEMENTATION.md §3.5): Event priority. If the
-	// rule-engine input is saturated we drop here and bump the drop counter.
-	// Detection priority (higher) will get a non-dropping path in task #20.
+	// Hash attachment is only meaningful on exec — fork/exit don't change the
+	// image, and the caller already has the hash cached from the parent's exec
+	// if anyone has looked at it. On exec we try the cache inline; on miss we
+	// kick off an async computation bounded by HashInlineTimeoutMs. If the
+	// result arrives in time we mutate the in-flight event before emit; if not
+	// we emit bare and follow up with a correlation-tagged event when the
+	// hash lands.
+	if raw.Kind == pipeline.ProcExec && ev.Process.File != nil && ev.Process.File.Path != "" && e.hasher != nil {
+		ch, cached, hash := e.hasher.Submit(ev.Process.File.Path)
+		if cached {
+			ev.Process.File.HashesSHA256 = hash
+			e.emit(ctx, ev)
+			return
+		}
+		if ch != nil {
+			go e.awaitHash(ctx, ev, ch)
+			return
+		}
+	}
+
+	e.emit(ctx, ev)
+}
+
+// emit sends ev on the output channel with the non-blocking Event-priority
+// policy from IMPLEMENTATION.md §3.5. A saturated downstream drops the event
+// and bumps telemetry.
+func (e *enricher) emit(ctx context.Context, ev ocsf.Event) {
 	select {
 	case e.out <- ev:
 	case <-ctx.Done():
 	default:
 		e.telem.IncDrops()
 	}
+}
+
+// awaitHash waits up to HashInlineTimeoutMs for an async hash computation to
+// finish. Inside the budget we mutate the original event's File.HashesSHA256
+// and emit it. Past the budget we emit the original bare and later, when the
+// hash lands, emit a followup event with Metadata.CorrelationUID set to the
+// original's UID so downstream consumers can stitch the two together.
+func (e *enricher) awaitHash(ctx context.Context, ev *ocsf.ProcessActivity, ch <-chan string) {
+	budget := time.Duration(e.opts.HashInlineTimeoutMs) * time.Millisecond
+	t := time.NewTimer(budget)
+	defer t.Stop()
+
+	select {
+	case hash, ok := <-ch:
+		if ok && hash != "" && ev.Process.File != nil {
+			ev.Process.File.HashesSHA256 = hash
+		}
+		e.emit(ctx, ev)
+	case <-t.C:
+		e.emit(ctx, ev)
+		go e.followupHash(ctx, ev, ch)
+	case <-ctx.Done():
+	}
+}
+
+// followupHash waits on the remaining hash computation and emits a followup
+// event correlated to the original. A zero-length hash (read failed, pool
+// closed) produces no followup — there's nothing new to report.
+func (e *enricher) followupHash(ctx context.Context, orig *ocsf.ProcessActivity, ch <-chan string) {
+	var hash string
+	select {
+	case h, ok := <-ch:
+		if !ok {
+			return
+		}
+		hash = h
+	case <-ctx.Done():
+		return
+	}
+	if hash == "" {
+		return
+	}
+	fu := buildHashFollowup(orig, hash)
+	e.emit(ctx, fu)
 }
 
 func (e *enricher) buildOCSF(raw pipeline.RawProcessEvent, ent procEntry) *ocsf.ProcessActivity {
@@ -264,6 +339,7 @@ func (e *enricher) buildOCSF(raw pipeline.RawProcessEvent, ent procEntry) *ocsf.
 			Product:   slitherProduct(),
 			LogName:   "process",
 			EventCode: eventCode(raw.Kind),
+			UID:       ocsf.NewUID(),
 			OriginalT: ts,
 		},
 		ClassUID:   ocsf.ClassProcessActivity,

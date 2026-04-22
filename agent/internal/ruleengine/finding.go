@@ -1,8 +1,6 @@
 package ruleengine
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"time"
 
 	"github.com/t3rmit3/slither/pkg/ocsf"
@@ -22,7 +20,7 @@ func buildFinding(rule *ruleast.Rule, trigger ocsf.Event, now time.Time) *ocsf.D
 			Product:   product,
 			LogName:   "detection",
 			EventCode: "sigma_match",
-			UID:       newUID(),
+			UID:       ocsf.NewUID(),
 			OriginalT: ts,
 		},
 		ClassUID:   ocsf.ClassDetectionFinding,
@@ -33,7 +31,7 @@ func buildFinding(rule *ruleast.Rule, trigger ocsf.Event, now time.Time) *ocsf.D
 		Time:       ocsf.TimeOCSF(ts),
 		Device:     device,
 		Finding: ocsf.Finding{
-			UID:    newUID(),
+			UID:    ocsf.NewUID(),
 			Title:  rule.Title,
 			Desc:   rule.Description,
 			Status: "New",
@@ -83,19 +81,3 @@ func severityFromLevel(l ruleast.Level) ocsf.Severity {
 	return ocsf.SeverityInformational
 }
 
-// newUID returns a 128-bit random hex string for OCSF *.uid fields. Collisions
-// are astronomically unlikely; the server side re-keys on ingest anyway so
-// any per-agent uniqueness is sufficient.
-func newUID() string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		// crypto/rand.Read returning an error is effectively never on Linux
-		// (/dev/urandom is always available); fall through to a time-based
-		// value so we still produce a non-empty id the validator accepts.
-		ns := time.Now().UnixNano()
-		for i := 0; i < 8; i++ {
-			b[i] = byte(ns >> (8 * i))
-		}
-	}
-	return hex.EncodeToString(b[:])
-}

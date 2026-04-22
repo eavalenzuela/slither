@@ -78,6 +78,10 @@ type Metadata struct {
 	Labels    []string  `json:"labels,omitempty"`
 	UID       string    `json:"uid,omitempty"`        // event_id (UUIDv7)
 	OriginalT int64     `json:"original_time,omitempty"`
+	// CorrelationUID links a followup event to the originating event's UID.
+	// Emitted when an async enrichment (e.g. SHA-256 hash) lands after the
+	// event it would have amended has already been sent downstream.
+	CorrelationUID string `json:"correlation_uid,omitempty"`
 }
 
 // Product identifies slither as the emitting product. Pinned here so every
