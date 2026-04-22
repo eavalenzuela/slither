@@ -37,8 +37,17 @@ Edit `/etc/slither/agent.yaml` to taste. Schema lives at
 IMPLEMENTATION.md §3.7; validation errors are actionable (unknown keys
 yield "did you mean?" hints).
 
-Drop Sigma rules under `/etc/slither/rules/` matching the glob in the
-config. An empty rules set is valid — the agent runs without detections.
+The repo ships a starter rule pack under `rules/linux/`. Copy it to the
+install path referenced by `agent.yaml`:
+
+```bash
+sudo install -m0644 rules/linux/*.yml /etc/slither/rules/
+```
+
+The bundled pack covers reverse-shell patterns, SUID discovery, sensitive
+file writes (`authorized_keys`, cron persistence, rc-file persistence,
+`/etc/shadow` access), and IMDS/cloud-metadata egress. An empty rules set
+is also valid — the agent runs without detections.
 
 ### Environment variable overrides
 

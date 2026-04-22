@@ -1,0 +1,20 @@
+title: Bash reverse shell via /dev/tcp
+id: 8b7c4d00-0001-4000-8000-000000000001
+status: experimental
+description: Detects bash invoked with a /dev/tcp redirection, the classic reverse-shell primitive.
+level: high
+tags:
+  - attack.execution
+  - attack.t1059.004
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith:
+      - /bash
+      - /sh
+    CommandLine|contains:
+      - '/dev/tcp/'
+      - '/dev/udp/'
+  condition: selection

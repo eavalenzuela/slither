@@ -1,0 +1,17 @@
+title: Edit under /etc/cron.*
+id: 8b7c4d00-0001-4000-8000-00000000000c
+description: Persistence via cron dropfile.
+level: high
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection:
+    TargetFilename|startswith:
+      - /etc/cron.d/
+      - /etc/cron.daily/
+      - /etc/cron.hourly/
+      - /etc/cron.monthly/
+      - /etc/cron.weekly/
+      - /var/spool/cron/
+  condition: selection
