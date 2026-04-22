@@ -5,11 +5,34 @@ config, drop in the systemd unit. `.deb` / `.rpm` land in Phase 5.
 
 ## Prerequisites
 
+### Runtime (target host)
+
 - Linux kernel ≥ 5.10 with BTF exposed at `/sys/kernel/btf/vmlinux`.
   Verify with `ls /sys/kernel/btf/vmlinux`. Kernels without BTF are
   unsupported (see IMPLEMENTATION.md §3.10).
 - systemd ≥ 245 (for `CAP_BPF` / `CAP_PERFMON` in `CapabilityBoundingSet`).
 - root on the host being installed.
+- `stress-ng` — only if you plan to run `make load-test` on the target
+  (Phase 1 exit criterion #3). Debian/Ubuntu: `apt-get install stress-ng`;
+  RHEL/Rocky: `dnf install stress-ng` (EPEL).
+
+The shipped agent binary is a statically linked Go binary with the BPF
+object embedded via `bpf2go` — no libbpf, no kernel headers, no runtime
+Go toolchain required on the target.
+
+### Build (dev host, only if you build from source)
+
+- Go 1.24+ (`go version`). RHEL 9 ships Go 1.21; use the
+  [official tarball](https://go.dev/dl/) if the distro lags.
+- clang 16+ and llvm (`clang --version`) — required for `make gen-bpf`
+  to regenerate bpf2go outputs. Not needed if you build from a clean
+  checkout that already has the generated files committed.
+- `make`, `git`.
+- Distro packages:
+  - Debian 13 / Ubuntu 22.04+: `apt-get install -y golang-1.24 clang llvm libbpf-dev linux-headers-$(uname -r)`
+  - RHEL 9 / Rocky 9: `dnf install -y golang git clang llvm libbpf-devel kernel-devel`
+
+See `docs/dev-setup.md` for the full dev-host bootstrap.
 
 ## 1. Build (or copy) the binary
 
