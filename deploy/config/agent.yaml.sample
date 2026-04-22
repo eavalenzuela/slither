@@ -1,0 +1,36 @@
+# Slither agent configuration. Install to /etc/slither/agent.yaml.
+# Schema: IMPLEMENTATION.md §3.7. Unknown top-level keys are rejected
+# with "did you mean?" suggestions.
+#
+# Any value here can be overridden at runtime with an env var set in the
+# systemd unit (see `SLITHER_*` in agent/internal/config/config.go).
+# SIGHUP reloads rules + file-collector include/exclude paths only; other
+# fields are startup-fixed.
+
+agent:
+  host_id_file: /var/lib/slither/host_id
+  log_level: info
+
+collectors:
+  process:
+    enabled: true
+  file:
+    enabled: true
+    include_paths:
+      - /etc/**
+      - /usr/bin/**
+      - /usr/sbin/**
+      - /root/**
+      - /home/**
+    exclude_paths:
+      - /proc/**
+      - /sys/**
+  net:
+    enabled: true
+
+rules:
+  paths:
+    - /etc/slither/rules/*.yml
+
+output:
+  kind: stdout

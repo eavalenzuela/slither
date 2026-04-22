@@ -469,7 +469,7 @@ BTF availability is the hard floor. Kernels without `/sys/kernel/btf/vmlinux` ar
 7. Add `net.bpf.c` + enrichment + rule-engine integration.
 8. Implement hashing worker pool + OCSF hash attachment (+ followup event pattern).
 9. Config loader + validation + reasonable errors.
-10. Systemd unit, capability bounding, install docs.
+10. ✅ Systemd unit, capability bounding, install docs. *(Completed 2026-04-22: `deploy/systemd/slither-agent.service` runs as root with `CapabilityBoundingSet`+`AmbientCapabilities` restricted to CAP_BPF/CAP_PERFMON/CAP_SYS_PTRACE/CAP_DAC_READ_SEARCH, `NoNewPrivileges=no` with an in-unit comment explaining the RHEL-9/5.14 `BPF_PROG_LOAD`+`no_new_privs` incompatibility, BTF `ConditionPathExists`, `ExecReload=kill -HUP` for rule/filter hot reload, and systemd hardening directives (`ProtectSystem=strict`, `ProtectHome=read-only`, `ProtectKernelLogs`, `RestrictSUIDSGID`, `LockPersonality`, `StateDirectory=slither`) layered on top. `deploy/config/agent.yaml.sample` ships §3.7 verbatim. `docs/install.md` walks copy-binary → write-config → enable-unit, documents the `SLITHER_*` env-var overrides and SIGHUP reload scope (rules + file filters only), and covers uninstall + common failure modes.)*
 11. Integration test harness + CI wiring for privileged runners.
 12. Scenario tests + 10 bundled Sigma rules under `rules/linux/`.
 13. Load test script + documented baseline.
