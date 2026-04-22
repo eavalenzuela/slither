@@ -38,7 +38,7 @@ sudo dnf install -y docker docker-compose-plugin   # or podman + podman-compose
 
 Note: RHEL 9 ships Go 1.21 at time of writing. If your distro lags, install Go from the [official release tarball](https://go.dev/dl/) and ensure `go version` reports 1.24+.
 
-## Debian 12
+## Debian 13
 
 ```bash
 sudo apt-get install -y golang-1.24 clang llvm libbpf-dev linux-headers-$(uname -r)
