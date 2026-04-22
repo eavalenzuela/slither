@@ -133,9 +133,10 @@ func (e *enricher) Run(ctx context.Context) error {
 	defer sweep.Stop()
 
 	// A nil channel in a select case is permanently non-ready, so we can
-	// always list both without branching on which collectors are enabled.
+	// always list all three without branching on which collectors are enabled.
 	var procIn <-chan pipeline.RawProcessEvent = e.cg.Process
 	var fileIn <-chan pipeline.RawFileEvent = e.cg.File
+	var netIn <-chan pipeline.RawNetEvent = e.cg.Net
 
 	for {
 		select {
@@ -157,6 +158,12 @@ func (e *enricher) Run(ctx context.Context) error {
 				continue
 			}
 			e.handleFile(ctx, raw)
+		case raw, ok := <-netIn:
+			if !ok {
+				netIn = nil
+				continue
+			}
+			e.handleNet(ctx, raw)
 		}
 	}
 }

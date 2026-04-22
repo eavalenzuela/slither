@@ -66,6 +66,54 @@ static long  (*bpf_get_current_comm)(void *buf, __u32 size)                     
 static __u64 (*bpf_ktime_get_ns)(void)                                           = (void *)5;
 static long  (*bpf_probe_read_user_str)(void *dst, __u32 size, const void *src)  = (void *)114;
 static long  (*bpf_probe_read_kernel_str)(void *dst, __u32 size, const void *src)= (void *)115;
+static long  (*bpf_probe_read_kernel)(void *dst, __u32 size, const void *src)    = (void *)113;
+
+/* -----------------------------------------------------------------------
+ * CO-RE — compile-once run-everywhere helpers.
+ *
+ * __builtin_preserve_access_index makes clang emit a BPF CO-RE relocation
+ * for the enclosed field access; libbpf's loader (cilium/ebpf) then rewrites
+ * the offset at program load time against the target kernel's BTF. Pair it
+ * with bpf_probe_read_kernel so the kernel-side read goes through the
+ * verifier-sanctioned helper rather than a raw dereference.
+ * -------------------------------------------------------------------- */
+#define BPF_CORE_READ_INTO(dst, src, field)                                  \
+    bpf_probe_read_kernel((void *)(dst), sizeof(*(dst)),                     \
+        __builtin_preserve_access_index(&(src)->field))
+
+/* Two-hop read: src->a.b */
+#define BPF_CORE_READ_INTO2(dst, src, a, b)                                  \
+    bpf_probe_read_kernel((void *)(dst), sizeof(*(dst)),                     \
+        __builtin_preserve_access_index(&(src)->a.b))
+
+/* -----------------------------------------------------------------------
+ * pt_regs argument accessors for kprobes / kretprobes.
+ *
+ * Kprobe handlers receive a `struct pt_regs *` whose field layout is
+ * architecture-specific. vmlinux.h — generated on the build host — encodes
+ * the host's layout. This block follows the convention of libbpf's
+ * bpf_tracing.h by picking the right field for the target arch.
+ *
+ * slither's release target list (ADR-0001) is amd64 + arm64. For any other
+ * arch the program will fail to compile loudly rather than silently read
+ * garbage — preferable to a soft-fail at runtime.
+ * -------------------------------------------------------------------- */
+#if defined(__aarch64__) || defined(__TARGET_ARCH_arm64)
+#define PT_REGS_PARM1(x) ((x)->regs[0])
+#define PT_REGS_PARM2(x) ((x)->regs[1])
+#define PT_REGS_PARM3(x) ((x)->regs[2])
+#define PT_REGS_RC(x)    ((x)->regs[0])
+#else
+/* Default: amd64. bpf2go's `-target bpfel` drops arch-specific defines, and
+ * our CI is amd64. vmlinux.h is generated on the dev host (also amd64), so
+ * struct pt_regs here exposes di/si/dx/ax directly. For arm64 release builds,
+ * pass `-D__TARGET_ARCH_arm64` via the bpf2go cflags and regen vmlinux.h on
+ * an arm64 host. */
+#define PT_REGS_PARM1(x) ((x)->di)
+#define PT_REGS_PARM2(x) ((x)->si)
+#define PT_REGS_PARM3(x) ((x)->dx)
+#define PT_REGS_RC(x)    ((x)->ax)
+#endif
 
 /* Licence — required by the verifier for GPL-only helpers like bpf_ktime_get_ns. */
 #define LICENSE(s) char LICENSE[] SEC("license") = s
