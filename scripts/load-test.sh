@@ -102,10 +102,22 @@ fi
 ) > "$CPU_LOG" &
 SAMPLER_PID=$!
 
-echo ">>> stress-ng --exec ${EXEC_COUNT} --timeout ${DURATION}s"
+# stress-ng refuses to run the --exec stressor as root ("exec stressor must
+# not run as root, skipping the stressor"). The agent needs root for BPF,
+# so we drop privileges for just the stress-ng call.
+if [[ -n "${SUDO_USER:-}" ]] && [[ "$SUDO_USER" != "root" ]]; then
+    STRESS_USER="$SUDO_USER"
+elif id -u nobody >/dev/null 2>&1; then
+    STRESS_USER="nobody"
+else
+    echo "error: cannot find a non-root user to run stress-ng; set SUDO_USER or create 'nobody'" >&2
+    exit 2
+fi
+
+echo ">>> stress-ng --exec ${EXEC_COUNT} --timeout ${DURATION}s (as ${STRESS_USER})"
 STRESS_LOG="${WORK}/stress.log"
 STRESS_START="$(date +%s)"
-if ! stress-ng --exec "$EXEC_COUNT" --timeout "${DURATION}s" --metrics-brief >"$STRESS_LOG" 2>&1; then
+if ! runuser -u "$STRESS_USER" -- stress-ng --exec "$EXEC_COUNT" --timeout "${DURATION}s" --metrics-brief >"$STRESS_LOG" 2>&1; then
     echo "error: stress-ng exited non-zero; output:" >&2
     cat "$STRESS_LOG" >&2
     exit 1
