@@ -6,11 +6,20 @@ smoke check, not continuous CI — privileged and noisy.
 
 ## Running
 
+Build the agent as your normal user first — `sudo` strips `PATH` on
+most distros, so `go` is typically not reachable under root. The load
+script therefore refuses to build; it only runs an already-built
+binary.
+
 ```bash
-# root on a host with /sys/kernel/btf/vmlinux and stress-ng installed
+make build-agent                        # as your user (go in PATH)
 sudo make load-test                     # defaults: 30s, --exec 100
 sudo bash scripts/load-test.sh 60 200   # 60s duration, 200 exec workers
 ```
+
+If `sudo make load-test` reports `bin/slither-agent not found`, the
+build step was skipped (or ran as root and failed) — re-run
+`make build-agent` as your user and try again.
 
 Output is a single summary block:
 

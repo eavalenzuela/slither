@@ -120,7 +120,7 @@ test-integration: ## Run integration tests (requires root + kernel BTF)
 	done
 
 .PHONY: load-test
-load-test: build-agent ## Run stress-ng load baseline (requires root + stress-ng)
+load-test: ## Run stress-ng load baseline (requires root + stress-ng; build agent first with `make build-agent`)
 	@bash scripts/load-test.sh
 
 .PHONY: cover

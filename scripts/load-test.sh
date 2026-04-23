@@ -39,10 +39,18 @@ require stress-ng
 require ps
 require awk
 
-# Build if missing or older than sources.
-if [[ ! -x "$AGENT" ]] || [[ -n "$(find "${ROOT}/agent" -name '*.go' -newer "$AGENT" -print -quit 2>/dev/null)" ]]; then
-    echo ">>> building agent"
-    (cd "$ROOT" && make build-agent >/dev/null)
+# Agent must already be built. We don't build under this script because the
+# script typically runs under sudo (required for BPF load), and sudo strips
+# PATH — so `go` isn't reachable even when it is in the invoking user's
+# shell. Build as your normal user first:
+#   make build-agent          # picks up $PATH correctly
+#   sudo make load-test       # or: sudo bash scripts/load-test.sh
+if [[ ! -x "$AGENT" ]]; then
+    echo "error: $AGENT not found — run 'make build-agent' as your user first" >&2
+    exit 2
+fi
+if [[ -n "$(find "${ROOT}/agent" -name '*.go' -newer "$AGENT" -print -quit 2>/dev/null)" ]]; then
+    echo "warning: agent sources are newer than $AGENT — rebuild with 'make build-agent'" >&2
 fi
 
 WORK="$(mktemp -d)"
