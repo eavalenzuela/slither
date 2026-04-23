@@ -330,18 +330,22 @@ func (e *enricher) handleProcess(ctx context.Context, raw pipeline.RawProcessEve
 
 	switch raw.Kind {
 	case pipeline.ProcExec:
-		// BPF doesn't carry ppid on exec, and exec replaces the image so
-		// exe/cmdline must come from /proc. Before the worker pool these
-		// three syscalls ran serially and dominated per-event latency —
-		// observed as 100% dispatch-attributed drops on Debian 13 under
-		// stress-ng --exec 100. Two mitigations, both safe:
+		// exec: the kernel replaces the image so exe/cmdline must come from
+		// outside the cached state. Three per-event mitigations, in order of
+		// cheapness:
 		//
-		//   (1) Skip /proc/status if the cache already learnt ppid from a
+		//   (1) Use exe from BPF when available. process.bpf.c captures the
+		//       sched_process_exec tracepoint's filename arg into the wire
+		//       record, so we skip /proc/<pid>/exe entirely on modern
+		//       kernels — the dominant cost under stress-ng --exec on RHEL
+		//       10 (task #15). Fall back to /proc only if the BPF field is
+		//       empty (truncated or missing on unusual paths).
+		//   (2) Skip /proc/status if the cache already learnt ppid from a
 		//       prior fork event for this pid (the common case; stress-ng
 		//       always forks before exec).
-		//   (2) Run the remaining independent /proc reads concurrently
-		//       with sync.WaitGroup so per-event latency collapses from
-		//       sum(ppid, exe, cmdline) to max(them).
+		//   (3) Run any remaining independent /proc reads concurrently with
+		//       sync.WaitGroup so per-event latency collapses from sum to
+		//       max across {ppid, exe, cmdline}.
 		if entry.ppid == 0 {
 			if prior, ok := e.cache.get(raw.PID); ok && prior.ppid != 0 {
 				entry.ppid = prior.ppid
@@ -352,18 +356,26 @@ func (e *enricher) handleProcess(ctx context.Context, raw pipeline.RawProcessEve
 		var ppid uint32
 		var exe, cmdline string
 		needPpid := entry.ppid == 0
+		needExe := raw.Exe == ""
 		if needPpid {
 			rg.Add(1)
 			go func() { defer rg.Done(); ppid = e.proc.ppid(raw.PID) }()
 		}
-		rg.Add(2)
-		go func() { defer rg.Done(); exe = e.proc.exe(raw.PID) }()
+		if needExe {
+			rg.Add(1)
+			go func() { defer rg.Done(); exe = e.proc.exe(raw.PID) }()
+		}
+		rg.Add(1)
 		go func() { defer rg.Done(); cmdline = e.proc.cmdline(raw.PID) }()
 		rg.Wait()
 		if needPpid {
 			entry.ppid = ppid
 		}
-		entry.exe = exe
+		if needExe {
+			entry.exe = exe
+		} else {
+			entry.exe = raw.Exe
+		}
 		entry.cmdline = cmdline
 	case pipeline.ProcFork:
 		// The BPF program captures the parent's comm at fork time. Try to

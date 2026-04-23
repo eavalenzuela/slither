@@ -14,6 +14,7 @@
 #include "bpf_helpers.h"
 
 #define COMM_LEN 16
+#define EXE_LEN  128
 
 /* Event kind discriminator. Values align with Go's RawProcessKind in
  * agent/internal/pipeline/types.go. Named with an SL_ prefix to avoid a
@@ -39,6 +40,11 @@ struct process_event {
     __u32 gid;
     __s32 exit_code;   /* populated on exit; 0 elsewhere */
     char  comm[COMM_LEN];
+    char  exe[EXE_LEN]; /* exec path — populated from the sched_process_exec
+                         * tracepoint's __data_loc_filename on SL_PROC_EXEC,
+                         * zero otherwise. Lets userspace skip the
+                         * /proc/<pid>/exe readlink on exec, which was the
+                         * dominant per-event cost on RHEL 10 (task #15). */
 };
 
 struct {
@@ -65,12 +71,19 @@ static __always_inline void fill_common(struct process_event *e) {
     e->ppid  = 0;
     e->exit_code = 0;
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
+    /* exe is zero-initialised here; handle_exec populates it from the
+     * tracepoint filename arg. fork/exit leave it empty. */
+    __builtin_memset(e->exe, 0, sizeof(e->exe));
 }
 
 /* ---------------------------------------------------------------------------
  * exec
  * struct trace_event_raw_sched_process_exec is generated in vmlinux.h.
- * We don't read the filename here; userspace reads /proc/<pid>/exe on arrival.
+ * The filename (exec path) is carried in the variable-length __data section
+ * at offset encoded in __data_loc_filename — lower 16 bits = byte offset from
+ * ctx start, upper 16 bits = length. Reading it here saves userspace one
+ * /proc/<pid>/exe readlink per exec, which dominates enricher throughput
+ * under fork storms (task #15 on RHEL 10).
  * --------------------------------------------------------------------------*/
 SEC("tracepoint/sched/sched_process_exec")
 int handle_exec(struct trace_event_raw_sched_process_exec *ctx) {
@@ -78,6 +91,10 @@ int handle_exec(struct trace_event_raw_sched_process_exec *ctx) {
     if (!e) return 0;
     fill_common(e);
     e->kind = SL_PROC_EXEC;
+    __u32 loc = ctx->__data_loc_filename;
+    __u16 off = (__u16)(loc & 0xFFFF);
+    const char *filename = (const char *)ctx + off;
+    bpf_probe_read_kernel_str(&e->exe, sizeof(e->exe), filename);
     bpf_ringbuf_submit(e, 0);
     return 0;
 }

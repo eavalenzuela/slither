@@ -130,6 +130,7 @@ func decodeProcessEvent(r bpfpkg.ProcessProcessEvent) pipeline.RawProcessEvent {
 		UID:       r.Uid,
 		GID:       r.Gid,
 		Comm:      cstr(r.Comm[:]),
+		Exe:       cstr(r.Exe[:]),
 		Timestamp: time.Now(),
 		ExitCode:  r.ExitCode,
 	}

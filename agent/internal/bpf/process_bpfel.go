@@ -24,6 +24,7 @@ type ProcessProcessEvent struct {
 	Gid      uint32
 	ExitCode int32
 	Comm     [16]int8
+	Exe      [128]int8
 	_        [4]byte
 }
 
