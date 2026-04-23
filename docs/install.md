@@ -31,15 +31,15 @@ Go toolchain required on the target.
 
 ### Build (dev host, only if you build from source)
 
-- Go 1.24+ (`go version`). RHEL 9 ships Go 1.21; use the
-  [official tarball](https://go.dev/dl/) if the distro lags.
+- Go 1.24+ (`go version`). If your distro lags, install Go from the
+  [official tarball](https://go.dev/dl/).
 - clang 16+ and llvm (`clang --version`) — required for `make gen-bpf`
   to regenerate bpf2go outputs. Not needed if you build from a clean
   checkout that already has the generated files committed.
 - `make`, `git`.
 - Distro packages:
   - Debian 13 / Ubuntu 22.04+: `apt-get install -y golang-1.24 clang llvm libbpf-dev linux-headers-$(uname -r)`
-  - RHEL 9 / Rocky 9: `dnf install -y golang git clang llvm libbpf-devel kernel-devel`
+  - RHEL 10 / Rocky 10: `dnf install -y golang git clang llvm libbpf-devel kernel-devel`
 
 See `docs/dev-setup.md` for the full dev-host bootstrap.
 
@@ -157,13 +157,14 @@ Both are deliberate. See the comments in
   (`CAP_BPF`, `CAP_PERFMON`, `CAP_SYS_PTRACE`, `CAP_DAC_READ_SEARCH`),
   which is meaningfully tighter than full root without buying the
   complexity of a dedicated service user that still needs the same caps.
-- **`NoNewPrivileges=no`** stays off because some 5.x kernels (notably
-  RHEL 9 / 5.14) reject `bpf(BPF_PROG_LOAD)` with `no_new_privs` set
-  when the program type requires `CAP_PERFMON`. Until we drop support
-  for those kernels this flag must remain off for the loader to
-  succeed. Other hardening (`ProtectSystem`, `ProtectHome`,
-  `ProtectKernelLogs`, `RestrictSUIDSGID`, `LockPersonality`, ...) still
-  applies independently.
+- **`NoNewPrivileges=no`** stays off as a belt-and-braces default.
+  Historically some 5.x kernels rejected `bpf(BPF_PROG_LOAD)` with
+  `no_new_privs` set when the program type required `CAP_PERFMON`; our
+  5.15 floor and the RHEL 10 / Debian 13 targets no longer exhibit
+  this, but flipping it to `yes` is deferred until we have a clean
+  CI signal across the full matrix. Other hardening
+  (`ProtectSystem`, `ProtectHome`, `ProtectKernelLogs`,
+  `RestrictSUIDSGID`, `LockPersonality`, ...) still applies independently.
 
 ## Troubleshooting
 

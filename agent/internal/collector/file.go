@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
@@ -51,20 +52,29 @@ func (f *fileCollector) Run(ctx context.Context) error {
 	}
 	defer objs.Close()
 
-	// Single attach to the generic raw_syscalls:sys_enter tracepoint. The
-	// in-kernel switch in file.bpf.c dispatches to the openat/unlinkat/
-	// renameat2/fchmodat/fchownat paths by syscall nr. Attaching here to the
-	// per-syscall tracepoints (syscalls/sys_enter_openat etc.) hit -EACCES
-	// on RHEL 9 / kernel 5.14 because the per-syscall trace event context
-	// struct is nb_args-sized and our program's max_ctx_offset (derived from
-	// the generic trace_event_raw_sys_enter with args[6] in vmlinux.h)
-	// exceeded it. The raw_syscalls tracepoint uses the generic struct
-	// natively, so the verifier's max_ctx_offset check always passes.
-	l, err := link.Tracepoint("raw_syscalls", "sys_enter", objs.HandleSysEnter, nil)
-	if err != nil {
-		return fmt.Errorf("file: attach raw_syscalls/sys_enter: %w", err)
+	hooks := []struct {
+		group, name string
+		prog        *ebpf.Program
+	}{
+		{"syscalls", "sys_enter_openat", objs.HandleOpenat},
+		{"syscalls", "sys_enter_unlinkat", objs.HandleUnlinkat},
+		{"syscalls", "sys_enter_renameat2", objs.HandleRenameat2},
+		{"syscalls", "sys_enter_fchmodat", objs.HandleFchmodat},
+		{"syscalls", "sys_enter_fchownat", objs.HandleFchownat},
 	}
-	defer l.Close()
+	var links []link.Link
+	defer func() {
+		for _, l := range links {
+			_ = l.Close()
+		}
+	}()
+	for _, h := range hooks {
+		l, err := link.Tracepoint(h.group, h.name, h.prog, nil)
+		if err != nil {
+			return fmt.Errorf("file: attach %s/%s: %w", h.group, h.name, err)
+		}
+		links = append(links, l)
+	}
 
 	rd, err := ringbuf.NewReader(objs.Events)
 	if err != nil {

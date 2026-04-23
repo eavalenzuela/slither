@@ -29,14 +29,14 @@ sudo usermod -aG docker "$USER"  # log out/in after this
 sudo apt-get install -y clang llvm libbpf-dev linux-headers-$(uname -r)
 ```
 
-## Fedora / RHEL 9 / Rocky 9
+## Fedora / RHEL 10 / Rocky 10
 
 ```bash
 sudo dnf install -y golang git clang llvm libbpf-devel kernel-devel
 sudo dnf install -y docker docker-compose-plugin   # or podman + podman-compose
 ```
 
-Note: RHEL 9 ships Go 1.21 at time of writing. If your distro lags, install Go from the [official release tarball](https://go.dev/dl/) and ensure `go version` reports 1.24+.
+Note: RHEL 10 ships Go 1.23+; if your distro lags, install Go from the [official release tarball](https://go.dev/dl/) and ensure `go version` reports 1.24+.
 
 ## Debian 13
 

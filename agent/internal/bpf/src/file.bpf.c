@@ -1,22 +1,11 @@
 /* file.bpf.c — filesystem syscall telemetry.
  *
- * Phase 1 (IMPLEMENTATION.md §3.2) observes five syscalls:
- *   - openat        (O_CREAT → Create; O_WRONLY/O_RDWR/O_TRUNC → Write)
- *   - unlinkat
- *   - renameat2
- *   - fchmodat
- *   - fchownat
- *
- * We attach a single program to the generic `raw_syscalls/sys_enter` rather
- * than five per-syscall `syscalls/sys_enter_*` tracepoints. The per-syscall
- * tracepoints use per-syscall context structs whose trace_event_get_offsets
- * is nb_args-sized, and the 5.14 verifier rejects programs whose
- * max_ctx_offset exceeds that bound with -EACCES — observed on RHEL 9 when
- * `tracepoint/syscalls/sys_enter_openat` casts its ctx to the generic
- * `trace_event_raw_sys_enter` (args[6]) that vmlinux.h gives us. The
- * raw_syscalls tracepoint uses that generic struct natively on every
- * supported kernel, so max_ctx_offset ≤ 64 always passes. The cost is one
- * extra branch per un-tracked syscall; cheap at modern syscall rates.
+ * Phase 1 (IMPLEMENTATION.md §3.2) hooks five syscall-enter tracepoints:
+ *   - sys_enter_openat        (O_CREAT → Create; O_WRONLY/O_RDWR/O_TRUNC → Write)
+ *   - sys_enter_unlinkat
+ *   - sys_enter_renameat2
+ *   - sys_enter_fchmodat
+ *   - sys_enter_fchownat
  *
  * Read-only opens are dropped in-kernel to keep ringbuf pressure manageable;
  * the detection surface we care about for Phase 1 is writes, deletes, and
@@ -38,16 +27,6 @@
 #define O_RDWR   00000002
 #define O_CREAT  00000100
 #define O_TRUNC  00001000
-
-/* Syscall numbers for amd64. arm64 uses a different table (Phase 5+ arch
- * support per ADR-0001 will need these redefined and bpf2go regenerated with
- * -D__TARGET_ARCH_arm64). Sourced from arch/x86/entry/syscalls/syscall_64.tbl
- * in the Linux tree — stable ABI, won't change. */
-#define SYS_openat    257
-#define SYS_fchownat  260
-#define SYS_unlinkat  263
-#define SYS_fchmodat  268
-#define SYS_renameat2 316
 
 /* Event kind discriminator. Values match pipeline.RawFileKind in Go. */
 enum {
@@ -110,14 +89,17 @@ static __always_inline void fill_common(struct file_event *e) {
     __builtin_memset(e->newpath, 0, sizeof(e->newpath));
 }
 
-/* Per-syscall event builders. Each reads the args it needs from the generic
- * sys_enter context — `args[0..5]` on every kernel. No in-BPF filtering of
- * event targets; the userspace enricher applies include/exclude globs. */
-
-static __always_inline int emit_openat(struct trace_event_raw_sys_enter *ctx) {
-    /* args: dfd, filename, flags, mode */
+/* ---------------------------------------------------------------------------
+ * openat
+ * args: dfd, filename, flags, mode. We filter to write-intent opens; the
+ * read-only stream dominates the ringbuf otherwise (tens of thousands/sec
+ * on a busy host).
+ * --------------------------------------------------------------------------*/
+SEC("tracepoint/syscalls/sys_enter_openat")
+int handle_openat(struct trace_event_raw_sys_enter *ctx) {
     int flags = (int)ctx->args[2];
     if (!(flags & (O_CREAT | O_WRONLY | O_RDWR | O_TRUNC))) return 0;
+
     struct file_event *e = reserve();
     if (!e) return 0;
     fill_common(e);
@@ -129,8 +111,12 @@ static __always_inline int emit_openat(struct trace_event_raw_sys_enter *ctx) {
     return 0;
 }
 
-static __always_inline int emit_unlinkat(struct trace_event_raw_sys_enter *ctx) {
-    /* args: dfd, pathname, flags */
+/* ---------------------------------------------------------------------------
+ * unlinkat
+ * args: dfd, pathname, flags.
+ * --------------------------------------------------------------------------*/
+SEC("tracepoint/syscalls/sys_enter_unlinkat")
+int handle_unlinkat(struct trace_event_raw_sys_enter *ctx) {
     struct file_event *e = reserve();
     if (!e) return 0;
     fill_common(e);
@@ -141,8 +127,12 @@ static __always_inline int emit_unlinkat(struct trace_event_raw_sys_enter *ctx) 
     return 0;
 }
 
-static __always_inline int emit_renameat2(struct trace_event_raw_sys_enter *ctx) {
-    /* args: olddfd, oldname, newdfd, newname, flags */
+/* ---------------------------------------------------------------------------
+ * renameat2
+ * args: olddfd, oldname, newdfd, newname, flags.
+ * --------------------------------------------------------------------------*/
+SEC("tracepoint/syscalls/sys_enter_renameat2")
+int handle_renameat2(struct trace_event_raw_sys_enter *ctx) {
     struct file_event *e = reserve();
     if (!e) return 0;
     fill_common(e);
@@ -154,8 +144,12 @@ static __always_inline int emit_renameat2(struct trace_event_raw_sys_enter *ctx)
     return 0;
 }
 
-static __always_inline int emit_fchmodat(struct trace_event_raw_sys_enter *ctx) {
-    /* args: dfd, filename, mode */
+/* ---------------------------------------------------------------------------
+ * fchmodat
+ * args: dfd, filename, mode.
+ * --------------------------------------------------------------------------*/
+SEC("tracepoint/syscalls/sys_enter_fchmodat")
+int handle_fchmodat(struct trace_event_raw_sys_enter *ctx) {
     struct file_event *e = reserve();
     if (!e) return 0;
     fill_common(e);
@@ -166,8 +160,12 @@ static __always_inline int emit_fchmodat(struct trace_event_raw_sys_enter *ctx) 
     return 0;
 }
 
-static __always_inline int emit_fchownat(struct trace_event_raw_sys_enter *ctx) {
-    /* args: dfd, filename, user, group, flag */
+/* ---------------------------------------------------------------------------
+ * fchownat
+ * args: dfd, filename, user, group, flag.
+ * --------------------------------------------------------------------------*/
+SEC("tracepoint/syscalls/sys_enter_fchownat")
+int handle_fchownat(struct trace_event_raw_sys_enter *ctx) {
     struct file_event *e = reserve();
     if (!e) return 0;
     fill_common(e);
@@ -177,21 +175,6 @@ static __always_inline int emit_fchownat(struct trace_event_raw_sys_enter *ctx) 
     e->flags = (__u32)ctx->args[4];
     bpf_probe_read_user_str(&e->path, sizeof(e->path), (const void *)ctx->args[1]);
     bpf_ringbuf_submit(e, 0);
-    return 0;
-}
-
-/* Single program attached to the generic raw_syscalls:sys_enter tracepoint.
- * Fires for every syscall — a switch on id dispatches the few we track, and
- * everything else returns 0 (~5 ns overhead per uninterested syscall). */
-SEC("tracepoint/raw_syscalls/sys_enter")
-int handle_sys_enter(struct trace_event_raw_sys_enter *ctx) {
-    switch (ctx->id) {
-    case SYS_openat:    return emit_openat(ctx);
-    case SYS_unlinkat:  return emit_unlinkat(ctx);
-    case SYS_renameat2: return emit_renameat2(ctx);
-    case SYS_fchmodat:  return emit_fchmodat(ctx);
-    case SYS_fchownat:  return emit_fchownat(ctx);
-    }
     return 0;
 }
 
