@@ -4,6 +4,24 @@
 agent and reports drop rate, CPU%, and RSS. The target is a single-host
 smoke check, not continuous CI — privileged and noisy.
 
+## Host sizing
+
+The default workload (`--exec 100 --timeout 30s`) and the documented
+exit criterion presume a host with at least:
+
+- **4 vCPUs.** The `<1%` drop-rate bar below is defined on a 4-core
+  host; fewer cores will drive the rate higher even on a healthy
+  agent because stress-ng's 100 exec workers contend with the
+  collector/enricher goroutines for CPU.
+- **4 GB RAM.** stress-ng's `--exec` stressor warns and self-skips
+  workers on tight-memory hosts (`recommend using --oom-avoid`);
+  observed on a 2 GB Debian 13 VM where `stressor must not run`
+  combined with the ambient allocations produced an unrepresentative
+  run. 4 GB gives comfortable headroom for 100 workers plus the agent.
+
+Smaller VMs may still run the load test, but the drop-rate number is
+not comparable against the Phase 1 exit criterion.
+
 ## Running
 
 Build the agent as your normal user first — `sudo` strips `PATH` on
@@ -53,7 +71,7 @@ samples=30 mean_cpu=3.4 peak_cpu=6.1 peak_rss_kb=21504
 ## Exit criterion #3 from IMPLEMENTATION.md §3.5
 
 The Phase 1 target is **drop rate < 1%** under this workload on a
-4-core host. A higher rate indicates one of:
+4-core / 4 GB host. A higher rate indicates one of:
 
 - Ringbuffer sized too small for the burst (look at
   `ringbuf_overflow`).

@@ -445,6 +445,7 @@ Validated at startup via a schema in `pkg/config/`. Errors are actionable ("unkn
 
 **Load test:**
 - `make load-test` runs the agent against `stress-ng --exec 100 --timeout 30s` and measures drop rate + CPU. Not run in CI; operator-run baseline.
+- Host sizing for the documented `<1%` drop-rate exit bar: **4 vCPUs + 4 GB RAM minimum**. On smaller hosts stress-ng's `--exec` workers contend with the agent for CPU and (on <2 GB VMs) self-skip under the memory-pressure heuristic. Smaller boxes may still run the test but the number is not comparable.
 
 ### 3.10 Kernel compatibility matrix
 
