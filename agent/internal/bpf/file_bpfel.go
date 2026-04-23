@@ -73,11 +73,7 @@ type FileSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type FileProgramSpecs struct {
-	HandleFchmodat  *ebpf.ProgramSpec `ebpf:"handle_fchmodat"`
-	HandleFchownat  *ebpf.ProgramSpec `ebpf:"handle_fchownat"`
-	HandleOpenat    *ebpf.ProgramSpec `ebpf:"handle_openat"`
-	HandleRenameat2 *ebpf.ProgramSpec `ebpf:"handle_renameat2"`
-	HandleUnlinkat  *ebpf.ProgramSpec `ebpf:"handle_unlinkat"`
+	HandleSysEnter *ebpf.ProgramSpec `ebpf:"handle_sys_enter"`
 }
 
 // FileMapSpecs contains maps before they are loaded into the kernel.
@@ -134,20 +130,12 @@ type FileVariables struct {
 //
 // It can be passed to LoadFileObjects or ebpf.CollectionSpec.LoadAndAssign.
 type FilePrograms struct {
-	HandleFchmodat  *ebpf.Program `ebpf:"handle_fchmodat"`
-	HandleFchownat  *ebpf.Program `ebpf:"handle_fchownat"`
-	HandleOpenat    *ebpf.Program `ebpf:"handle_openat"`
-	HandleRenameat2 *ebpf.Program `ebpf:"handle_renameat2"`
-	HandleUnlinkat  *ebpf.Program `ebpf:"handle_unlinkat"`
+	HandleSysEnter *ebpf.Program `ebpf:"handle_sys_enter"`
 }
 
 func (p *FilePrograms) Close() error {
 	return _FileClose(
-		p.HandleFchmodat,
-		p.HandleFchownat,
-		p.HandleOpenat,
-		p.HandleRenameat2,
-		p.HandleUnlinkat,
+		p.HandleSysEnter,
 	)
 }
 
