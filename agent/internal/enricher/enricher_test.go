@@ -1,12 +1,15 @@
 package enricher
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/t3rmit3/slither/agent/internal/collector"
 	"github.com/t3rmit3/slither/agent/internal/config"
 	"github.com/t3rmit3/slither/agent/internal/pipeline"
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
@@ -244,6 +247,103 @@ func newTestEnricher(t *testing.T) *enricher {
 	}
 	t.Cleanup(e.hasher.Close)
 	return e
+}
+
+// TestRunShardedDispatchPreservesPerPIDOrder feeds interleaved exec/exit
+// pairs across many pids through Run's dispatch path and asserts that every
+// event is emitted and, within each pid, exec comes before exit. The test
+// exercises the pid-sharded worker pool added for task #30 (Phase 1
+// load-test exit criterion) and is intentionally short-running so -race can
+// flag any lock ordering issues around the shared cache / hasher / out
+// channel.
+func TestRunShardedDispatchPreservesPerPIDOrder(t *testing.T) {
+	dir := t.TempDir()
+	passwd := filepath.Join(dir, "passwd")
+	if err := os.WriteFile(passwd, []byte("root:x:0:0::/root:/bin/sh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	procRoot := filepath.Join(dir, "proc")
+	if err := os.MkdirAll(procRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cg := &collector.Group{
+		Process: make(chan pipeline.RawProcessEvent, 256),
+		File:    make(chan pipeline.RawFileEvent),
+		Net:     make(chan pipeline.RawNetEvent),
+	}
+	telem := telemetry.NewCounters()
+	enr := New(cg, telem, Options{
+		ProcessWorkers:   4,
+		ProcessInboxSize: 64,
+		PasswdPath:       passwd,
+		ProcRoot:         procRoot,
+		Device:           ocsf.Device{HostID: "t", Hostname: "t"},
+		Now:              func() time.Time { return time.Unix(1_700_000_000, 0) },
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_ = enr.Run(ctx)
+	}()
+
+	const pids = 64
+	const expected = pids * 2
+	go func() {
+		// Interleave exec across pids first, then exit, so per-pid
+		// [exec, exit] ordering is only preserved if the sharded queues
+		// keep FIFO within a shard.
+		for pid := uint32(1); pid <= pids; pid++ {
+			cg.Process <- pipeline.RawProcessEvent{Kind: pipeline.ProcExec, PID: pid, Comm: "x"}
+		}
+		for pid := uint32(1); pid <= pids; pid++ {
+			cg.Process <- pipeline.RawProcessEvent{Kind: pipeline.ProcExit, PID: pid}
+		}
+		close(cg.Process)
+	}()
+
+	got := make(map[uint32][]ocsf.ProcessActivityID) // pid -> sequence (1=exec, 2=exit)
+	deadline := time.After(5 * time.Second)
+	count := 0
+	for count < expected {
+		select {
+		case ev, ok := <-enr.Events():
+			if !ok {
+				t.Fatalf("events channel closed early at %d/%d", count, expected)
+			}
+			pa, isProc := ev.(*ocsf.ProcessActivity)
+			if !isProc {
+				continue
+			}
+			got[pa.Process.PID] = append(got[pa.Process.PID], pa.ActivityID)
+			count++
+		case <-deadline:
+			t.Fatalf("timed out at %d/%d events", count, expected)
+		}
+	}
+	// All events drained — cancel so Run returns and its defer can close
+	// e.out cleanly. Workers already finished (else count wouldn't match).
+	cancel()
+	wg.Wait()
+
+	if len(got) != pids {
+		t.Fatalf("saw %d distinct pids, want %d", len(got), pids)
+	}
+	for pid := uint32(1); pid <= pids; pid++ {
+		seq := got[pid]
+		if len(seq) != 2 {
+			t.Errorf("pid %d: got %d events, want 2 (exec+exit): %v", pid, len(seq), seq)
+			continue
+		}
+		if seq[0] != 1 || seq[1] != 2 {
+			t.Errorf("pid %d: out-of-order events %v, want [1 exec, 2 exit]", pid, seq)
+		}
+	}
 }
 
 func TestReloadFileFilterCoalesces(t *testing.T) {

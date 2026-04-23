@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -43,6 +44,16 @@ type Enricher interface {
 type Options struct {
 	// ParentChainDepth caps ppid-walk depth (default 8).
 	ParentChainDepth int
+	// ProcessWorkers is the size of the pid-sharded worker pool that drains
+	// the process collector channel. Each worker owns one shard of pids
+	// (hash(pid) % N), so per-pid event order is preserved; the pool
+	// parallelises the enricher's synchronous /proc backfill, which is the
+	// Phase 1 load-test bottleneck (§3.11 task #30). Default 4.
+	ProcessWorkers int
+	// ProcessInboxSize buffers each worker's inbox. Too small and bursts
+	// trip the dispatch drop path; too large just defers backpressure.
+	// Default 1024 (total capacity = ProcessWorkers * ProcessInboxSize).
+	ProcessInboxSize int
 	// HashWorkers bounds the async hashing pool (default 4).
 	HashWorkers int
 	// HashInlineTimeoutMs is the budget for inline hash attachment.
@@ -67,6 +78,12 @@ func (o *Options) applyDefaults() {
 	if o.ParentChainDepth <= 0 {
 		o.ParentChainDepth = 8
 	}
+	if o.ProcessWorkers <= 0 {
+		o.ProcessWorkers = 4
+	}
+	if o.ProcessInboxSize <= 0 {
+		o.ProcessInboxSize = 1024
+	}
 	if o.HashWorkers <= 0 {
 		o.HashWorkers = 4
 	}
@@ -90,6 +107,10 @@ func (o *Options) applyDefaults() {
 // New constructs an Enricher that reads from the given collector group.
 func New(cg *collector.Group, telem *telemetry.Counters, opts Options) Enricher {
 	opts.applyDefaults()
+	inboxes := make([]chan pipeline.RawProcessEvent, opts.ProcessWorkers)
+	for i := range inboxes {
+		inboxes[i] = make(chan pipeline.RawProcessEvent, opts.ProcessInboxSize)
+	}
 	return &enricher{
 		cg:             cg,
 		telem:          telem,
@@ -101,6 +122,7 @@ func New(cg *collector.Group, telem *telemetry.Counters, opts Options) Enricher 
 		fileFilter:     newPathGlob(opts.FileFilter.IncludePaths, opts.FileFilter.ExcludePaths),
 		hasher:         newHasher(opts.HashWorkers),
 		reloadFilterCh: make(chan config.FileCollector, 1),
+		procInboxes:    inboxes,
 	}
 }
 
@@ -134,14 +156,24 @@ type enricher struct {
 	fileFilter     *pathGlob
 	hasher         *hasher
 	reloadFilterCh chan config.FileCollector
+	// procInboxes is the pid-sharded worker pool. Dispatch lives in Run's
+	// main select; each inbox is drained by one goroutine running
+	// handleProcess. Sharding by pid preserves per-pid event order (exec
+	// before exit) while parallelising /proc backfill across workers.
+	procInboxes []chan pipeline.RawProcessEvent
 }
 
 func (e *enricher) Events() <-chan ocsf.Event { return e.out }
 
 // Run pumps raw process events through the cache, converts them to OCSF, and
 // emits on e.out. Returns when ctx is cancelled or the raw channel is closed.
+//
+// Process events are dispatched to a pid-sharded worker pool
+// (see Options.ProcessWorkers) to parallelise the synchronous /proc backfill
+// done in handleProcess for ProcExec. File and net events stay on the main
+// goroutine — they have no /proc read fan-out today, so parallelising them
+// would add lock contention without throughput gain.
 func (e *enricher) Run(ctx context.Context) error {
-	defer close(e.out)
 	defer func() {
 		if e.hasher != nil {
 			e.hasher.Close()
@@ -152,8 +184,49 @@ func (e *enricher) Run(ctx context.Context) error {
 	// until shutdown so the orchestrator's goroutine accounting stays simple.
 	if e.cg == nil {
 		<-ctx.Done()
+		close(e.out)
 		return ctx.Err()
 	}
+
+	// Start workers. Each drains one sharded inbox. ctx or a closed inbox
+	// stops the worker.
+	var wg sync.WaitGroup
+	for i := range e.procInboxes {
+		wg.Add(1)
+		inbox := e.procInboxes[i]
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case raw, ok := <-inbox:
+					if !ok {
+						return
+					}
+					e.handleProcess(ctx, raw)
+				}
+			}
+		}()
+	}
+
+	// Close worker inboxes exactly once — either when the upstream process
+	// channel is closed, or when Run itself returns. Workers must drain and
+	// exit before we close e.out, so output consumers never see a send on a
+	// closed channel.
+	var closeOnce sync.Once
+	closeInboxes := func() {
+		closeOnce.Do(func() {
+			for _, w := range e.procInboxes {
+				close(w)
+			}
+		})
+	}
+	defer func() {
+		closeInboxes()
+		wg.Wait()
+		close(e.out)
+	}()
 
 	sighup := make(chan os.Signal, 1)
 	signal.Notify(sighup, syscall.SIGHUP)
@@ -181,9 +254,10 @@ func (e *enricher) Run(ctx context.Context) error {
 		case raw, ok := <-procIn:
 			if !ok {
 				procIn = nil
+				closeInboxes()
 				continue
 			}
-			e.handleProcess(ctx, raw)
+			e.dispatchProcess(ctx, raw)
 		case raw, ok := <-fileIn:
 			if !ok {
 				fileIn = nil
@@ -197,6 +271,19 @@ func (e *enricher) Run(ctx context.Context) error {
 			}
 			e.handleNet(ctx, raw)
 		}
+	}
+}
+
+// dispatchProcess routes a raw process event to the pid-sharded worker inbox.
+// Non-blocking on the inbox with drop-on-full, so a wedged worker cannot
+// stall the main select loop. A full inbox counts as an enricher-side drop.
+func (e *enricher) dispatchProcess(ctx context.Context, raw pipeline.RawProcessEvent) {
+	shard := int(raw.PID) % len(e.procInboxes)
+	select {
+	case e.procInboxes[shard] <- raw:
+	case <-ctx.Done():
+	default:
+		e.telem.IncDrops()
 	}
 }
 
