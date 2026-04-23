@@ -103,7 +103,22 @@ fi
 SAMPLER_PID=$!
 
 echo ">>> stress-ng --exec ${EXEC_COUNT} --timeout ${DURATION}s"
-stress-ng --exec "$EXEC_COUNT" --timeout "${DURATION}s" --metrics-brief >/dev/null 2>&1 || true
+STRESS_LOG="${WORK}/stress.log"
+STRESS_START="$(date +%s)"
+if ! stress-ng --exec "$EXEC_COUNT" --timeout "${DURATION}s" --metrics-brief >"$STRESS_LOG" 2>&1; then
+    echo "error: stress-ng exited non-zero; output:" >&2
+    cat "$STRESS_LOG" >&2
+    exit 1
+fi
+STRESS_ELAPSED=$(( $(date +%s) - STRESS_START ))
+# If stress-ng returned far earlier than the requested duration, the
+# measurement is not meaningful — surface it instead of printing a
+# misleading "0% drop rate from 44 events" summary block.
+if [[ "$STRESS_ELAPSED" -lt $(( DURATION - 2 )) ]]; then
+    echo "error: stress-ng ran only ${STRESS_ELAPSED}s (expected ~${DURATION}s); output:" >&2
+    cat "$STRESS_LOG" >&2
+    exit 1
+fi
 
 echo ">>> stopping agent"
 kill -TERM "$AGENT_PID" 2>/dev/null || true
