@@ -149,6 +149,10 @@ fi
 
 EVENTS="$(echo "$TELEM_LINE" | awk 'match($0,/events=[0-9]+/){print substr($0,RSTART+7,RLENGTH-7)}')"
 DROPS="$(echo "$TELEM_LINE" | awk 'match($0,/dropped=[0-9]+/){print substr($0,RSTART+8,RLENGTH-8)}')"
+DROPS_COLLECTOR="$(echo "$TELEM_LINE" | awk 'match($0,/collector=[0-9]+/){print substr($0,RSTART+10,RLENGTH-10)}')"
+DROPS_DISPATCH="$(echo "$TELEM_LINE"  | awk 'match($0,/dispatch=[0-9]+/){print substr($0,RSTART+9,RLENGTH-9)}')"
+DROPS_ENRICHER="$(echo "$TELEM_LINE"  | awk 'match($0,/enricher=[0-9]+/){print substr($0,RSTART+9,RLENGTH-9)}')"
+DROPS_ENGINE="$(echo "$TELEM_LINE"    | awk 'match($0,/engine=[0-9]+/){print substr($0,RSTART+7,RLENGTH-7)}')"
 DETECTIONS="$(echo "$TELEM_LINE" | awk 'match($0,/detections=[0-9]+/){print substr($0,RSTART+11,RLENGTH-11)}')"
 OVERFLOWS="$(echo "$TELEM_LINE" | awk 'match($0,/ringbuf_overflows=[0-9]+/){print substr($0,RSTART+18,RLENGTH-18)}')"
 
@@ -185,6 +189,7 @@ duration_s       ${DURATION}
 stress_ng_exec   ${EXEC_COUNT}
 events_produced  ${EVENTS}
 events_dropped   ${DROPS}
+  by_stage       collector=${DROPS_COLLECTOR:-0} dispatch=${DROPS_DISPATCH:-0} enricher=${DROPS_ENRICHER:-0} engine=${DROPS_ENGINE:-0}
 detections_fired ${DETECTIONS}
 ringbuf_overflow ${OVERFLOWS}
 drop_rate_pct    ${DROP_PCT}%

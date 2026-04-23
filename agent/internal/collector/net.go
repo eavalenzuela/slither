@@ -116,7 +116,7 @@ func (n *netCollector) drain(ctx context.Context, rd *ringbuf.Reader) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			n.telem.IncDrops()
+			n.telem.IncDropCollector()
 		}
 	}
 }

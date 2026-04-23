@@ -83,8 +83,10 @@ report:
 	// drop-rate baselines; operators use it for quick health checks.
 	snap := telem.Snapshot()
 	fmt.Fprintf(os.Stderr,
-		"telemetry: events=%d dropped=%d detections=%d ringbuf_overflows=%d\n",
-		snap.EventsProduced, snap.EventsDropped, snap.DetectionsFired, snap.RingbufOverflows)
+		"telemetry: events=%d dropped=%d (collector=%d dispatch=%d enricher=%d engine=%d) detections=%d ringbuf_overflows=%d\n",
+		snap.EventsProduced, snap.EventsDropped,
+		snap.DropsCollector, snap.DropsDispatch, snap.DropsEnricher, snap.DropsEngine,
+		snap.DetectionsFired, snap.RingbufOverflows)
 	return runErr
 }
 

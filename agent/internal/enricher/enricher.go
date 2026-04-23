@@ -79,10 +79,10 @@ func (o *Options) applyDefaults() {
 		o.ParentChainDepth = 8
 	}
 	if o.ProcessWorkers <= 0 {
-		o.ProcessWorkers = 4
+		o.ProcessWorkers = 8
 	}
 	if o.ProcessInboxSize <= 0 {
-		o.ProcessInboxSize = 1024
+		o.ProcessInboxSize = 2048
 	}
 	if o.HashWorkers <= 0 {
 		o.HashWorkers = 4
@@ -115,7 +115,7 @@ func New(cg *collector.Group, telem *telemetry.Counters, opts Options) Enricher 
 		cg:             cg,
 		telem:          telem,
 		opts:           opts,
-		out:            make(chan ocsf.Event, 2048),
+		out:            make(chan ocsf.Event, 16384),
 		cache:          newProcCache(),
 		users:          newUserResolver(opts.PasswdPath),
 		proc:           newProcReader(opts.ProcRoot),
@@ -283,7 +283,7 @@ func (e *enricher) dispatchProcess(ctx context.Context, raw pipeline.RawProcessE
 	case e.procInboxes[shard] <- raw:
 	case <-ctx.Done():
 	default:
-		e.telem.IncDrops()
+		e.telem.IncDropDispatch()
 	}
 }
 
@@ -370,7 +370,7 @@ func (e *enricher) emit(ctx context.Context, ev ocsf.Event) {
 	case e.out <- ev:
 	case <-ctx.Done():
 	default:
-		e.telem.IncDrops()
+		e.telem.IncDropEnricher()
 	}
 }
 

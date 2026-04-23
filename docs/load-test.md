@@ -47,12 +47,26 @@ duration_s       30
 stress_ng_exec   100
 events_produced  123456
 events_dropped   0
+  by_stage       collector=0 dispatch=0 enricher=0 engine=0
 detections_fired 0
 ringbuf_overflow 0
 drop_rate_pct    0.00%
 samples=30 mean_cpu=3.4 peak_cpu=6.1 peak_rss_kb=21504
 ===============================================================
 ```
+
+The `by_stage` line attributes `events_dropped` to the pipeline boundary
+where the drop happened:
+
+- `collector` — the kernel ringbuf drained cleanly but the collector's
+  output channel to the enricher was full (i.e. the agent can read BPF
+  faster than the enricher can dispatch).
+- `dispatch` — pid-sharded dispatcher found a worker inbox full (one
+  shard getting hammered; re-hash needed or workload skewed).
+- `enricher` — a worker finished /proc backfill but the rule engine's
+  input channel was full (engine/sink slow).
+- `engine` — rule engine's non-blocking emit to the output sink was
+  full (sink saturated — stdout/journald rate limits, network, etc).
 
 ## Methodology
 

@@ -33,7 +33,7 @@ func (e *enricher) handleNet(ctx context.Context, raw pipeline.RawNetEvent) {
 	case e.out <- ev:
 	case <-ctx.Done():
 	default:
-		e.telem.IncDrops()
+		e.telem.IncDropEnricher()
 	}
 }
 

@@ -54,7 +54,7 @@ func (e *enricher) handleFile(ctx context.Context, raw pipeline.RawFileEvent) {
 	case e.out <- ev:
 	case <-ctx.Done():
 	default:
-		e.telem.IncDrops()
+		e.telem.IncDropEnricher()
 	}
 }
 

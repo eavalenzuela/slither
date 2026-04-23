@@ -58,7 +58,7 @@ func New(rules []CompiledRule, telem *telemetry.Counters) Engine {
 	return &engine{
 		index:   indexByClass(rules),
 		telem:   telem,
-		out:     make(chan ocsf.Event, 2048),
+		out:     make(chan ocsf.Event, 16384),
 		now:     time.Now,
 		replace: make(chan map[ocsf.ClassID][]CompiledRule, 1),
 	}
@@ -136,7 +136,7 @@ func (e *engine) processEvent(ctx context.Context, ev ocsf.Event) error {
 	default:
 		// Event priority: drop and move on. Detection priority gets its own
 		// path below.
-		e.telem.IncDrops()
+		e.telem.IncDropEngine()
 	}
 
 	// Followup events are deferred enrichments of prior events the engine has

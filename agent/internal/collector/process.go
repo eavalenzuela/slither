@@ -111,7 +111,7 @@ func (p *processCollector) drain(ctx context.Context, rd *ringbuf.Reader) error 
 			// Channel full — drop here to avoid stalling the ringbuf drain.
 			// Priority-class drop policy proper lives on the inter-stage
 			// queue (pipeline.Priority).
-			p.telem.IncDrops()
+			p.telem.IncDropCollector()
 		}
 	}
 }
