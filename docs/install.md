@@ -15,6 +15,15 @@ config, drop in the systemd unit. `.deb` / `.rpm` land in Phase 5.
 - `stress-ng` — only if you plan to run `make load-test` on the target
   (Phase 1 exit criterion #3). Debian/Ubuntu: `apt-get install stress-ng`;
   RHEL/Rocky: `dnf install stress-ng` (EPEL).
+- On **Debian** (11/12/13): lower `kernel.perf_event_paranoid` to 2 —
+  Debian defaults it to 3, at which level tracepoint `perf_event_open`
+  demands `CAP_SYS_ADMIN` and `CAP_PERFMON` is rejected. RHEL and
+  Ubuntu already default to 2. Use the shipped drop-in:
+
+  ```bash
+  sudo install -m0644 deploy/sysctl.d/99-slither.conf /etc/sysctl.d/99-slither.conf
+  sudo sysctl --system
+  ```
 
 The shipped agent binary is a statically linked Go binary with the BPF
 object embedded via `bpf2go` — no libbpf, no kernel headers, no runtime
@@ -163,6 +172,13 @@ Both are deliberate. See the comments in
 (`cat /proc/$(pidof slither-agent)/status | grep CapBnd`) and that BTF
 is present. On a container host, check `docker info | grep -i btf` and
 whether the container has `CAP_BPF`/`CAP_PERFMON`.
+
+**`attach sched/sched_process_exec: opening tracepoint perf event: permission denied`** —
+`kernel.perf_event_paranoid` is > 2. Debian ships this at 3 by default;
+the CAP_PERFMON the unit grants is not enough at that level. Check with
+`cat /proc/sys/kernel/perf_event_paranoid`, then apply the shipped
+sysctl drop-in (`deploy/sysctl.d/99-slither.conf`) or one-shot
+`sudo sysctl -w kernel.perf_event_paranoid=2` and restart the service.
 
 **`config: invalid: unknown key "collecor" — did you mean "collectors"?`** —
 fix the typo; the loader is strict. Full key list in §3.7.
