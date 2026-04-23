@@ -14,18 +14,19 @@ import (
 )
 
 type ProcessProcessEvent struct {
-	_        structs.HostLayout
-	TsNs     uint64
-	Kind     uint32
-	Pid      uint32
-	Tgid     uint32
-	Ppid     uint32
-	Uid      uint32
-	Gid      uint32
-	ExitCode int32
-	Comm     [16]int8
-	Exe      [128]int8
-	_        [4]byte
+	_          structs.HostLayout
+	TsNs       uint64
+	Kind       uint32
+	Pid        uint32
+	Tgid       uint32
+	Ppid       uint32
+	Uid        uint32
+	Gid        uint32
+	ExitCode   int32
+	CmdlineLen uint32
+	Comm       [16]int8
+	Exe        [128]int8
+	Cmdline    [256]int8
 }
 
 // LoadProcess returns the embedded CollectionSpec for Process.

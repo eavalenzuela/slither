@@ -13,8 +13,9 @@
 #include "vmlinux.h"
 #include "bpf_helpers.h"
 
-#define COMM_LEN 16
-#define EXE_LEN  128
+#define COMM_LEN    16
+#define EXE_LEN     128
+#define CMDLINE_LEN 256
 
 /* Event kind discriminator. Values align with Go's RawProcessKind in
  * agent/internal/pipeline/types.go. Named with an SL_ prefix to avoid a
@@ -39,12 +40,18 @@ struct process_event {
     __u32 uid;
     __u32 gid;
     __s32 exit_code;   /* populated on exit; 0 elsewhere */
+    __u32 cmdline_len; /* valid bytes in cmdline[]; args are null-separated
+                        * in place. Userspace converts nulls to spaces. */
     char  comm[COMM_LEN];
     char  exe[EXE_LEN]; /* exec path — populated from the sched_process_exec
                          * tracepoint's __data_loc_filename on SL_PROC_EXEC,
-                         * zero otherwise. Lets userspace skip the
-                         * /proc/<pid>/exe readlink on exec, which was the
-                         * dominant per-event cost on RHEL 10 (task #15). */
+                         * zero otherwise. */
+    char  cmdline[CMDLINE_LEN]; /* argv blob — populated on SL_PROC_EXEC from
+                                 * current->mm->arg_{start,end}, zero
+                                 * otherwise. Lets userspace skip the
+                                 * /proc/<pid>/cmdline read on exec, which
+                                 * was the last /proc syscall on the hot
+                                 * path after the exe BPF capture. */
 };
 
 struct {
@@ -70,10 +77,12 @@ static __always_inline void fill_common(struct process_event *e) {
     e->gid   = (__u32)(uid_gid >> 32);
     e->ppid  = 0;
     e->exit_code = 0;
+    e->cmdline_len = 0;
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
-    /* exe is zero-initialised here; handle_exec populates it from the
-     * tracepoint filename arg. fork/exit leave it empty. */
+    /* exe/cmdline are zero-initialised here; handle_exec populates them
+     * on SL_PROC_EXEC. fork/exit leave them empty. */
     __builtin_memset(e->exe, 0, sizeof(e->exe));
+    __builtin_memset(e->cmdline, 0, sizeof(e->cmdline));
 }
 
 /* ---------------------------------------------------------------------------
@@ -91,10 +100,39 @@ int handle_exec(struct trace_event_raw_sched_process_exec *ctx) {
     if (!e) return 0;
     fill_common(e);
     e->kind = SL_PROC_EXEC;
+
+    /* exe: copy from the tracepoint's __data_loc_filename arg. */
     __u32 loc = ctx->__data_loc_filename;
     __u16 off = (__u16)(loc & 0xFFFF);
     const char *filename = (const char *)ctx + off;
     bpf_probe_read_kernel_str(&e->exe, sizeof(e->exe), filename);
+
+    /* cmdline: argv is contiguous null-separated bytes between
+     * task->mm->arg_start and arg_end. Read up to sizeof(cmdline) and
+     * record the actual length so userspace can convert nulls to spaces
+     * without scanning. If mm or arg_{start,end} can't be read we leave
+     * cmdline_len=0 and userspace falls back to /proc. */
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    if (task) {
+        struct mm_struct *mm;
+        bpf_probe_read_kernel(&mm, sizeof(mm), &task->mm);
+        if (mm) {
+            unsigned long arg_start = 0, arg_end = 0;
+            bpf_probe_read_kernel(&arg_start, sizeof(arg_start), &mm->arg_start);
+            bpf_probe_read_kernel(&arg_end,   sizeof(arg_end),   &mm->arg_end);
+            unsigned long len = arg_end - arg_start;
+            /* Bound the length so the verifier accepts the probe-read size
+             * as a scalar less than sizeof(cmdline). */
+            if (arg_end > arg_start && len <= sizeof(e->cmdline)) {
+                bpf_probe_read_user(&e->cmdline, len, (const void *)arg_start);
+                e->cmdline_len = (__u32)len;
+            } else if (arg_end > arg_start) {
+                bpf_probe_read_user(&e->cmdline, sizeof(e->cmdline), (const void *)arg_start);
+                e->cmdline_len = (__u32)sizeof(e->cmdline);
+            }
+        }
+    }
+
     bpf_ringbuf_submit(e, 0);
     return 0;
 }

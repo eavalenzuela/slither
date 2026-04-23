@@ -64,6 +64,8 @@ static __u64 (*bpf_get_current_pid_tgid)(void)                                  
 static __u64 (*bpf_get_current_uid_gid)(void)                                    = (void *)15;
 static long  (*bpf_get_current_comm)(void *buf, __u32 size)                      = (void *)16;
 static __u64 (*bpf_ktime_get_ns)(void)                                           = (void *)5;
+static long  (*bpf_probe_read_user)(void *dst, __u32 size, const void *src)      = (void *)112;
+static __u64 (*bpf_get_current_task)(void)                                       = (void *)35;
 static long  (*bpf_probe_read_user_str)(void *dst, __u32 size, const void *src)  = (void *)114;
 static long  (*bpf_probe_read_kernel_str)(void *dst, __u32 size, const void *src)= (void *)115;
 static long  (*bpf_probe_read_kernel)(void *dst, __u32 size, const void *src)    = (void *)113;

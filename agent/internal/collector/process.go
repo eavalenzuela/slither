@@ -131,9 +131,35 @@ func decodeProcessEvent(r bpfpkg.ProcessProcessEvent) pipeline.RawProcessEvent {
 		GID:       r.Gid,
 		Comm:      cstr(r.Comm[:]),
 		Exe:       cstr(r.Exe[:]),
+		Cmdline:   decodeCmdline(r.Cmdline[:], r.CmdlineLen),
 		Timestamp: time.Now(),
 		ExitCode:  r.ExitCode,
 	}
+}
+
+// decodeCmdline converts the BPF cmdline blob to a space-separated string.
+// argv in task->mm->arg_{start,end} is stored as null-separated bytes; we
+// replace internal nulls with spaces up to cmdline_len. Length==0 means BPF
+// didn't populate it (exec came from a kernel thread, or mm/arg reads
+// failed) — fall back to empty and let the enricher hit /proc.
+func decodeCmdline(buf []int8, n uint32) string {
+	if n == 0 || int(n) > len(buf) {
+		return ""
+	}
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = byte(buf[i])
+	}
+	// Trim the final null if present; replace interior nulls with spaces.
+	if b[len(b)-1] == 0 {
+		b = b[:len(b)-1]
+	}
+	for i := range b {
+		if b[i] == 0 {
+			b[i] = ' '
+		}
+	}
+	return string(b)
 }
 
 func decodeKind(k uint32) pipeline.RawProcessKind {

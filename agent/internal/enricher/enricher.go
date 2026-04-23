@@ -352,11 +352,21 @@ func (e *enricher) handleProcess(ctx context.Context, raw pipeline.RawProcessEve
 			}
 		}
 
+		// Common path on a modern kernel: BPF supplied both exe and
+		// cmdline, cache supplied ppid, and we skip /proc entirely for
+		// exec. /proc fallback runs only on the cold path (BPF missed
+		// the exec — kthreads, very long paths, mm unreadable).
+		needPpid := entry.ppid == 0
+		needExe := raw.Exe == ""
+		needCmdline := raw.Cmdline == ""
+		if !needPpid && !needExe && !needCmdline {
+			entry.exe = raw.Exe
+			entry.cmdline = raw.Cmdline
+			break
+		}
 		var rg sync.WaitGroup
 		var ppid uint32
 		var exe, cmdline string
-		needPpid := entry.ppid == 0
-		needExe := raw.Exe == ""
 		if needPpid {
 			rg.Add(1)
 			go func() { defer rg.Done(); ppid = e.proc.ppid(raw.PID) }()
@@ -365,8 +375,10 @@ func (e *enricher) handleProcess(ctx context.Context, raw pipeline.RawProcessEve
 			rg.Add(1)
 			go func() { defer rg.Done(); exe = e.proc.exe(raw.PID) }()
 		}
-		rg.Add(1)
-		go func() { defer rg.Done(); cmdline = e.proc.cmdline(raw.PID) }()
+		if needCmdline {
+			rg.Add(1)
+			go func() { defer rg.Done(); cmdline = e.proc.cmdline(raw.PID) }()
+		}
 		rg.Wait()
 		if needPpid {
 			entry.ppid = ppid
@@ -376,7 +388,11 @@ func (e *enricher) handleProcess(ctx context.Context, raw pipeline.RawProcessEve
 		} else {
 			entry.exe = raw.Exe
 		}
-		entry.cmdline = cmdline
+		if needCmdline {
+			entry.cmdline = cmdline
+		} else {
+			entry.cmdline = raw.Cmdline
+		}
 	case pipeline.ProcFork:
 		// The BPF program captures the parent's comm at fork time. Try to
 		// refresh from the child's /proc entry; on race (child not yet
