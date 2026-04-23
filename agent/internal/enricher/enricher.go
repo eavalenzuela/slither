@@ -170,7 +170,12 @@ func (e *enricher) Events() <-chan ocsf.Event { return e.out }
 //
 // Process events are dispatched to a pid-sharded worker pool
 // (see Options.ProcessWorkers) to parallelise the synchronous /proc backfill
-// done in handleProcess for ProcExec. File and net events stay on the main
+// done in handleProcess for ProcExec. The dispatcher runs in its own
+// goroutine rather than the main select — RHEL 10 / 6.12 validation
+// (task #29, 2026-04-22) showed that when the main select also handles
+// file/net events inline, their /proc-read latency blocks process dispatch
+// and the collector→enricher channel fills, surfacing as collector-stage
+// drops under stress-ng --exec 100. File and net events stay on the main
 // goroutine — they have no /proc read fan-out today, so parallelising them
 // would add lock contention without throughput gain.
 func (e *enricher) Run(ctx context.Context) error {
@@ -210,9 +215,9 @@ func (e *enricher) Run(ctx context.Context) error {
 		}()
 	}
 
-	// Close worker inboxes exactly once — either when the upstream process
-	// channel is closed, or when Run itself returns. Workers must drain and
-	// exit before we close e.out, so output consumers never see a send on a
+	// Close worker inboxes exactly once — either when the dispatcher sees
+	// procIn close, or when Run itself returns. Workers must drain and exit
+	// before we close e.out, so output consumers never see a send on a
 	// closed channel.
 	var closeOnce sync.Once
 	closeInboxes := func() {
@@ -222,6 +227,31 @@ func (e *enricher) Run(ctx context.Context) error {
 			}
 		})
 	}
+
+	// Dedicated process-dispatch goroutine. Isolating this from the main
+	// select is load-bearing: on busy hosts (RHEL 10, 6.12) file/net events
+	// handled inline in the main loop can stall for the duration of their
+	// /proc-backed enrichment, during which the collector→enricher channel
+	// (cg.Process) fills and the collector starts dropping at the ringbuf
+	// drain boundary.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer closeInboxes()
+		procIn := e.cg.Process
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case raw, ok := <-procIn:
+				if !ok {
+					return
+				}
+				e.dispatchProcess(ctx, raw)
+			}
+		}
+	}()
+
 	defer func() {
 		closeInboxes()
 		wg.Wait()
@@ -236,8 +266,8 @@ func (e *enricher) Run(ctx context.Context) error {
 	defer sweep.Stop()
 
 	// A nil channel in a select case is permanently non-ready, so we can
-	// always list all three without branching on which collectors are enabled.
-	var procIn <-chan pipeline.RawProcessEvent = e.cg.Process
+	// always list both without branching on which collectors are enabled.
+	// procIn is handled by the dedicated goroutine above.
 	var fileIn <-chan pipeline.RawFileEvent = e.cg.File
 	var netIn <-chan pipeline.RawNetEvent = e.cg.Net
 
@@ -251,13 +281,6 @@ func (e *enricher) Run(ctx context.Context) error {
 			e.fileFilter = newPathGlob(fc.IncludePaths, fc.ExcludePaths)
 		case <-sweep.C:
 			e.cache.evictExpired(e.opts.Now(), e.opts.CacheEvictionGrace)
-		case raw, ok := <-procIn:
-			if !ok {
-				procIn = nil
-				closeInboxes()
-				continue
-			}
-			e.dispatchProcess(ctx, raw)
 		case raw, ok := <-fileIn:
 			if !ok {
 				fileIn = nil
