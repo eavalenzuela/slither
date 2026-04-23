@@ -6,12 +6,21 @@ SHELL := /usr/bin/env bash
 
 ROOT := $(CURDIR)
 BIN  := $(ROOT)/bin
+
+# Go may not be in PATH when `make` runs under sudo (sudo's secure_path
+# strips /usr/local/go/bin on Debian/Ubuntu/RHEL). Skip the go env probe
+# in that case — targets that don't need go (e.g. load-test, which only
+# execs a pre-built binary) must still work. Targets that do need go
+# will get a clear "go: command not found" from their own recipe.
+HAVE_GO := $(shell command -v go 2>/dev/null)
+ifneq ($(HAVE_GO),)
 GOBIN ?= $(shell go env GOBIN)
 ifeq ($(GOBIN),)
 GOBIN := $(shell go env GOPATH)/bin
 endif
 export GOBIN
 export PATH := $(GOBIN):$(PATH)
+endif
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X github.com/t3rmit3/slither/pkg/version.Version=$(VERSION)
