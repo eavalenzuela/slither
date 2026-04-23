@@ -46,9 +46,9 @@ type Group struct {
 // individual collectors are created as stubs until §3.2 programs land.
 func NewGroup(cfg config.Collectors, telem *telemetry.Counters) *Group {
 	g := &Group{
-		Process: make(chan pipeline.RawProcessEvent, 8192),
-		File:    make(chan pipeline.RawFileEvent, 8192),
-		Net:     make(chan pipeline.RawNetEvent, 8192),
+		Process: make(chan pipeline.RawProcessEvent, 65536),
+		File:    make(chan pipeline.RawFileEvent, 16384),
+		Net:     make(chan pipeline.RawNetEvent, 16384),
 		cfg:     cfg,
 		telem:   telem,
 	}
