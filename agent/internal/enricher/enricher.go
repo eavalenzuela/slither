@@ -79,7 +79,7 @@ func (o *Options) applyDefaults() {
 		o.ParentChainDepth = 8
 	}
 	if o.ProcessWorkers <= 0 {
-		o.ProcessWorkers = 16
+		o.ProcessWorkers = 32
 	}
 	if o.ProcessInboxSize <= 0 {
 		o.ProcessInboxSize = 2048
