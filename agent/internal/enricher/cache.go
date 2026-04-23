@@ -23,9 +23,12 @@ type procEntry struct {
 }
 
 // cacheShardCount is the lock-stripe fan-out. Must be a power of two so the
-// shard index is a cheap mask. 16 is comfortably above ProcessWorkers default
-// (8) so workers rarely hit the same shard at the same time.
-const cacheShardCount = 16
+// shard index is a cheap mask. 64 matches ProcessWorkers default so workers
+// statistically hit distinct shards on sequential stress-ng pids — keeps
+// RWMutex writer-preference from queueing readers during concurrent
+// upserts, which showed up as worker throughput ceiling on RHEL 10 /
+// kernel 6.12 under stress-ng --exec 100 (task #15).
+const cacheShardCount = 64
 const cacheShardMask = cacheShardCount - 1
 
 // procCache is a pid-keyed process cache, lock-striped across cacheShardCount
