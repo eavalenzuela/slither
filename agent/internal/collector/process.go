@@ -3,12 +3,11 @@
 package collector
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"time"
+	"unsafe"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -96,11 +95,18 @@ func (p *processCollector) drain(ctx context.Context, rd *ringbuf.Reader) error 
 			return fmt.Errorf("process: ringbuf read: %w", err)
 		}
 
-		var raw bpfpkg.ProcessProcessEvent
-		if err := binary.Read(bytes.NewReader(rec.RawSample), binary.LittleEndian, &raw); err != nil {
+		// Direct struct cast over reflection-based binary.Read — the BPF
+		// ringbuf reserves exact-size records and bpf2go emits the Go
+		// struct with HostLayout matching the C wire layout on little-
+		// endian amd64/arm64 (our only targets). Profile-level cost of
+		// binary.Read with reflection on a 440-byte struct dominated the
+		// single drain goroutine on RHEL 10 at 8k+ events/s and showed up
+		// as collector-stage drops (task #15 step 10).
+		if len(rec.RawSample) < int(unsafe.Sizeof(bpfpkg.ProcessProcessEvent{})) {
 			p.telem.IncDrops()
 			continue
 		}
+		raw := *(*bpfpkg.ProcessProcessEvent)(unsafe.Pointer(&rec.RawSample[0]))
 		p.telem.IncEvents()
 
 		select {

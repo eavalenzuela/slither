@@ -3,12 +3,11 @@
 package collector
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"time"
+	"unsafe"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -100,11 +99,11 @@ func (f *fileCollector) drain(ctx context.Context, rd *ringbuf.Reader) error {
 			return fmt.Errorf("file: ringbuf read: %w", err)
 		}
 
-		var raw bpfpkg.FileFileEvent
-		if err := binary.Read(bytes.NewReader(rec.RawSample), binary.LittleEndian, &raw); err != nil {
+		if len(rec.RawSample) < int(unsafe.Sizeof(bpfpkg.FileFileEvent{})) {
 			f.telem.IncDrops()
 			continue
 		}
+		raw := *(*bpfpkg.FileFileEvent)(unsafe.Pointer(&rec.RawSample[0]))
 		f.telem.IncEvents()
 
 		select {

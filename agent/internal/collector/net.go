@@ -3,12 +3,11 @@
 package collector
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"time"
+	"unsafe"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -104,11 +103,11 @@ func (n *netCollector) drain(ctx context.Context, rd *ringbuf.Reader) error {
 			return fmt.Errorf("net: ringbuf read: %w", err)
 		}
 
-		var raw bpfpkg.NetNetEvent
-		if err := binary.Read(bytes.NewReader(rec.RawSample), binary.LittleEndian, &raw); err != nil {
+		if len(rec.RawSample) < int(unsafe.Sizeof(bpfpkg.NetNetEvent{})) {
 			n.telem.IncDrops()
 			continue
 		}
+		raw := *(*bpfpkg.NetNetEvent)(unsafe.Pointer(&rec.RawSample[0]))
 		n.telem.IncEvents()
 
 		select {
