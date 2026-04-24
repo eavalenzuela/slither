@@ -87,7 +87,7 @@ func TestScenarios(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				scanErr = scanJSONL(stdout, findings)
+				scanErr = scanJSONL(ctx, stdout, findings)
 			}()
 
 			// Collectors need time to attach tracepoints before the
@@ -198,8 +198,11 @@ output:
 }
 
 // scanJSONL reads newline-delimited JSON from r and forwards decoded objects
-// on out. Stops when r closes.
-func scanJSONL(r io.Reader, out chan<- map[string]any) error {
+// on out. Stops when r closes or ctx is cancelled. ctx is needed because the
+// subtest stops draining `out` once waitForFinding succeeds; without a
+// cancellable send the scanner blocks on a full buffered channel and the
+// wg.Wait() in the subtest's teardown never returns.
+func scanJSONL(ctx context.Context, r io.Reader, out chan<- map[string]any) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for sc.Scan() {
@@ -209,7 +212,11 @@ func scanJSONL(r io.Reader, out chan<- map[string]any) error {
 			// fail so a stray log line doesn't mask the actual finding.
 			continue
 		}
-		out <- v
+		select {
+		case out <- v:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	return sc.Err()
 }
