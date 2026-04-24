@@ -15,6 +15,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -113,7 +114,11 @@ func TestScenarios(t *testing.T) {
 
 			cancel()
 			wg.Wait()
-			if scanErr != nil && scanErr != io.EOF && !strings.Contains(scanErr.Error(), "file already closed") {
+			// context.Canceled is the intended exit path now that scanJSONL
+			// respects ctx on send; io.EOF and "file already closed" cover
+			// the "agent exited first" races.
+			if scanErr != nil && !errors.Is(scanErr, context.Canceled) &&
+				scanErr != io.EOF && !strings.Contains(scanErr.Error(), "file already closed") {
 				t.Errorf("stdout scan: %v", scanErr)
 			}
 		})
