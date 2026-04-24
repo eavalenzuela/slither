@@ -36,24 +36,42 @@ const defaultClientTTL = 365 * 24 * time.Hour
 // Accepted:
 //   - PEM-encoded CERTIFICATE REQUEST (single block).
 //   - Public key type P-256 ECDSA or Ed25519 (see assertAcceptedKey).
-//   - Subject.CommonName exactly equal to opts.HostID.
+//   - Subject.CommonName is either empty (agent's first-enroll case —
+//     host_id isn't known until the server assigns one) or exactly
+//     equal to opts.HostID.
 //
 // Rejected:
 //   - RSA keys, ECDSA curves other than P-256 (weak-key guard).
 //   - CSR signature mismatch.
-//   - CN != host_id (so one host's CSR cannot be bent to another's
-//     identity).
+//   - Non-empty CN that doesn't match HostID (so a CSR minted for one
+//     host cannot be re-signed under another host's identity).
 //   - Any SubjectAltName extension. The slither identity model is
 //     "CN == host_id"; SANs open alternative identities and defeat
 //     that guarantee.
 //   - Any extension carried from the CSR at all: the CA decides what
 //     goes on the cert, not the agent. We emit a fixed template.
 func (c *CA) SignCSR(csrPEM []byte, opts SignOptions) ([]byte, error) {
+	serial, err := randomSerial()
+	if err != nil {
+		return nil, fmt.Errorf("%w: SignCSR: serial: %w", ErrCA, err)
+	}
+	return c.SignCSRWithSerial(csrPEM, opts, serial)
+}
+
+// SignCSRWithSerial is SignCSR but with a caller-supplied serial. Used
+// by the Enroll RPC, which pre-commits the serial to hosts.cert_serial
+// inside the enrollment transaction so revocation lookups keyed on
+// serial number find exactly the right host row. Every other caller
+// should use SignCSR for a random serial.
+func (c *CA) SignCSRWithSerial(csrPEM []byte, opts SignOptions, serial *big.Int) ([]byte, error) {
 	if c == nil || c.Cert == nil || c.Key == nil {
 		return nil, fmt.Errorf("%w: CA not loaded", ErrCA)
 	}
 	if opts.HostID == "" {
 		return nil, fmt.Errorf("%w: SignCSR: empty HostID", ErrCA)
+	}
+	if serial == nil || serial.Sign() <= 0 {
+		return nil, fmt.Errorf("%w: SignCSR: non-positive serial", ErrCA)
 	}
 
 	block, _ := pem.Decode(csrPEM)
@@ -73,7 +91,7 @@ func (c *CA) SignCSR(csrPEM []byte, opts SignOptions) ([]byte, error) {
 	if kErr := assertAcceptedKey(csr.PublicKey); kErr != nil {
 		return nil, fmt.Errorf("%w: SignCSR: %w", ErrCA, kErr)
 	}
-	if csr.Subject.CommonName != opts.HostID {
+	if csr.Subject.CommonName != "" && csr.Subject.CommonName != opts.HostID {
 		return nil, fmt.Errorf("%w: SignCSR: CN %q != HostID %q",
 			ErrCA, csr.Subject.CommonName, opts.HostID)
 	}
@@ -85,11 +103,6 @@ func (c *CA) SignCSR(csrPEM []byte, opts SignOptions) ([]byte, error) {
 	ttl := opts.TTL
 	if ttl <= 0 {
 		ttl = defaultClientTTL
-	}
-
-	serial, err := randomSerial()
-	if err != nil {
-		return nil, fmt.Errorf("%w: SignCSR: serial: %w", ErrCA, err)
 	}
 
 	now := time.Now().UTC()

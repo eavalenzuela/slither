@@ -201,6 +201,21 @@ func TestSignCSR_RejectsEmptyHostID(t *testing.T) {
 	}
 }
 
+// Agents generate CSRs with a blank CN because host_id is server-assigned.
+// SignCSR must fill it in from opts.HostID.
+func TestSignCSR_AcceptsBlankCNAndFillsFromHostID(t *testing.T) {
+	ca := testCA(t)
+	csr := makeCSR(t, p256Key(t), csrShape{cn: ""})
+	certPEM, err := ca.SignCSR(csr, SignOptions{HostID: "assigned-host-99"})
+	if err != nil {
+		t.Fatalf("SignCSR with blank CN: %v", err)
+	}
+	cert := parseCertPEM(t, certPEM)
+	if cert.Subject.CommonName != "assigned-host-99" {
+		t.Errorf("issued CN = %q, want assigned-host-99", cert.Subject.CommonName)
+	}
+}
+
 func TestSignCSR_RejectsTamperedCSR(t *testing.T) {
 	ca := testCA(t)
 	csr := makeCSR(t, p256Key(t), csrShape{cn: "host-01"})
