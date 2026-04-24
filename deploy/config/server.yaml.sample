@@ -1,0 +1,33 @@
+# Slither server configuration. Install to /etc/slither/server.yaml.
+# Schema: IMPLEMENTATION.md §4.1. Unknown top-level keys are rejected
+# with "did you mean?" suggestions.
+#
+# Any value here can be overridden at runtime via SLITHER_SERVER_* /
+# SLITHER_LISTENERS_* / SLITHER_STORAGE_* env vars.
+
+server:
+  log_level: info
+
+listeners:
+  # mTLS-authenticated agent Session stream.
+  grpc: ":9443"
+  # Pre-cert Enroll RPC — separate listener so unauthenticated clients
+  # can reach exactly one endpoint and nothing else.
+  enroll: ":9444"
+  # HTMX operator console (HTTP; front with a reverse proxy for TLS).
+  console: ":8080"
+
+storage:
+  postgres:
+    dsn: postgres://slither:slither@localhost:5432/slither?sslmode=disable
+  clickhouse:
+    dsn: clickhouse://default:@localhost:9000/slither
+
+mtls:
+  ca_cert: /etc/slither/pki/ca.crt
+  ca_key: /etc/slither/pki/ca.key
+  server_cert: /etc/slither/pki/server.crt
+  server_key: /etc/slither/pki/server.key
+
+console:
+  session_key_file: /var/lib/slither/session.key

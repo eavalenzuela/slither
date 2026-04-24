@@ -121,6 +121,10 @@ test: ## Run unit tests across all modules
 		(cd $$m && go test -race -count=1 ./...) || exit 1; \
 	done
 
+.PHONY: test-server
+test-server: ## Run unit tests for the server module only
+	@cd server && go test -race -count=1 ./...
+
 .PHONY: test-integration
 test-integration: ## Run integration tests (requires root + kernel BTF)
 	@echo "Integration tests require root and kernel BTF; re-running with sudo -E if needed."

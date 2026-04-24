@@ -504,6 +504,57 @@ BTF availability is the hard floor. Kernels without `/sys/kernel/btf/vmlinux` ar
 - Tailwind compile wired into `make gen` via standalone CLI.
 - RBAC seeded with three roles (viewer, analyst, admin) but only enforced at endpoint level; row-level authorization deferred.
 
+### 4.1 Phase 2 task breakdown
+
+Task numbering continues from Phase 1 (which closed at #30). Dependency graph:
+- **A. Transport & enrollment:** #31 → #33 → #34 → #35 → #36
+- **B. Storage:** #32 and #38 after #31
+- **C. Ingest:** #37 after A + B
+- **D. Console:** #40 → #41 → #42/#43/#44 → #45 after A + B
+- **E. Control plane:** #39 after #32 + #35
+- **Exit gate:** #46 after all
+
+1. **#31 — Server scaffold.** Mirror the agent's `internal/` layout: `server/internal/{app,config,grpcserv,store,ingest,console,mtls}`. Wire `cmd/slither-server/main.go` to a real `app.Run(ctx, configPath)` with signal handling and a final counters snapshot (parallel to the agent's telemetry surface). Config loader is yaml.v3 + `KnownFields(true)` + Levenshtein typo suggestions (copy the pattern from `agent/internal/config`). Add `make build-server`, `make test-server`. **Exit:** `slither-server --config …yaml` starts, logs, SIGTERM-drains cleanly, zero RPCs yet.
+
+2. **#32 — Postgres schema + migration harness.** `server/internal/store/pg/` with pgx/v5. Tables per §4: `hosts`, `users`, `enrollment_tokens` (single-use, TTL, hashed), `rules` (yaml source + compiled bytecode blob + enabled flag), `alerts` (new/ack/in-progress/closed per §5), `audit_log`. Migrations live at `server/migrations/` using `pressly/goose` (sql-only — keeps schema reviewable). `make db-migrate` + `make db-reset`. ADR `docs/adr/0011-postgres-schema.md` for the initial schema so Phase 5 migration harness has a baseline. **Exit:** `docker run postgres` + `make db-migrate` → all tables exist; store-package tests pass against ephemeral pg via testcontainers-go.
+
+3. **#33 — mTLS CA bootstrap.** `scripts/gen-ca.sh` generates a P-256 root CA + server cert into `deploy/pki/` (gitignored). `server/internal/mtls/` loads CA key + cert from config paths, exposes `SignCSR(csrPEM, hostID, ttl) ([]byte, error)` enforcing: CSR key type ∈ {P-256, Ed25519}, CN == host_id, no SAN. gRPC listener uses `tls.Config{ClientAuth: RequireAndVerifyClientCert}` but Enroll RPC accepts unauthenticated clients on a **separate** listener/port (enrollment is pre-cert). **Exit:** unit tests cover happy path + wrong-CN + weak-key rejection; `scripts/gen-ca.sh` is idempotent.
+
+4. **#34 — Server `Enroll` RPC.** Implement `AgentService.Enroll` on the enrollment listener: look up token by hash in `enrollment_tokens`, check unused + not-expired, `SELECT … FOR UPDATE` to burn it, insert `hosts` row with fingerprint, call `SignCSR`, return chain. Audit-log every attempt (success and failure reason). **Exit:** integration test against ephemeral pg + in-proc grpc: valid token → cert; reused token → `FailedPrecondition`; expired → same.
+
+5. **#35 — Agent gRPC transport output sink.** New `agent/internal/output/grpc/` implementing the existing `output.Sink` interface. Config: `output.kind: grpc` with sub-fields `server_addr`, `ca_path`, `cert_path`, `key_path`, `host_id_path`. Opens `AgentService.Session`, marshals `ocsf.Event` → `Envelope` (proto types already exist under `proto/slither/v1/gen/`), sends as `ClientMessage.Event`. Heartbeat goroutine at config-driven cadence (default 30 s per §2.4). Reconnect backoff: exponential 1s → 60s, jittered; events buffered into a bounded channel during disconnect (drop-oldest to preserve existing telemetry invariants). `stdout` sink stays selectable (needed for dev + scenario tests). **Exit:** agent configured with `kind: grpc` against a stub server streams events end-to-end; killing the server mid-stream → agent reconnects; `dropped` counter increments when the buffer fills.
+
+6. **#36 — Agent enrollment first-run flow.** New CLI subcommand `slither-agent enroll --token … --server …`. Generates P-256 key, builds CSR (CN set by server, blank client-side), calls `Enroll`, writes `client.key` (0600), `client.crt`, `ca.crt`, `host_id` into `/var/lib/slither/` (matches StateDirectory from the systemd unit). `docs/install.md` gets an "Enroll this host" section. **Exit:** manual flow on a dev box against docker-compose server produces usable certs; `slither-agent run` then connects without further config changes.
+
+7. **#37 — Server ingest Session handler + in-proc bus.** `server/internal/ingest/`: `AgentService.Session` handler consumes `ClientMessage`, routes Envelope → bus, Heartbeat → hosts.last_seen update, Ack → outstanding-ResponseRequest tracker (stub OK for Phase 2), DiagReport → audit_log. Bus is a fan-out in-process channel with a subscriber registry (the ClickHouse writer and the live-tail SSE are the two Phase 2 subscribers). Backpressure: slow subscriber → its per-conn queue fills → that subscriber drops, incrementing a subscriber-specific counter; ingest never blocks upstream. **Exit:** 2 concurrent fake agents stream 10k events each; both land on the bus; telemetry counters exposed via `/metrics` (prometheus textfile is fine for Phase 2).
+
+8. **#38 — ClickHouse schema + batched writer.** `server/internal/store/ch/`: one table per OCSF class shipped in Phase 1 (`ocsf_process_activity_1007`, `ocsf_file_activity_1001`, `ocsf_network_activity_4001`, `ocsf_detection_finding_2004`) with shared columns (`event_id UUID`, `host_id`, `observed_at DateTime64(9)`, `collected_at DateTime64(9)`, `class_uid UInt32`, `severity_id UInt8`, `raw String` for full OCSF JSON) plus class-specific materialized columns for search hot paths. Partition by `toYYYYMMDD(observed_at)`, ORDER BY `(host_id, observed_at)`. Writer is a bus subscriber with batch size (default 10k) + flush interval (default 2 s), whichever fires first; `async_insert=1` on the CH side. Migrations via `golang-migrate/migrate` (CH driver), `make ch-migrate`. ADR `docs/adr/0012-clickhouse-schema.md`. **Exit:** integration test via testcontainers CH: 50k events in, rowcount matches, `SELECT count() WHERE host_id=…` correct.
+
+9. **#39 — Control plane: rule distribution over Session.** Server loads enabled rules from the `rules` table on boot + on `NOTIFY rules_changed`, compiles via the existing `pkg/ruleast`, and sends `ServerMessage.RuleSet` to every live Session on change. Agent applies via the already-shipped `engine.ReplaceRules` (#24). Initial RuleSet is sent at Session-open so freshly-connected agents converge. **Exit:** insert a rule row → every connected agent receives it within 1 s; toggle `enabled=false` → agent drops it; unit test for the compile-once-push-to-N-sessions path.
+
+10. **#40 — docker compose stack.** `deploy/compose/docker-compose.yml`: `postgres:16`, `clickhouse/clickhouse-server:24`, `slither-server` (built from local), volumes for PKI + data, healthchecks. Bootstrap service runs `gen-ca.sh` on first `up`, applies migrations, seeds one admin user (password from env or random-and-logged). `make compose-up` / `make compose-down`. **Exit:** `make compose-up` on a clean checkout → `http://localhost:8080` serves a login page; `docker compose ps` all healthy.
+
+11. **#41 — Console scaffold + Tailwind + auth.** `server/internal/console/`: chi router, templ for views, session cookies (scs with pg store), argon2id password hashing, RBAC middleware reading role from session. Three roles seeded (viewer/analyst/admin) but only route-level enforcement (row-level deferred per §4). Layout shell (`layout.templ`) with sidebar nav. Tailwind via the standalone CLI (pinned version under `tools/tailwind/`); `make gen` runs `buf generate` then `tailwindcss -i … -o server/internal/console/static/app.css --minify`. Embed static via `embed.FS`. **Exit:** login with seeded admin → `/dashboard` placeholder renders; wrong password → audit-log entry; `make gen` produces deterministic CSS.
+
+12. **#42 — Live tail page (SSE).** `/live` subscribes a per-request subscriber to the ingest bus, streams OCSF-formatted rows as `text/event-stream`. Filters: host_id, class_uid, free-text substring on raw. Pause/resume client-side. Per-connection drop counter shown in the UI footer (honest about backpressure). **Exit:** two browser tabs both receive the same events; pausing one does not stall the other or the bus.
+
+13. **#43 — Events search page.** `/events` paginated ClickHouse queries with cursor pagination on `(observed_at DESC, event_id DESC)` (not offset — keeps large skips cheap). Filters: time range, host_id, class_uid, severity_id. Detail view renders raw OCSF as pretty JSON + a human-rendered summary per class. **Exit:** 1M-row CH table, last-hour query returns in <500 ms on localhost.
+
+14. **#44 — Host inventory page.** `/hosts` lists from the `hosts` table: host_id, hostname, os, kernel, enrolled_at, last_seen (heartbeat-derived), status (online/stale/offline per §2.4 "3 missed heartbeats"), agent version. Admin-only actions: revoke cert (appends to CRL table, server refuses the cert on next connect). **Exit:** stale/offline transitions observable; revocation test — revoked agent's next Session fails with `Unauthenticated`.
+
+15. **#45 — Enrollment-token UX.** Admin page `/enrollment-tokens`: create (TTL + optional hostname-hint), display **once** (store hash only), list outstanding, revoke. Copy-paste UX for the `slither-agent enroll --token …` command. **Exit:** operator-facing flow — generate token → copy command → paste onto fresh VM → agent shows up in `/hosts` within 5 s.
+
+16. **#46 — Phase 2 exit validation.** Doc-backed manual run (mirrors the #29 pattern): bring up `make compose-up`, enroll a fresh agent VM, generate process/file/net events, confirm they land in ClickHouse via `/events`, confirm a server-pushed rule fires on edge and the resulting `DetectionFinding` is also searchable. Also load-test the server path: 3 agents × the Phase 1 stress-ng workload (~36k events/s aggregate) with `drop_rate_pct` reported at both agent and server-subscriber level. Commit `docs/phase2-validation.md` with raw outputs under `phase2_validation/`. **Exit:** all green, Phase 2 closed, Phase 3 scope unlocks.
+
+**Cross-cutting notes.**
+- **No row-level authz** — endpoint-level only (§4 explicit). Row-level is a Phase 3+ item; don't backdoor it into RBAC middleware now.
+- **Wire protocol is frozen** (§2.4). Any message-shape need that surfaces during Phase 2 → ADR + `slither.v2` discussion, not a silent edit.
+- **Rule hot reload on the agent** is already in place (#24 `ReplaceRules`); #39 is the server push side. No agent-side reload rework needed.
+- **Offline buffering** is deliberately Phase 5 (§7) — #35's disconnect-drop is acceptable for Phase 2.
+- **Deferred technical questions** activated by this phase: §10.2 (TLS cert storage — plain files in `/etc/slither/`, revisit Phase 5), §10.3/§10.4 (CH schema + retention — initial schema now, tune Phase 3), §10.7 (console auth — local users only).
+
+**Estimated effort:** 6–8 weeks for one person. The two biggest unknowns are the ClickHouse schema/query-shape tuning (#38 + #43) and the enrollment + CRL plumbing (#33/#34/#44 together); budget slack there.
+
 ## 5. Phase 3 — Detection (bullet)
 
 **Goal:** full Sigma (not just subset), edge/server partitioning, alerts with flow graphs, bounded-stateful on edge.
