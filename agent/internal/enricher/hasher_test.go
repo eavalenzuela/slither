@@ -14,7 +14,7 @@ func writeTempFile(t *testing.T, name string, body []byte) string {
 	t.Helper()
 	dir := t.TempDir()
 	p := filepath.Join(dir, name)
-	if err := os.WriteFile(p, body, 0o755); err != nil {
+	if err := os.WriteFile(p, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return p
@@ -117,7 +117,7 @@ func TestHasherFreshMtimeInvalidatesCache(t *testing.T) {
 	}
 
 	// Rewrite with different content + advance mtime so the key changes.
-	if err := os.WriteFile(path, []byte("v2-longer-body"), 0o755); err != nil {
+	if err := os.WriteFile(path, []byte("v2-longer-body"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	future := time.Now().Add(2 * time.Second)

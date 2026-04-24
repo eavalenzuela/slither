@@ -68,7 +68,7 @@ func TestLoadDefaultsLogLevel(t *testing.T) {
 }
 
 func TestLoadUnknownTopLevelKeySuggests(t *testing.T) {
-	_, err := Load(writeTmp(t, "listners:\n  grpc: ':9443'\n"))
+	_, err := Load(writeTmp(t, "listener:\n  grpc: ':9443'\n"))
 	if err == nil {
 		t.Fatal("expected error")
 	}

@@ -19,7 +19,7 @@ func TestHandleProcessExecAttachesHashInline(t *testing.T) {
 
 	body := []byte("#!/bin/sh\necho hi\n")
 	bin := filepath.Join(t.TempDir(), "hi.sh")
-	if err := os.WriteFile(bin, body, 0o755); err != nil {
+	if err := os.WriteFile(bin, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	want := sha256Hex(body)

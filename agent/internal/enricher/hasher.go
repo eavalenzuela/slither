@@ -167,7 +167,7 @@ func statKey(path string) (hashKey, bool) {
 		return hashKey{}, false
 	}
 	return hashKey{
-		dev:   uint64(st.Dev),
+		dev:   st.Dev,
 		inode: st.Ino,
 		mtime: st.Mtim.Nano(),
 	}, true
