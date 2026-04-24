@@ -14,9 +14,11 @@ import (
 	"github.com/t3rmit3/slither/agent/internal/config"
 	"github.com/t3rmit3/slither/agent/internal/enricher"
 	"github.com/t3rmit3/slither/agent/internal/output"
+	grpcsink "github.com/t3rmit3/slither/agent/internal/output/grpc"
 	"github.com/t3rmit3/slither/agent/internal/ruleengine"
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
 	"github.com/t3rmit3/slither/pkg/ocsf"
+	"github.com/t3rmit3/slither/pkg/version"
 )
 
 // Run assembles every stage described in IMPLEMENTATION.md §3.1 and blocks
@@ -49,7 +51,10 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	}
 	eng := ruleengine.New(rules, telem)
 
-	sink := output.NewStdoutJSONL(os.Stdout)
+	sink, err := newSink(cfg, telem)
+	if err != nil {
+		return fmt.Errorf("app: output sink: %w", err)
+	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -83,10 +88,11 @@ report:
 	// drop-rate baselines; operators use it for quick health checks.
 	snap := telem.Snapshot()
 	fmt.Fprintf(os.Stderr,
-		"telemetry: events=%d dropped=%d (collector=%d dispatch=%d enricher=%d engine=%d) detections=%d ringbuf_overflows=%d\n",
+		"telemetry: events=%d dropped=%d (collector=%d dispatch=%d enricher=%d engine=%d output=%d) detections=%d ringbuf_overflows=%d output_reconnects=%d heartbeats_sent=%d\n",
 		snap.EventsProduced, snap.EventsDropped,
-		snap.DropsCollector, snap.DropsDispatch, snap.DropsEnricher, snap.DropsEngine,
-		snap.DetectionsFired, snap.RingbufOverflows)
+		snap.DropsCollector, snap.DropsDispatch, snap.DropsEnricher, snap.DropsEngine, snap.DropsOutput,
+		snap.DetectionsFired, snap.RingbufOverflows,
+		snap.OutputReconnects, snap.HeartbeatsSent)
 	return runErr
 }
 
@@ -130,6 +136,31 @@ func applyReload(configPath string, enr enricher.Enricher, eng ruleengine.Engine
 
 func isCancelled(err error, ctx context.Context) bool {
 	return ctx.Err() != nil && (err == ctx.Err() || err == context.Canceled || err == context.DeadlineExceeded)
+}
+
+// newSink selects the output sink by config. "stdout" stays the default
+// for dev + scenario tests; "grpc" opens a long-lived Session to the
+// server. The grpc sink needs host_id on disk (written by the Enroll
+// flow in #36) — a missing or empty file is a startup error, not a
+// silent degradation.
+func newSink(cfg *config.Config, telem *telemetry.Counters) (output.Sink, error) {
+	switch cfg.Output.Kind {
+	case "stdout", "":
+		return output.NewStdoutJSONL(os.Stdout), nil
+	case "grpc":
+		g := cfg.Output.GRPC
+		return grpcsink.New(grpcsink.Options{
+			ServerAddr:        g.ServerAddr,
+			CAPath:            g.CAPath,
+			CertPath:          g.CertPath,
+			KeyPath:           g.KeyPath,
+			HostIDPath:        g.HostIDPath,
+			HeartbeatInterval: g.HeartbeatInterval,
+			BufferSize:        g.BufferSize,
+			AgentVersion:      version.Version,
+		}, telem)
+	}
+	return nil, fmt.Errorf("unknown output.kind %q", cfg.Output.Kind)
 }
 
 // deviceIdentity builds the OCSF Device stamp used in every emitted event.

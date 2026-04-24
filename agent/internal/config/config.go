@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -60,8 +61,24 @@ type Rules struct {
 }
 
 // Output configures the event sink.
+//
+// GRPC fields are only consulted when Kind == "grpc". They're still
+// present in the struct so unknown-key errors fire cleanly when the
+// operator misspells one, regardless of the selected kind.
 type Output struct {
-	Kind string `yaml:"kind"`
+	Kind string   `yaml:"kind"`
+	GRPC GRPCSink `yaml:"grpc"`
+}
+
+// GRPCSink configures the grpc output sink (IMPLEMENTATION.md §4.1 #35).
+type GRPCSink struct {
+	ServerAddr        string        `yaml:"server_addr"`
+	CAPath            string        `yaml:"ca_path"`
+	CertPath          string        `yaml:"cert_path"`
+	KeyPath           string        `yaml:"key_path"`
+	HostIDPath        string        `yaml:"host_id_path"`
+	HeartbeatInterval time.Duration `yaml:"heartbeat_interval"`
+	BufferSize        int           `yaml:"buffer_size"`
 }
 
 // ErrInvalidConfig is returned when validation fails. Callers can use
@@ -71,9 +88,9 @@ var ErrInvalidConfig = errors.New("config: invalid")
 // validLogLevels are the log levels accepted by agent.log_level.
 var validLogLevels = []string{"debug", "info", "warn", "error"}
 
-// validOutputKinds are the sink kinds recognised today. stdout is the only
-// Phase 1 implementation; grpc lands with the server handshake work.
-var validOutputKinds = []string{"stdout"}
+// validOutputKinds are the sink kinds recognised today. stdout for dev +
+// scenario tests, grpc for production (Phase 2 §4.1 #35).
+var validOutputKinds = []string{"stdout", "grpc"}
 
 // topLevelKeys is the authoritative set of root keys for typo suggestions.
 var topLevelKeys = []string{"agent", "collectors", "rules", "output"}
@@ -152,6 +169,24 @@ func (c *Config) Validate() error {
 	if !known(validOutputKinds, c.Output.Kind) {
 		return fmt.Errorf("%w: output.kind %q (valid: %s)",
 			ErrInvalidConfig, c.Output.Kind, strings.Join(validOutputKinds, ", "))
+	}
+	if c.Output.Kind == "grpc" {
+		g := &c.Output.GRPC
+		if g.ServerAddr == "" {
+			return fmt.Errorf("%w: output.grpc.server_addr required when kind=grpc", ErrInvalidConfig)
+		}
+		if g.CAPath == "" || g.CertPath == "" || g.KeyPath == "" {
+			return fmt.Errorf("%w: output.grpc requires ca_path, cert_path, key_path", ErrInvalidConfig)
+		}
+		if g.HostIDPath == "" {
+			return fmt.Errorf("%w: output.grpc.host_id_path required", ErrInvalidConfig)
+		}
+		if g.HeartbeatInterval <= 0 {
+			g.HeartbeatInterval = 30 * time.Second // §2.4 default
+		}
+		if g.BufferSize <= 0 {
+			g.BufferSize = 4096
+		}
 	}
 	if !c.Collectors.Process.Enabled && !c.Collectors.File.Enabled && !c.Collectors.Net.Enabled {
 		return fmt.Errorf("%w: no collectors enabled", ErrInvalidConfig)

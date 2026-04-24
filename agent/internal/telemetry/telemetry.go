@@ -19,6 +19,9 @@ type Counters struct {
 	dropsDispatch    atomic.Uint64
 	dropsEnricher    atomic.Uint64
 	dropsEngine      atomic.Uint64
+	dropsOutput      atomic.Uint64
+	outputReconnects atomic.Uint64
+	heartbeatsSent   atomic.Uint64
 	detectionsFired  atomic.Uint64
 	ringbufOverflows atomic.Uint64
 }
@@ -61,6 +64,21 @@ func (c *Counters) IncDropEngine() {
 	c.dropsEngine.Add(1)
 }
 
+// IncDropOutput — the grpc sink's outbound buffer was full and dropped
+// the oldest pending event to make room. Only the grpc sink uses this;
+// stdout is write-or-block.
+func (c *Counters) IncDropOutput() {
+	c.eventsDropped.Add(1)
+	c.dropsOutput.Add(1)
+}
+
+// IncOutputReconnect — the grpc sink's Session stream closed and the
+// sink reopened it. Useful for operators watching for network flaps.
+func (c *Counters) IncOutputReconnect() { c.outputReconnects.Add(1) }
+
+// IncHeartbeatSent — the grpc sink sent one Heartbeat ClientMessage.
+func (c *Counters) IncHeartbeatSent() { c.heartbeatsSent.Add(1) }
+
 // IncDetections bumps the detections-fired counter.
 func (c *Counters) IncDetections() { c.detectionsFired.Add(1) }
 
@@ -75,6 +93,9 @@ type Snapshot struct {
 	DropsDispatch    uint64
 	DropsEnricher    uint64
 	DropsEngine      uint64
+	DropsOutput      uint64
+	OutputReconnects uint64
+	HeartbeatsSent   uint64
 	DetectionsFired  uint64
 	RingbufOverflows uint64
 }
@@ -88,6 +109,9 @@ func (c *Counters) Snapshot() Snapshot {
 		DropsDispatch:    c.dropsDispatch.Load(),
 		DropsEnricher:    c.dropsEnricher.Load(),
 		DropsEngine:      c.dropsEngine.Load(),
+		DropsOutput:      c.dropsOutput.Load(),
+		OutputReconnects: c.outputReconnects.Load(),
+		HeartbeatsSent:   c.heartbeatsSent.Load(),
 		DetectionsFired:  c.detectionsFired.Load(),
 		RingbufOverflows: c.ringbufOverflows.Load(),
 	}
