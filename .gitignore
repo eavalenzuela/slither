@@ -29,6 +29,9 @@ certs/
 # Compose runtime data
 deploy/compose/data/
 
+# mTLS PKI material — generated locally by scripts/gen-ca.sh; never commit
+deploy/pki/
+
 # Coverage
 coverage.out
 coverage.html

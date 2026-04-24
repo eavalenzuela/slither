@@ -68,6 +68,9 @@ linters:
 
     misspell:
       locale: UK
+      # stdlib identifiers we can't rename (pkix.Name.Organization, etc.)
+      ignore-rules:
+        - Organization
 
   exclusions:
     generated: lax
