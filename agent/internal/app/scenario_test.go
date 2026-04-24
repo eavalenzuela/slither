@@ -93,7 +93,7 @@ func TestScenarios(t *testing.T) {
 
 			// Collectors need time to attach tracepoints before the
 			// scenario runs, otherwise we race the exec.
-				time.Sleep(800 * time.Millisecond)
+			time.Sleep(800 * time.Millisecond)
 
 			scriptPath := filepath.Join(scenariosDir, tc.script)
 			scriptArgs := []string{}

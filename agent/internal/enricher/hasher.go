@@ -83,7 +83,7 @@ func (h *hasher) Close() {
 //
 // Concurrent submitters for the same key share one in-flight computation;
 // every subscriber gets its own channel.
-func (h *hasher) Submit(path string) (<-chan string, bool, string) {
+func (h *hasher) Submit(path string) (result <-chan string, cached bool, cachedHash string) {
 	key, ok := statKey(path)
 	if !ok {
 		return nil, false, ""
@@ -176,7 +176,7 @@ func statKey(path string) (hashKey, bool) {
 // sha256File streams the file through a SHA-256 hasher. Returns "" on any I/O
 // error — the caller treats that as "no hash available" and continues.
 func sha256File(path string) string {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // G304: hashing an operator-controlled exec path is the whole point
 	if err != nil {
 		return ""
 	}

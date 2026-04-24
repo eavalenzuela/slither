@@ -104,6 +104,24 @@ func (o *Options) applyDefaults() {
 	}
 }
 
+type enricher struct {
+	cg             *collector.Group
+	telem          *telemetry.Counters
+	opts           Options
+	out            chan ocsf.Event
+	cache          *procCache
+	users          *userResolver
+	proc           *procReader
+	fileFilter     *pathGlob
+	hasher         *hasher
+	reloadFilterCh chan config.FileCollector
+	// procInboxes is the pid-sharded worker pool. Dispatch lives in Run's
+	// main select; each inbox is drained by one goroutine running
+	// handleProcess. Sharding by pid preserves per-pid event order (exec
+	// before exit) while parallelising /proc backfill across workers.
+	procInboxes []chan pipeline.RawProcessEvent
+}
+
 // New constructs an Enricher that reads from the given collector group.
 func New(cg *collector.Group, telem *telemetry.Counters, opts Options) Enricher {
 	opts.applyDefaults()
@@ -143,24 +161,6 @@ func (e *enricher) ReloadFileFilter(fc config.FileCollector) {
 		default:
 		}
 	}
-}
-
-type enricher struct {
-	cg             *collector.Group
-	telem          *telemetry.Counters
-	opts           Options
-	out            chan ocsf.Event
-	cache          *procCache
-	users          *userResolver
-	proc           *procReader
-	fileFilter     *pathGlob
-	hasher         *hasher
-	reloadFilterCh chan config.FileCollector
-	// procInboxes is the pid-sharded worker pool. Dispatch lives in Run's
-	// main select; each inbox is drained by one goroutine running
-	// handleProcess. Sharding by pid preserves per-pid event order (exec
-	// before exit) while parallelising /proc backfill across workers.
-	procInboxes []chan pipeline.RawProcessEvent
 }
 
 func (e *enricher) Events() <-chan ocsf.Event { return e.out }

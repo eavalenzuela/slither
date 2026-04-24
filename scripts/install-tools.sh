@@ -7,7 +7,7 @@
 # a Go toolchain bump on contributors.
 #
 # Prerequisites (not installed by this script):
-#   - Go 1.24+
+#   - Go 1.25+
 #   - clang 16+ (for eBPF compilation, Phase 1+)
 #   - Docker / Podman (for compose dev stack)
 #
@@ -31,22 +31,22 @@ export GOBIN
 
 # ---------------------------------------------------------------------------
 # Pinned tool versions. Bump these deliberately; CI re-runs the full build
-# after any change here. Compatible with Go 1.24.
+# after any change here. Compatible with Go 1.25.
 # ---------------------------------------------------------------------------
 readonly BUF_VERSION=v1.47.2
-readonly TEMPL_VERSION=v0.3.819
+readonly TEMPL_VERSION=v0.3.1001
 readonly PROTOC_GEN_GO_VERSION=v1.36.5
 readonly PROTOC_GEN_GO_GRPC_VERSION=v1.5.1
-readonly GOLANGCI_LINT_VERSION=v1.63.4
+readonly GOLANGCI_LINT_VERSION=v2.11.4
 readonly GOVULNCHECK_VERSION=v1.1.4
-readonly GOTESTSUM_VERSION=v1.12.0
+readonly GOTESTSUM_VERSION=v1.13.0
 
 declare -a TOOLS=(
     "github.com/bufbuild/buf/cmd/buf@${BUF_VERSION}"
     "github.com/a-h/templ/cmd/templ@${TEMPL_VERSION}"
     "google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION}"
     "google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}"
-    "github.com/golangci/golangci-lint/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+    "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
     "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
     "gotest.tools/gotestsum@${GOTESTSUM_VERSION}"
 )

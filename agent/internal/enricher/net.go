@@ -104,7 +104,7 @@ func netActivityID(k pipeline.RawNetKind) ocsf.NetActivityID {
 // netDirection returns the OCSF direction label + id. inbound = 1, outbound = 2
 // per the OCSF spec; lateral isn't classifiable from a single sock observation
 // so we don't emit it here.
-func netDirection(k pipeline.RawNetKind) (string, uint8) {
+func netDirection(k pipeline.RawNetKind) (label string, id uint8) {
 	switch k {
 	case pipeline.NetTCPConnect, pipeline.NetUDPSend:
 		return "outbound", 2

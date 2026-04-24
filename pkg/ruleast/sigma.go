@@ -59,9 +59,9 @@ func CompileSigma(src []byte) (*Rule, error) {
 
 	sels := make(map[string]*Selection, len(selections))
 	for name, body := range selections {
-		sel, err := compileSelection(name, body)
-		if err != nil {
-			return nil, compileErr(doc.ID, "ruleast", fmt.Errorf("selection %q: %w", name, err))
+		sel, selErr := compileSelection(name, body)
+		if selErr != nil {
+			return nil, compileErr(doc.ID, "ruleast", fmt.Errorf("selection %q: %w", name, selErr))
 		}
 		sels[name] = sel
 	}
@@ -120,7 +120,7 @@ func normaliseLevel(s string) Level {
 // leaves the remaining keys (selections). A detection without a condition
 // is invalid — Sigma's implicit-single-selection shortcut is rejected so
 // rules are explicit.
-func splitDetection(det map[string]any) (map[string]any, string, error) {
+func splitDetection(det map[string]any) (selections map[string]any, condition string, err error) {
 	if len(det) == 0 {
 		return nil, "", fmt.Errorf("detection block empty")
 	}

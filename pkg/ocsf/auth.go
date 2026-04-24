@@ -15,7 +15,7 @@ type Authentication struct {
 	Device      Device       `json:"device"`
 	Actor       Actor        `json:"actor"`
 	User        User         `json:"user"`
-	Status      string       `json:"status,omitempty"`     // Success, Failure, Other
+	Status      string       `json:"status,omitempty"` // Success, Failure, Other
 	StatusID    uint8        `json:"status_id,omitempty"`
 	AuthProto   string       `json:"auth_protocol,omitempty"` // ssh, pam, sudo
 	LogonType   string       `json:"logon_type,omitempty"`
@@ -27,18 +27,18 @@ type Authentication struct {
 type AuthActivity uint8
 
 const (
-	AuthActivityUnknown  AuthActivity = 0
-	AuthActivityLogon    AuthActivity = 1
-	AuthActivityLogoff   AuthActivity = 2
-	AuthActivityAuthTkt  AuthActivity = 3
-	AuthActivityServTkt  AuthActivity = 4
-	AuthActivityOther    AuthActivity = 99
+	AuthActivityUnknown AuthActivity = 0
+	AuthActivityLogon   AuthActivity = 1
+	AuthActivityLogoff  AuthActivity = 2
+	AuthActivityAuthTkt AuthActivity = 3
+	AuthActivityServTkt AuthActivity = 4
+	AuthActivityOther   AuthActivity = 99
 )
 
 type Session struct {
-	UID       string   `json:"uid,omitempty"`
-	CreatedT  TimeOCSF `json:"created_time,omitempty"`
-	IsRemote  bool     `json:"is_remote,omitempty"`
+	UID      string   `json:"uid,omitempty"`
+	CreatedT TimeOCSF `json:"created_time,omitempty"`
+	IsRemote bool     `json:"is_remote,omitempty"`
 }
 
 func (a *Authentication) ClassID() ClassID { return ClassAuthentication }

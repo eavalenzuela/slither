@@ -4,19 +4,19 @@ import "fmt"
 
 // KernelActivity (OCSF class_uid 1003).
 // Covers kernel-module loads, kprobe/uprobe attach, and similar kernel-level
-// actions. Used for rootkit defense-in-depth detections.
+// actions. Used for rootkit defence-in-depth detections.
 type KernelActivity struct {
-	Metadata    Metadata        `json:"metadata"`
-	ClassUID    ClassID         `json:"class_uid"`
-	ClassName   string          `json:"class_name"`
+	Metadata    Metadata         `json:"metadata"`
+	ClassUID    ClassID          `json:"class_uid"`
+	ClassName   string           `json:"class_name"`
 	ActivityID  KernelActivityID `json:"activity_id"`
-	TypeUID     uint64          `json:"type_uid"`
-	Severity    Severity        `json:"severity_id"`
-	SeverityStr string          `json:"severity,omitempty"`
-	Time        TimeOCSF        `json:"time"`
-	Device      Device          `json:"device"`
-	Actor       Actor           `json:"actor"`
-	Kernel      KernelObject    `json:"kernel"`
+	TypeUID     uint64           `json:"type_uid"`
+	Severity    Severity         `json:"severity_id"`
+	SeverityStr string           `json:"severity,omitempty"`
+	Time        TimeOCSF         `json:"time"`
+	Device      Device           `json:"device"`
+	Actor       Actor            `json:"actor"`
+	Kernel      KernelObject     `json:"kernel"`
 }
 
 type KernelActivityID uint8

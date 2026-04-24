@@ -1,6 +1,7 @@
 package ruleast
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -55,8 +56,8 @@ func TestCompileGolden(t *testing.T) {
 
 			goldenPath := filepath.Join(goldenDir, strings.TrimSuffix(name, ".yml")+".json")
 			if *updateGolden {
-				if err := os.WriteFile(goldenPath, got, 0o600); err != nil {
-					t.Fatalf("write golden: %v", err)
+				if wErr := os.WriteFile(goldenPath, got, 0o600); wErr != nil {
+					t.Fatalf("write golden: %v", wErr)
 				}
 				return
 			}
@@ -64,7 +65,7 @@ func TestCompileGolden(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read golden (run with -update to create): %v", err)
 			}
-			if string(got) != string(want) {
+			if !bytes.Equal(got, want) {
 				t.Errorf("golden mismatch for %s\n--- want\n%s\n--- got\n%s", name, want, got)
 			}
 		})
@@ -91,7 +92,7 @@ func TestCompileRejectsInvalid(t *testing.T) {
 	for _, c := range cases {
 		c := c
 		t.Run(c.file, func(t *testing.T) {
-			src, err := os.ReadFile(filepath.Join("testdata/invalid", c.file))
+			src, err := os.ReadFile(filepath.Join("testdata", "invalid", c.file))
 			if err != nil {
 				t.Fatalf("read: %v", err)
 			}

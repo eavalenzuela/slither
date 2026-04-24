@@ -7,18 +7,18 @@ import "fmt"
 // Emitted on process lifecycle transitions observed via eBPF
 // tracepoint/sched_process_* hooks.
 type ProcessActivity struct {
-	Metadata   Metadata          `json:"metadata"`
-	ClassUID   ClassID           `json:"class_uid"`
-	ClassName  string            `json:"class_name"`
-	ActivityID ProcessActivityID `json:"activity_id"`
-	TypeUID    uint64            `json:"type_uid"`
-	Severity   Severity          `json:"severity_id"`
-	SeverityStr string           `json:"severity,omitempty"`
-	Time       TimeOCSF          `json:"time"`
-	Device     Device            `json:"device"`
-	Actor      Actor             `json:"actor"`
-	Process    Process           `json:"process"`
-	ExitCode   *int32            `json:"exit_code,omitempty"`
+	Metadata    Metadata          `json:"metadata"`
+	ClassUID    ClassID           `json:"class_uid"`
+	ClassName   string            `json:"class_name"`
+	ActivityID  ProcessActivityID `json:"activity_id"`
+	TypeUID     uint64            `json:"type_uid"`
+	Severity    Severity          `json:"severity_id"`
+	SeverityStr string            `json:"severity,omitempty"`
+	Time        TimeOCSF          `json:"time"`
+	Device      Device            `json:"device"`
+	Actor       Actor             `json:"actor"`
+	Process     Process           `json:"process"`
+	ExitCode    *int32            `json:"exit_code,omitempty"`
 }
 
 // Actor wraps the process that caused the activity — typically the parent
@@ -32,13 +32,13 @@ type Actor struct {
 type ProcessActivityID uint8
 
 const (
-	ProcessActivityUnknown    ProcessActivityID = 0
-	ProcessActivityLaunch     ProcessActivityID = 1 // exec
-	ProcessActivityTerminate  ProcessActivityID = 2 // exit
-	ProcessActivityOpen       ProcessActivityID = 3 // debug/trace open
-	ProcessActivityInject     ProcessActivityID = 4
-	ProcessActivitySetUserID  ProcessActivityID = 5
-	ProcessActivityOther      ProcessActivityID = 99
+	ProcessActivityUnknown   ProcessActivityID = 0
+	ProcessActivityLaunch    ProcessActivityID = 1 // exec
+	ProcessActivityTerminate ProcessActivityID = 2 // exit
+	ProcessActivityOpen      ProcessActivityID = 3 // debug/trace open
+	ProcessActivityInject    ProcessActivityID = 4
+	ProcessActivitySetUserID ProcessActivityID = 5
+	ProcessActivityOther     ProcessActivityID = 99
 )
 
 func (p *ProcessActivity) ClassID() ClassID { return ClassProcessActivity }

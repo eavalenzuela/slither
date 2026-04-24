@@ -10,9 +10,9 @@ import (
 type Category string
 
 const (
-	CategoryProcessCreation    Category = "process_creation"
-	CategoryFileEvent          Category = "file_event"
-	CategoryNetworkConnection  Category = "network_connection"
+	CategoryProcessCreation   Category = "process_creation"
+	CategoryFileEvent         Category = "file_event"
+	CategoryNetworkConnection Category = "network_connection"
 )
 
 // Level maps Sigma's severity vocabulary to slither's own enum. We keep
@@ -115,10 +115,10 @@ func (s *Selection) Cost() int { return len(s.Fields) }
 
 // FieldPredicate is a single "field[|modifier]: value-or-list" entry.
 type FieldPredicate struct {
-	Field    string
-	Op       Operator
-	Values   []string       // OR across values
-	regexps  []*regexp.Regexp
+	Field   string
+	Op      Operator
+	Values  []string // OR across values
+	regexps []*regexp.Regexp
 }
 
 // Eval returns true when at least one of Values matches any bound value of

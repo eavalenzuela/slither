@@ -32,19 +32,19 @@ const (
 )
 
 type Container struct {
-	UID          string   `json:"uid,omitempty"` // container id
-	Name         string   `json:"name,omitempty"`
-	Image        Image    `json:"image"`
-	Runtime      string   `json:"runtime,omitempty"` // docker, containerd, runc
-	Network      string   `json:"network_driver,omitempty"`
+	UID                string   `json:"uid,omitempty"` // container id
+	Name               string   `json:"name,omitempty"`
+	Image              Image    `json:"image"`
+	Runtime            string   `json:"runtime,omitempty"` // docker, containerd, runc
+	Network            string   `json:"network_driver,omitempty"`
 	OrchestratorLabels []string `json:"orchestrator,omitempty"`
 }
 
 type Image struct {
-	Name     string `json:"name,omitempty"`
-	UID      string `json:"uid,omitempty"` // image id
-	Tag      string `json:"tag,omitempty"`
-	Digest   string `json:"hashes.sha256,omitempty"`
+	Name   string `json:"name,omitempty"`
+	UID    string `json:"uid,omitempty"` // image id
+	Tag    string `json:"tag,omitempty"`
+	Digest string `json:"hashes.sha256,omitempty"`
 }
 
 func (c *ContainerLifecycle) ClassID() ClassID { return ClassContainerLifecycle }

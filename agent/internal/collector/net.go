@@ -107,7 +107,7 @@ func (n *netCollector) drain(ctx context.Context, rd *ringbuf.Reader) error {
 			n.telem.IncDrops()
 			continue
 		}
-		raw := *(*bpfpkg.NetNetEvent)(unsafe.Pointer(&rec.RawSample[0]))
+		raw := *(*bpfpkg.NetNetEvent)(unsafe.Pointer(&rec.RawSample[0])) //nolint:gosec // G103: deliberate zero-copy decode of BPF-emitted fixed-layout record
 		n.telem.IncEvents()
 
 		select {
@@ -172,7 +172,7 @@ func formatIPv6(b [16]uint8) string {
 		if i > 0 {
 			out = append(out, ':')
 		}
-		w := uint16(b[i])<<8 | uint16(b[i+1])
+		w := uint16(b[i])<<8 | uint16(b[i+1]) //nolint:gosec // G602 false positive: i<16 step 2, b is [16]uint8, so i+1<=15
 		// Emit 4 hex digits without leading-zero trimming. RFC 5952-correct
 		// compression happens in the enricher only if we need it later.
 		out = append(out,

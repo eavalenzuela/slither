@@ -98,7 +98,7 @@ verify-gen: ## Fail if `make gen` would produce a diff (CI guard)
 # ----------------------------------------------------------------------------
 
 .PHONY: build
-build: build-agent build-server ## Build all binaries
+build: build-agent build-server build-db ## Build all binaries
 
 .PHONY: build-agent
 build-agent: ## Build slither-agent → bin/
@@ -109,6 +109,11 @@ build-agent: ## Build slither-agent → bin/
 build-server: ## Build slither-server → bin/
 	@mkdir -p $(BIN)
 	@cd server && CGO_ENABLED=0 go build -trimpath -ldflags='$(LDFLAGS)' -o $(BIN)/slither-server ./cmd/slither-server
+
+.PHONY: build-db
+build-db: ## Build slither-db (Postgres migration harness) → bin/
+	@mkdir -p $(BIN)
+	@cd server && CGO_ENABLED=0 go build -trimpath -ldflags='$(LDFLAGS)' -o $(BIN)/slither-db ./cmd/slither-db
 
 # ----------------------------------------------------------------------------
 # Test
@@ -188,6 +193,25 @@ compose-down: ## Tear down dev stack and remove volumes
 .PHONY: compose-logs
 compose-logs: ## Tail dev stack logs
 	@docker compose -f deploy/compose/docker-compose.yml logs -f
+
+# ----------------------------------------------------------------------------
+# Database migrations
+# ----------------------------------------------------------------------------
+
+# DSN is taken from SLITHER_STORAGE_POSTGRES_DSN unless --dsn is passed.
+# `reset` additionally requires SLITHER_ALLOW_RESET=1 as a safety gate.
+
+.PHONY: db-migrate
+db-migrate: build-db ## Apply pending Postgres migrations (reads SLITHER_STORAGE_POSTGRES_DSN)
+	@$(BIN)/slither-db migrate
+
+.PHONY: db-reset
+db-reset: build-db ## Rewind all migrations and re-apply (requires SLITHER_ALLOW_RESET=1)
+	@$(BIN)/slither-db reset
+
+.PHONY: db-status
+db-status: build-db ## Print Postgres migration status
+	@$(BIN)/slither-db status
 
 # ----------------------------------------------------------------------------
 # Housekeeping

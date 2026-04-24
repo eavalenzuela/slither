@@ -80,4 +80,3 @@ func severityFromLevel(l ruleast.Level) ocsf.Severity {
 	}
 	return ocsf.SeverityInformational
 }
-

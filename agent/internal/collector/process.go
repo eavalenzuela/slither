@@ -106,7 +106,7 @@ func (p *processCollector) drain(ctx context.Context, rd *ringbuf.Reader) error 
 			p.telem.IncDrops()
 			continue
 		}
-		raw := *(*bpfpkg.ProcessProcessEvent)(unsafe.Pointer(&rec.RawSample[0]))
+		raw := *(*bpfpkg.ProcessProcessEvent)(unsafe.Pointer(&rec.RawSample[0])) //nolint:gosec // G103: deliberate zero-copy decode of BPF-emitted fixed-layout record
 		p.telem.IncEvents()
 
 		select {

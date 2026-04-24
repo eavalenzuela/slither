@@ -5,19 +5,19 @@ import "fmt"
 // DetectionFinding (OCSF class_uid 2004).
 // Emitted when a rule fires, carrying pointers to the triggering events.
 type DetectionFinding struct {
-	Metadata    Metadata    `json:"metadata"`
-	ClassUID    ClassID     `json:"class_uid"`
-	ClassName   string      `json:"class_name"`
+	Metadata    Metadata          `json:"metadata"`
+	ClassUID    ClassID           `json:"class_uid"`
+	ClassName   string            `json:"class_name"`
 	ActivityID  FindingActivityID `json:"activity_id"`
-	TypeUID     uint64      `json:"type_uid"`
-	Severity    Severity    `json:"severity_id"`
-	SeverityStr string      `json:"severity,omitempty"`
-	Time        TimeOCSF    `json:"time"`
-	Device      Device      `json:"device"`
+	TypeUID     uint64            `json:"type_uid"`
+	Severity    Severity          `json:"severity_id"`
+	SeverityStr string            `json:"severity,omitempty"`
+	Time        TimeOCSF          `json:"time"`
+	Device      Device            `json:"device"`
 
-	Finding     Finding     `json:"finding"`
-	RuleInfo    Rule        `json:"rule"`
-	MitreATTACK []MitreTag  `json:"attacks,omitempty"`
+	Finding     Finding    `json:"finding"`
+	RuleInfo    Rule       `json:"rule"`
+	MitreATTACK []MitreTag `json:"attacks,omitempty"`
 
 	// event_id values of the events that caused this finding. Server uses these
 	// to build the detection flow graph.
@@ -35,7 +35,7 @@ const (
 )
 
 type Finding struct {
-	UID    string `json:"uid"`            // alert id
+	UID    string `json:"uid"` // alert id
 	Title  string `json:"title"`
 	Desc   string `json:"desc,omitempty"`
 	Status string `json:"status,omitempty"` // New, InProgress, Closed

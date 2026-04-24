@@ -67,7 +67,7 @@ linters:
       check-exported: false
 
     misspell:
-      locale: US
+      locale: UK
 
   exclusions:
     generated: lax

@@ -71,13 +71,13 @@ var ErrInvalidEvent = errors.New("invalid ocsf event")
 
 // Metadata is the OCSF metadata object carried by every event.
 type Metadata struct {
-	Version   string    `json:"version"`    // OCSF schema version, e.g. "1.3.0"
-	Product   Product   `json:"product"`
-	LogName   string    `json:"log_name,omitempty"`
-	EventCode string    `json:"event_code,omitempty"`
-	Labels    []string  `json:"labels,omitempty"`
-	UID       string    `json:"uid,omitempty"`        // event_id (UUIDv7)
-	OriginalT int64     `json:"original_time,omitempty"`
+	Version   string   `json:"version"` // OCSF schema version, e.g. "1.3.0"
+	Product   Product  `json:"product"`
+	LogName   string   `json:"log_name,omitempty"`
+	EventCode string   `json:"event_code,omitempty"`
+	Labels    []string `json:"labels,omitempty"`
+	UID       string   `json:"uid,omitempty"` // event_id (UUIDv7)
+	OriginalT int64    `json:"original_time,omitempty"`
 	// CorrelationUID links a followup event to the originating event's UID.
 	// Emitted when an async enrichment (e.g. SHA-256 hash) lands after the
 	// event it would have amended has already been sent downstream.
@@ -87,10 +87,10 @@ type Metadata struct {
 // Product identifies slither as the emitting product. Pinned here so every
 // event carries consistent identity without the caller filling it in.
 type Product struct {
-	Name     string `json:"name"`
+	Name       string `json:"name"`
 	VendorName string `json:"vendor_name"`
-	Version  string `json:"version"`
-	Language string `json:"lang,omitempty"`
+	Version    string `json:"version"`
+	Language   string `json:"lang,omitempty"`
 }
 
 // TimeOCSF is the OCSF convention: unix-epoch milliseconds as int64.
@@ -99,8 +99,8 @@ type TimeOCSF int64
 // User is the shared user-identity field group (OCSF `user` object).
 type User struct {
 	Name     string `json:"name,omitempty"`
-	UID      string `json:"uid,omitempty"`      // uid as string per OCSF
-	Type     string `json:"type,omitempty"`     // User, System, Admin, Other
+	UID      string `json:"uid,omitempty"`  // uid as string per OCSF
+	Type     string `json:"type,omitempty"` // User, System, Admin, Other
 	Domain   string `json:"domain,omitempty"`
 	FullName string `json:"full_name,omitempty"`
 }
@@ -108,12 +108,12 @@ type User struct {
 // Device is the shared device-identity field group (OCSF `device` object).
 // slither populates this from agent-side enrichment at ingest.
 type Device struct {
-	HostID       string `json:"uid,omitempty"`
-	Hostname     string `json:"hostname,omitempty"`
-	OSName       string `json:"os.name,omitempty"`
-	OSVersion    string `json:"os.version,omitempty"`
+	HostID        string `json:"uid,omitempty"`
+	Hostname      string `json:"hostname,omitempty"`
+	OSName        string `json:"os.name,omitempty"`
+	OSVersion     string `json:"os.version,omitempty"`
 	KernelVersion string `json:"os.kernel_release,omitempty"`
-	Arch         string `json:"hw_info.cpu_architecture,omitempty"`
+	Arch          string `json:"hw_info.cpu_architecture,omitempty"`
 }
 
 // FilePath + File are the shared file-identity field group.
@@ -137,8 +137,8 @@ type Process struct {
 	Name        string   `json:"name,omitempty"`
 	Cmdline     string   `json:"cmd_line,omitempty"`
 	CreatedT    TimeOCSF `json:"created_time,omitempty"`
-	File        *File    `json:"file,omitempty"`    // executable file
-	User        *User    `json:"user,omitempty"`    // running user
+	File        *File    `json:"file,omitempty"` // executable file
+	User        *User    `json:"user,omitempty"` // running user
 	Parent      *Process `json:"parent_process,omitempty"`
 	ContainerID string   `json:"x_container_id,omitempty"` // slither extension; Phase 2+
 }

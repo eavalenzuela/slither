@@ -24,21 +24,21 @@ type NetworkActivity struct {
 type NetActivityID uint8
 
 const (
-	NetActivityUnknown  NetActivityID = 0
-	NetActivityOpen     NetActivityID = 1  // connect
-	NetActivityClose    NetActivityID = 2
-	NetActivityReset    NetActivityID = 3
-	NetActivityFail     NetActivityID = 4
-	NetActivityRefuse   NetActivityID = 5
-	NetActivityTraffic  NetActivityID = 6
-	NetActivityListen   NetActivityID = 7
-	NetActivityOther    NetActivityID = 99
+	NetActivityUnknown NetActivityID = 0
+	NetActivityOpen    NetActivityID = 1 // connect
+	NetActivityClose   NetActivityID = 2
+	NetActivityReset   NetActivityID = 3
+	NetActivityFail    NetActivityID = 4
+	NetActivityRefuse  NetActivityID = 5
+	NetActivityTraffic NetActivityID = 6
+	NetActivityListen  NetActivityID = 7
+	NetActivityOther   NetActivityID = 99
 )
 
 type NetConnectionInfo struct {
 	Protocol  string `json:"protocol_name,omitempty"` // tcp, udp, icmp
 	ProtoNum  uint8  `json:"protocol_num,omitempty"`
-	Direction string `json:"direction,omitempty"`     // inbound, outbound, lateral
+	Direction string `json:"direction,omitempty"` // inbound, outbound, lateral
 	DirID     uint8  `json:"direction_id,omitempty"`
 }
 
@@ -94,9 +94,9 @@ const (
 )
 
 type DnsQuery struct {
-	Name    string `json:"hostname,omitempty"`
-	Type    string `json:"type,omitempty"`
-	Class   string `json:"class,omitempty"`
+	Name  string `json:"hostname,omitempty"`
+	Type  string `json:"type,omitempty"`
+	Class string `json:"class,omitempty"`
 }
 
 type DnsAnswer struct {

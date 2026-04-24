@@ -17,7 +17,7 @@
 //
 // # Invariants
 //
-//   - All types serialize to canonical JSON matching OCSF 1.3 field names.
+//   - All types serialise to canonical JSON matching OCSF 1.3 field names.
 //   - Each event type implements Event (ClassID + Validate + metadata).
 //   - No cross-type inheritance; shared field groups live as embeddable structs.
 //

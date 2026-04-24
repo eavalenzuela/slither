@@ -103,7 +103,7 @@ func (f *fileCollector) drain(ctx context.Context, rd *ringbuf.Reader) error {
 			f.telem.IncDrops()
 			continue
 		}
-		raw := *(*bpfpkg.FileFileEvent)(unsafe.Pointer(&rec.RawSample[0]))
+		raw := *(*bpfpkg.FileFileEvent)(unsafe.Pointer(&rec.RawSample[0])) //nolint:gosec // G103: deliberate zero-copy decode of BPF-emitted fixed-layout record
 		f.telem.IncEvents()
 
 		select {
@@ -152,4 +152,3 @@ func decodeFileKind(k uint32) pipeline.RawFileKind {
 		return pipeline.FileUnknown
 	}
 }
-

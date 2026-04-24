@@ -1,0 +1,53 @@
+package pg
+
+import (
+	"context"
+	"io/fs"
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/t3rmit3/slither/server/migrations"
+)
+
+// TestEmbeddedMigrationsPresent asserts every numbered migration file the
+// v1 schema expects is packaged into the binary. Guards against forgetting
+// a new file in `//go:embed` when Phase 3+ adds migrations.
+func TestEmbeddedMigrationsPresent(t *testing.T) {
+	want := []string{
+		"00001_extensions.sql",
+		"00002_users.sql",
+		"00003_hosts.sql",
+		"00004_enrollment_tokens.sql",
+		"00005_rules.sql",
+		"00006_alerts.sql",
+		"00007_audit_log.sql",
+	}
+	got, err := fs.Glob(migrations.FS, "*.sql")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	sort.Strings(got)
+	sort.Strings(want)
+	if len(got) != len(want) {
+		t.Fatalf("migrations = %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("migration[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestResetRefusedWithoutEnv proves the Reset safety gate is effective
+// without needing a real database — the env check fires before any DB work.
+func TestResetRefusedWithoutEnv(t *testing.T) {
+	t.Setenv("SLITHER_ALLOW_RESET", "")
+	err := Reset(context.Background(), "postgres://ignored/ignored")
+	if err == nil {
+		t.Fatal("Reset succeeded without SLITHER_ALLOW_RESET=1")
+	}
+	if !strings.Contains(err.Error(), "SLITHER_ALLOW_RESET") {
+		t.Errorf("error should reference the guard env var: %v", err)
+	}
+}

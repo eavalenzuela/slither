@@ -44,11 +44,11 @@ func TestHandleNetTCPConnectBuildsValidOCSF(t *testing.T) {
 	})
 
 	raw := pipeline.RawNetEvent{
-		Kind:      pipeline.NetTCPConnect,
-		PID:       800,
-		Proto:     6,
-		SrcAddr:   "10.0.0.5", SrcPort: 54321,
-		DstAddr:   "203.0.113.9", DstPort: 80,
+		Kind:    pipeline.NetTCPConnect,
+		PID:     800,
+		Proto:   6,
+		SrcAddr: "10.0.0.5", SrcPort: 54321,
+		DstAddr: "203.0.113.9", DstPort: 80,
 		Timestamp: time.Unix(100, 0),
 	}
 	e.handleNet(context.Background(), raw)
@@ -80,11 +80,11 @@ func TestHandleNetAcceptSwapsEndpoints(t *testing.T) {
 	// Kernel's accepted-sock presents remote-client as daddr/dport. The
 	// enricher flips them so src=client matches the outbound-event convention.
 	raw := pipeline.RawNetEvent{
-		Kind:      pipeline.NetTCPAccept,
-		PID:       900,
-		Proto:     6,
-		SrcAddr:   "10.0.0.2", SrcPort: 22, // server local
-		DstAddr:   "198.51.100.7", DstPort: 44123, // remote client (as seen in kernel sock)
+		Kind:    pipeline.NetTCPAccept,
+		PID:     900,
+		Proto:   6,
+		SrcAddr: "10.0.0.2", SrcPort: 22, // server local
+		DstAddr: "198.51.100.7", DstPort: 44123, // remote client (as seen in kernel sock)
 		Timestamp: time.Unix(1, 0),
 	}
 	e.handleNet(context.Background(), raw)

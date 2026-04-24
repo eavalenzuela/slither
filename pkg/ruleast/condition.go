@@ -9,11 +9,11 @@ import (
 // parseCondition turns a Sigma condition string into an Expr. The grammar
 // we accept in Phase 1:
 //
-//   expr   := or
-//   or     := and ("or" and)*
-//   and    := not ("and" not)*
-//   not    := "not" not | primary
-//   primary:= IDENT | "(" expr ")"
+//	expr   := or
+//	or     := and ("or" and)*
+//	and    := not ("and" not)*
+//	not    := "not" not | primary
+//	primary:= IDENT | "(" expr ")"
 //
 // Every IDENT must resolve against selections. "1 of", "all of", "them"
 // wildcard forms return a compile error so unsupported shapes fail loudly.

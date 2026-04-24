@@ -23,20 +23,20 @@ type FileSystemActivity struct {
 type FileSystemActivityID uint8
 
 const (
-	FileActivityUnknown    FileSystemActivityID = 0
-	FileActivityCreate     FileSystemActivityID = 1
-	FileActivityRead       FileSystemActivityID = 2
-	FileActivityUpdate     FileSystemActivityID = 3
-	FileActivityDelete     FileSystemActivityID = 4
-	FileActivitySetAttr    FileSystemActivityID = 5
-	FileActivityRename     FileSystemActivityID = 6
-	FileActivitySetOwner   FileSystemActivityID = 7
-	FileActivityEncrypt    FileSystemActivityID = 8
-	FileActivityDecrypt    FileSystemActivityID = 9
-	FileActivityMount      FileSystemActivityID = 10
-	FileActivityUnmount    FileSystemActivityID = 11
-	FileActivityOpen       FileSystemActivityID = 12
-	FileActivityOther      FileSystemActivityID = 99
+	FileActivityUnknown  FileSystemActivityID = 0
+	FileActivityCreate   FileSystemActivityID = 1
+	FileActivityRead     FileSystemActivityID = 2
+	FileActivityUpdate   FileSystemActivityID = 3
+	FileActivityDelete   FileSystemActivityID = 4
+	FileActivitySetAttr  FileSystemActivityID = 5
+	FileActivityRename   FileSystemActivityID = 6
+	FileActivitySetOwner FileSystemActivityID = 7
+	FileActivityEncrypt  FileSystemActivityID = 8
+	FileActivityDecrypt  FileSystemActivityID = 9
+	FileActivityMount    FileSystemActivityID = 10
+	FileActivityUnmount  FileSystemActivityID = 11
+	FileActivityOpen     FileSystemActivityID = 12
+	FileActivityOther    FileSystemActivityID = 99
 )
 
 func (f *FileSystemActivity) ClassID() ClassID { return ClassFileSystemActivity }

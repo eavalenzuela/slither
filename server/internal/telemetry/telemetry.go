@@ -11,15 +11,15 @@ import "sync/atomic"
 
 // Counters aggregates server-wide metrics. Methods are safe for concurrent use.
 type Counters struct {
-	eventsReceived   atomic.Uint64
-	eventsDropped    atomic.Uint64
-	dropsIngest      atomic.Uint64
-	dropsSubscriber  atomic.Uint64
-	batchesFlushed   atomic.Uint64
-	rulesetsPushed   atomic.Uint64
-	enrollSuccess    atomic.Uint64
-	enrollRejected   atomic.Uint64
-	sessionsActive   atomic.Int64
+	eventsReceived  atomic.Uint64
+	eventsDropped   atomic.Uint64
+	dropsIngest     atomic.Uint64
+	dropsSubscriber atomic.Uint64
+	batchesFlushed  atomic.Uint64
+	rulesetsPushed  atomic.Uint64
+	enrollSuccess   atomic.Uint64
+	enrollRejected  atomic.Uint64
+	sessionsActive  atomic.Int64
 }
 
 // NewCounters returns a zero-valued Counters.
