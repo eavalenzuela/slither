@@ -1,0 +1,67 @@
+package views
+
+// Hosts is the host inventory list page.
+templ Hosts(d HostsPageData) {
+	@Layout("Hosts") {
+		<div class="card">
+			<h2>Hosts</h2>
+			<p class="muted">
+				Status is derived from last_seen against the heartbeat
+				cadence. Stale = up to 3× heartbeat interval since the
+				last contact; offline = beyond 3×.
+			</p>
+
+			if len(d.Hosts) == 0 {
+				<p class="muted">No hosts enrolled yet. Use <code>slither-agent enroll</code> with an operator-issued token to onboard.</p>
+			} else {
+				<table class="events-table">
+					<thead>
+						<tr>
+							<th>status</th>
+							<th>hostname</th>
+							<th>os</th>
+							<th>kernel</th>
+							<th>arch</th>
+							<th>agent</th>
+							<th>enrolled_at</th>
+							<th>last_seen</th>
+							if d.IsAdmin {
+								<th></th>
+							}
+						</tr>
+					</thead>
+					<tbody>
+						for _, h := range d.Hosts {
+							{{ status := Status(d, h) }}
+							<tr>
+								<td><span class={ "host-status", "host-status-" + string(status) }>{ string(status) }</span></td>
+								<td>{ h.Hostname }</td>
+								<td>{ h.OSName } { h.OSVersion }</td>
+								<td class="muted">{ h.KernelVersion }</td>
+								<td>{ h.Arch }</td>
+								<td class="muted">
+									if h.AgentVersion == "" {
+										—
+									} else {
+										{ h.AgentVersion }
+									}
+								</td>
+								<td class="muted">{ FormatEnrolledAt(h) }</td>
+								<td class="muted">{ FormatLastSeen(h) }</td>
+								if d.IsAdmin {
+									<td>
+										if status != HostStatusRevoked {
+											<form method="post" action={ templ.SafeURL("/hosts/" + h.ID + "/revoke") }>
+												<button type="submit" class="danger">Revoke</button>
+											</form>
+										}
+									</td>
+								}
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	}
+}

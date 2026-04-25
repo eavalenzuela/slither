@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // ErrHostNotFound is returned when a hosts row lookup misses. Callers
@@ -47,4 +49,104 @@ func (s *Store) HostExists(ctx context.Context, hostID string) (bool, error) {
 		return false, fmt.Errorf("pg.HostExists: %w", err)
 	}
 	return exists, nil
+}
+
+// HostRow is the projection returned by ListHosts. last_seen and
+// revoked_at are pointers so the template can distinguish "never
+// connected" from "online" without a sentinel value.
+type HostRow struct {
+	ID            string
+	Hostname      string
+	MachineID     string
+	OSName        string
+	OSVersion     string
+	KernelVersion string
+	Arch          string
+	AgentVersion  string
+	CertSerial    string
+	EnrolledAt    time.Time
+	LastSeen      *time.Time
+	RevokedAt     *time.Time
+}
+
+// ListHosts returns every hosts row, ordered by hostname (revoked
+// rows included so the inventory shows them with a "revoked" badge
+// rather than vanishing on revoke). Phase 3 may add filters; v1 is
+// fleet-scale (50–500 hosts per ADR-0004) so a single page is fine.
+func (s *Store) ListHosts(ctx context.Context) ([]HostRow, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, hostname, machine_id, os_name, os_version,
+		       kernel_version, arch, COALESCE(agent_version, ''),
+		       cert_serial, enrolled_at, last_seen, revoked_at
+		FROM hosts
+		ORDER BY hostname, id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("pg.ListHosts: %w", err)
+	}
+	defer rows.Close()
+
+	var out []HostRow
+	for rows.Next() {
+		var (
+			r        HostRow
+			id       pgtype.UUID
+			lastSeen pgtype.Timestamptz
+			revoked  pgtype.Timestamptz
+		)
+		if err := rows.Scan(
+			&id, &r.Hostname, &r.MachineID, &r.OSName, &r.OSVersion,
+			&r.KernelVersion, &r.Arch, &r.AgentVersion,
+			&r.CertSerial, &r.EnrolledAt, &lastSeen, &revoked,
+		); err != nil {
+			return nil, fmt.Errorf("pg.ListHosts: scan: %w", err)
+		}
+		r.ID = uuidString(id)
+		if lastSeen.Valid {
+			t := lastSeen.Time
+			r.LastSeen = &t
+		}
+		if revoked.Valid {
+			t := revoked.Time
+			r.RevokedAt = &t
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// RevokeHost flips hosts.revoked_at = now() and audits the action.
+// The next Session-stream authn for this host will fail because
+// HostExists treats revoked_at IS NOT NULL as "not present". Existing
+// sessions stay open until they reconnect; force-disconnect lands
+// post-Phase-2. ErrHostNotFound is returned for unknown UUIDs.
+//
+// actorID is the operator's users.id (for the audit row); empty when
+// a system path triggers the revoke (none today).
+func (s *Store) RevokeHost(ctx context.Context, hostID, actorID string) error {
+	id, err := parseUUID(hostID)
+	if err != nil {
+		return fmt.Errorf("pg.RevokeHost: parse host_id: %w", err)
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE hosts SET revoked_at = now()
+		WHERE id = $1 AND revoked_at IS NULL
+	`, id)
+	if err != nil {
+		return fmt.Errorf("pg.RevokeHost: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		// Either the host doesn't exist or it's already revoked. Map
+		// both to ErrHostNotFound so callers get a single shape; the
+		// audit log still distinguishes via the LogAudit detail.
+		return ErrHostNotFound
+	}
+	_ = s.LogAudit(ctx, AuditEntry{
+		ActorType:  ActorUser,
+		ActorID:    actorID,
+		Action:     "host.revoke",
+		TargetKind: "host",
+		TargetID:   hostID,
+	})
+	return nil
 }

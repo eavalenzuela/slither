@@ -133,6 +133,9 @@ func (s *Server) routes() {
 			r.Get("/events", s.eventsList)
 			r.Get("/events/{class_uid}/{event_id}", s.eventDetail)
 		}
+		r.Get("/hosts", s.hostsList)
+		r.With(s.RequireRole(pg.RoleAdmin)).
+			Post("/hosts/{host_id}/revoke", s.hostsRevoke)
 	})
 }
 

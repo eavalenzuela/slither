@@ -44,7 +44,7 @@ func Layout(title string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, " — slither</title><link rel=\"stylesheet\" href=\"/static/app.css\"></head><body><div class=\"layout\"><aside class=\"sidebar\"><h1>slither</h1><nav><a href=\"/dashboard\">Dashboard</a> <a href=\"/live\">Live tail</a> <a href=\"/events\">Events</a> <a href=\"/hosts\" class=\"muted\">Hosts <span class=\"muted\">(#44)</span></a> <a href=\"/alerts\" class=\"muted\">Alerts <span class=\"muted\">(#44)</span></a></nav></aside><main class=\"main\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, " — slither</title><link rel=\"stylesheet\" href=\"/static/app.css\"></head><body><div class=\"layout\"><aside class=\"sidebar\"><h1>slither</h1><nav><a href=\"/dashboard\">Dashboard</a> <a href=\"/live\">Live tail</a> <a href=\"/events\">Events</a> <a href=\"/hosts\">Hosts</a></nav></aside><main class=\"main\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
