@@ -1,14 +1,19 @@
-# Slither dev stack.
-# Single-node deploy of the data tier. Agent + server binaries are run
-# directly from `make build` for faster iteration; this compose file covers
-# only the stateful dependencies.
+# Slither Phase 2 dev stack.
+#
+# Brings up a single-node deploy of every Phase 2 component: Postgres
+# (control plane), ClickHouse (event store), the slither-server binary,
+# and a one-shot bootstrap container that mints PKI, applies migrations,
+# and seeds an admin user. Bootstrap operations are idempotent — running
+# `make compose-up` twice is safe; the second run no-ops everything.
 #
 # Usage:
-#   make compose-up     # bring up
+#   make compose-up     # build images + up
 #   make compose-logs   # tail
 #   make compose-down   # tear down (wipes volumes via -v)
 #
 # Credentials below are dev-only. Rotate before any non-local use.
+# Operators install agents against this stack by copying `pki/ca.crt`
+# to each host and running `slither-agent enroll --ca-cert ...`.
 
 services:
   postgres:
@@ -19,11 +24,12 @@ services:
       POSTGRES_DB: slither
       POSTGRES_USER: slither
       POSTGRES_PASSWORD: slither-dev
-    ports:
-      - "127.0.0.1:5432:5432"
+    # Postgres is reachable from other compose services via the
+    # `postgres` DNS name; not published to the host to avoid clashing
+    # with a developer's local pg. Use `docker compose exec postgres
+    # psql -U slither slither` for ad-hoc queries.
     volumes:
       - pg-data:/var/lib/postgresql/data
-      - ../migrations/postgres:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "slither", "-d", "slither"]
       interval: 5s
@@ -31,7 +37,7 @@ services:
       retries: 10
 
   clickhouse:
-    image: clickhouse/clickhouse-server:24-alpine
+    image: clickhouse/clickhouse-server:24.8-alpine
     container_name: slither-clickhouse
     restart: unless-stopped
     environment:
@@ -39,22 +45,72 @@ services:
       CLICKHOUSE_USER: slither
       CLICKHOUSE_PASSWORD: slither-dev
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
-    ports:
-      - "127.0.0.1:8123:8123"   # HTTP
-      - "127.0.0.1:9000:9000"   # native TCP
+    # ClickHouse is reachable from other compose services via the
+    # `clickhouse` DNS name; not published to the host. Use `docker
+    # compose exec clickhouse clickhouse-client` for ad-hoc queries.
     volumes:
       - ch-data:/var/lib/clickhouse
-      - ../migrations/clickhouse:/docker-entrypoint-initdb.d:ro
     ulimits:
       nofile:
         soft: 262144
         hard: 262144
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      # Use 127.0.0.1 explicitly: `localhost` inside the alpine
+      # container resolves to ::1 first and the ClickHouse server only
+      # binds IPv4 by default.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8123/ping"]
       interval: 5s
       timeout: 3s
       retries: 10
 
+  bootstrap:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/bootstrap.Dockerfile
+    container_name: slither-bootstrap
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    environment:
+      SLITHER_STORAGE_POSTGRES_DSN: "postgres://slither:slither-dev@postgres:5432/slither?sslmode=disable"
+      SLITHER_STORAGE_CLICKHOUSE_DSN: "clickhouse://slither:slither-dev@clickhouse:9000/slither"
+      PKI_DIR: /pki
+      # Comment this out to let bootstrap-admin generate a random
+      # password and print it to stdout.
+      SLITHER_BOOTSTRAP_PASSWORD: "slither-admin-dev"
+    volumes:
+      - pki:/pki
+    restart: "no"
+
+  server:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/server.Dockerfile
+    container_name: slither-server
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    command:
+      - "--config=/etc/slither/server.yaml"
+    environment:
+      SLITHER_STORAGE_POSTGRES_DSN: "postgres://slither:slither-dev@postgres:5432/slither?sslmode=disable"
+      SLITHER_STORAGE_CLICKHOUSE_DSN: "clickhouse://slither:slither-dev@clickhouse:9000/slither"
+    ports:
+      - "127.0.0.1:8080:8080" # console (placeholder until #41)
+      - "127.0.0.1:9443:9443" # mTLS Session
+      - "127.0.0.1:9444:9444" # Enroll
+    volumes:
+      - pki:/etc/slither/pki:ro
+      - ./server.yaml:/etc/slither/server.yaml:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/slither-server", "--version"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
 volumes:
   pg-data:
   ch-data:
+  pki:

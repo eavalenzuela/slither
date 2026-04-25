@@ -1,0 +1,30 @@
+# Server config for the docker-compose stack. Listeners bind to all
+# interfaces because Docker's network namespace handles isolation;
+# ports are then narrowed in docker-compose.yml to 127.0.0.1.
+#
+# Storage DSNs are intentionally left blank here — the compose service
+# overrides them via SLITHER_STORAGE_* environment variables so service
+# DNS names (postgres / clickhouse) and creds live in one place.
+
+server:
+  log_level: info
+
+listeners:
+  grpc: ":9443"
+  enroll: ":9444"
+  console: ":8080"
+
+storage:
+  postgres:
+    dsn: ""
+  clickhouse:
+    dsn: ""
+
+mtls:
+  ca_cert: /etc/slither/pki/ca.crt
+  ca_key:  /etc/slither/pki/ca.key
+  server_cert: /etc/slither/pki/server.crt
+  server_key:  /etc/slither/pki/server.key
+
+console:
+  session_key_file: /etc/slither/pki/session.key

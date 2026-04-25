@@ -183,16 +183,20 @@ ci: verify-gen build test lint ## Everything CI runs
 # ----------------------------------------------------------------------------
 
 .PHONY: compose-up
-compose-up: ## Bring up ClickHouse + Postgres dev stack
-	@docker compose -f deploy/compose/docker-compose.yml up -d
+compose-up: ## Build images + bring up the Phase 2 stack (pg + ch + bootstrap + server)
+	@docker compose -f deploy/compose/docker-compose.yml up -d --build
 
 .PHONY: compose-down
-compose-down: ## Tear down dev stack and remove volumes
+compose-down: ## Tear down the stack and remove volumes
 	@docker compose -f deploy/compose/docker-compose.yml down -v
 
 .PHONY: compose-logs
 compose-logs: ## Tail dev stack logs
 	@docker compose -f deploy/compose/docker-compose.yml logs -f
+
+.PHONY: compose-ps
+compose-ps: ## Show stack health
+	@docker compose -f deploy/compose/docker-compose.yml ps
 
 # ----------------------------------------------------------------------------
 # Database migrations
