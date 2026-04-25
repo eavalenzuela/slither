@@ -14,6 +14,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -53,9 +54,12 @@ type Postgres struct {
 	DSN string `yaml:"dsn"`
 }
 
-// ClickHouse configures the event store.
+// ClickHouse configures the event store and the writer cadence
+// (ADR-0031). Zero values fall back to the writer's documented defaults.
 type ClickHouse struct {
-	DSN string `yaml:"dsn"`
+	DSN           string        `yaml:"dsn"`
+	BatchSize     int           `yaml:"batch_size"`
+	FlushInterval time.Duration `yaml:"flush_interval"`
 }
 
 // MTLS configures CA and server cert material.
