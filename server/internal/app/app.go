@@ -130,6 +130,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		Store:      pgStore,
 		Telem:      telem,
 		Bus:        bus,
+		ChStore:    chStore,
 		SessionKey: sessionKey,
 	})
 	consoleSrv := &http.Server{

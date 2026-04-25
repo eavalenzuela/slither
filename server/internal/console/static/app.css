@@ -142,3 +142,46 @@ button:hover { background: #a3c0ff; }
 }
 
 .live-footer { margin-top: 0.5rem; }
+
+.events-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin-top: 1rem;
+}
+
+.events-table th,
+.events-table td {
+    text-align: left;
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid #2c3a4a;
+    vertical-align: top;
+}
+
+.events-table th { color: #8a99b3; font-weight: 600; }
+.events-table code { color: #c5e478; word-break: break-all; }
+.events-table tr:hover td { background: #1a232f; }
+
+.kv {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 0.25rem 1rem;
+    margin: 0;
+}
+
+.kv dt { color: #8a99b3; }
+.kv dd { margin: 0; }
+.kv code { color: #c5e478; }
+
+.event-summary, .event-raw {
+    background: #0f1419;
+    border: 1px solid #2c3a4a;
+    border-radius: 4px;
+    padding: 0.75rem;
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.event-summary { color: #82aaff; }
+.event-raw { color: #c5e478; max-height: 600px; overflow: auto; }

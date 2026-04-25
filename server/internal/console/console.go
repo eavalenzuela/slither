@@ -25,6 +25,7 @@ import (
 	"github.com/t3rmit3/slither/server/internal/console/static"
 	"github.com/t3rmit3/slither/server/internal/console/views"
 	"github.com/t3rmit3/slither/server/internal/ingest"
+	"github.com/t3rmit3/slither/server/internal/store/ch"
 	"github.com/t3rmit3/slither/server/internal/store/pg"
 	"github.com/t3rmit3/slither/server/internal/telemetry"
 )
@@ -33,11 +34,13 @@ import (
 // SessionKey is the 64-byte secret HMAC key used to sign session
 // cookies and rotate to a new key file on startup if missing. Bus is
 // optional — pass it to enable the live-tail SSE page (#42); leaving
-// it nil hides the route.
+// it nil hides the route. ChStore is optional — pass it to enable the
+// events search page (#43).
 type Options struct {
 	Store          *pg.Store
 	Telem          *telemetry.Counters
 	Bus            *ingest.Bus
+	ChStore        *ch.Store
 	SessionKey     []byte
 	SessionTimeout time.Duration
 }
@@ -45,11 +48,12 @@ type Options struct {
 // Server is the chi.Router built around Options. New returns a stdlib
 // http.Handler ready to be plugged into app.Run's console listener.
 type Server struct {
-	store *pg.Store
-	telem *telemetry.Counters
-	bus   *ingest.Bus
-	sm    *scs.SessionManager
-	mux   *chi.Mux
+	store   *pg.Store
+	telem   *telemetry.Counters
+	bus     *ingest.Bus
+	chStore *ch.Store
+	sm      *scs.SessionManager
+	mux     *chi.Mux
 }
 
 // New constructs the console router. Panics on misconfiguration — a
@@ -78,11 +82,12 @@ func New(opts Options) *Server {
 	// reverse proxy and should set this in a config wrapper later.
 
 	s := &Server{
-		store: opts.Store,
-		telem: opts.Telem,
-		bus:   opts.Bus,
-		sm:    sm,
-		mux:   chi.NewRouter(),
+		store:   opts.Store,
+		telem:   opts.Telem,
+		bus:     opts.Bus,
+		chStore: opts.ChStore,
+		sm:      sm,
+		mux:     chi.NewRouter(),
 	}
 	s.routes()
 	return s
@@ -123,6 +128,10 @@ func (s *Server) routes() {
 		if s.bus != nil {
 			r.Get("/live", s.livePage)
 			r.Get("/live/stream", s.liveStream)
+		}
+		if s.chStore != nil {
+			r.Get("/events", s.eventsList)
+			r.Get("/events/{class_uid}/{event_id}", s.eventDetail)
 		}
 	})
 }

@@ -1,0 +1,111 @@
+package views
+
+import "strconv"
+
+// Events is the paginated search list view.
+templ Events(d EventsPageData) {
+	@Layout("Events") {
+		<div class="card">
+			<h2>Events</h2>
+			<form method="get" action="/events" class="live-filters">
+				<label>
+					host_id
+					<input type="text" name="host_id" value={ d.Filter.HostID } placeholder="UUID"/>
+				</label>
+				<label>
+					class_uid
+					<input type="text" name="class_uid" value={ d.Filter.ClassUID } placeholder="1007 / 1001 / 4001 / 2004"/>
+				</label>
+				<label>
+					severity ≥
+					<input type="text" name="severity_id" value={ d.Filter.SeverityID } placeholder="1–6"/>
+				</label>
+				<label>
+					since
+					<input type="text" name="since" value={ d.Filter.Since } placeholder="RFC3339"/>
+				</label>
+				<label>
+					until
+					<input type="text" name="until" value={ d.Filter.Until } placeholder="RFC3339"/>
+				</label>
+				<button type="submit">Apply</button>
+			</form>
+
+			if len(d.Rows) == 0 {
+				<p class="muted">No events match.</p>
+			} else {
+				<table class="events-table">
+					<thead>
+						<tr>
+							<th>observed_at</th>
+							<th>class</th>
+							<th>sev</th>
+							<th>host_id</th>
+							<th>summary</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, row := range d.Rows {
+							<tr>
+								<td><a href={ templ.SafeURL(detailHref(row.ClassUID, row.EventID)) }>{ formatTime(row.ObservedAt) }</a></td>
+								<td>{ classLabel(row.ClassUID) }</td>
+								<td>{ severityLabel(row.SeverityID) }</td>
+								<td class="muted">{ row.HostID }</td>
+								<td><code>{ row.Summary }</code></td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+
+			if d.NextCursor != "" {
+				<p>
+					<a href={ templ.SafeURL(nextPageURL(d.Filter, d.NextCursor)) }>Next page →</a>
+				</p>
+			}
+		</div>
+	}
+}
+
+// nextPageURL preserves the current filter when paginating forward —
+// the cursor is the only value that changes between page requests.
+func nextPageURL(f EventsFilter, cursor string) string {
+	q := "/events?cursor=" + cursor
+	if f.HostID != "" {
+		q += "&host_id=" + f.HostID
+	}
+	if f.ClassUID != "" {
+		q += "&class_uid=" + f.ClassUID
+	}
+	if f.SeverityID != "" {
+		q += "&severity_id=" + f.SeverityID
+	}
+	if f.Since != "" {
+		q += "&since=" + f.Since
+	}
+	if f.Until != "" {
+		q += "&until=" + f.Until
+	}
+	return q
+}
+
+// EventDetail is the per-event drill-down view.
+templ EventDetail(d EventDetailData) {
+	@Layout("Event " + d.Event.EventID) {
+		<div class="card">
+			<h2>{ classLabel(d.Event.ClassUID) } event</h2>
+			<dl class="kv">
+				<dt>event_id</dt><dd><code>{ d.Event.EventID }</code></dd>
+				<dt>host_id</dt><dd><code>{ d.Event.HostID }</code></dd>
+				<dt>class_uid</dt><dd>{ strconv.FormatUint(uint64(d.Event.ClassUID), 10) } ({ classLabel(d.Event.ClassUID) })</dd>
+				<dt>severity</dt><dd>{ severityLabel(d.Event.SeverityID) }</dd>
+				<dt>observed_at</dt><dd>{ formatTime(d.Event.ObservedAt) }</dd>
+				<dt>collected_at</dt><dd>{ formatTime(d.Event.CollectedAt) }</dd>
+			</dl>
+			<h3>Summary</h3>
+			<pre class="event-summary">{ d.Event.Summary }</pre>
+			<h3>Raw OCSF</h3>
+			<pre class="event-raw">{ d.Event.RawPretty }</pre>
+		</div>
+	}
+}
