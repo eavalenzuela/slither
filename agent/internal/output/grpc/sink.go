@@ -46,6 +46,11 @@ type Options struct {
 	// bufconn-backed dial options here; production leaves it nil and
 	// the sink builds TLS + a standard dialer.
 	DialOptions []grpc.DialOption
+
+	// OnRuleSet, when non-nil, is called for every server-pushed
+	// RuleSet (Phase 2 §4.1 #39). Production wires this to
+	// ruleengine.Engine.ReplaceRules; tests inject a recorder.
+	OnRuleSet func(*pb.RuleSet)
 }
 
 // Sink is the gRPC Session-stream output. Implements
@@ -200,17 +205,19 @@ func (s *Sink) runSession(ctx context.Context, client pb.AgentServiceClient) err
 	if err != nil {
 		return err
 	}
-	// Server may send control messages back (RuleSet, etc.); a receive
-	// goroutine keeps the half-stream drained so the server can proceed.
-	// #39 will wire RuleSet handling; for now we discard.
+	// Server may send control messages back (RuleSet today, hunt
+	// queries + response requests in later phases). A receive goroutine
+	// keeps the half-stream drained and dispatches RuleSet to the
+	// configured callback (#39 wires Engine.ReplaceRules).
 	recvErr := make(chan error, 1)
 	go func() {
 		for {
-			_, err := stream.Recv()
+			msg, err := stream.Recv()
 			if err != nil {
 				recvErr <- err
 				return
 			}
+			s.handleServerMessage(msg)
 		}
 	}()
 
@@ -242,6 +249,20 @@ func (s *Sink) runSession(ctx context.Context, client pb.AgentServiceClient) err
 				return err
 			}
 			s.telem.IncHeartbeatSent()
+		}
+	}
+}
+
+// handleServerMessage dispatches one ServerMessage. RuleSet pushes
+// fan into the configured OnRuleSet callback; other kinds are
+// observational today.
+func (s *Sink) handleServerMessage(msg *pb.ServerMessage) {
+	if msg == nil {
+		return
+	}
+	if rs, ok := msg.GetKind().(*pb.ServerMessage_RuleSet); ok {
+		if s.opts.OnRuleSet != nil && rs.RuleSet != nil {
+			s.opts.OnRuleSet(rs.RuleSet)
 		}
 	}
 }

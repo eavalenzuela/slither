@@ -1,12 +1,11 @@
-// Phase 2 §4.1 task #37: AgentService.Session on the mTLS listener.
-// Authenticated by the listener's tls.RequireAndVerifyClientCert; the
-// handler reads the host_id from the verified peer cert's Subject.CN
-// rather than trusting the wire fields, then demuxes ClientMessage
-// kinds onto the ingest bus and the Postgres host-state writer.
-//
-// ServerMessage send-side stays mute until #39 wires RuleSet
-// distribution; the bidi stream is held open so future control pushes
-// don't require an extra round trip.
+// Phase 2 §4.1 task #37 (events) + #39 (rule push): AgentService.Session
+// on the mTLS listener. Authenticated by the listener's
+// tls.RequireAndVerifyClientCert; the handler reads the host_id from
+// the verified peer cert's Subject.CN rather than trusting the wire
+// fields, then demuxes ClientMessage kinds onto the ingest bus and the
+// Postgres host-state writer. The send half subscribes to a control.Hub
+// (when non-nil) and pushes RuleSet ServerMessages on every update;
+// initial RuleSet is delivered synchronously by the hub at Subscribe.
 
 package grpcserv
 
@@ -15,6 +14,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/peer"
@@ -26,6 +26,14 @@ import (
 	"github.com/t3rmit3/slither/server/internal/telemetry"
 )
 
+// RuleHub is the dependency the Session handler needs from the control
+// package. Defining a local interface avoids a server→control import
+// cycle once #41 wires the console which also talks to the hub.
+type RuleHub interface {
+	Subscribe(name string) <-chan *pb.RuleSet
+	Unsubscribe(name string)
+}
+
 // SessionService implements AgentService.Session. It embeds
 // UnimplementedAgentServiceServer so it satisfies AgentServiceServer
 // with Enroll left unimplemented — the two halves of AgentService run
@@ -35,9 +43,10 @@ import (
 type SessionService struct {
 	pb.UnimplementedAgentServiceServer
 
-	Store *pg.Store
-	Bus   *ingest.Bus
-	Telem *telemetry.Counters
+	Store   *pg.Store
+	Bus     *ingest.Bus
+	Telem   *telemetry.Counters
+	RuleHub RuleHub // optional; nil disables rule push
 
 	// PeerHostIDExtractor is overridable for tests that route through
 	// bufconn without real client certs. Production leaves it nil and
@@ -86,6 +95,25 @@ func (s *SessionService) Session(stream pb.AgentService_SessionServer) error {
 	s.Telem.SessionOpened()
 	defer s.Telem.SessionClosed()
 
+	// Send half: a single goroutine owns stream.Send. gRPC stream.Send
+	// is NOT concurrent-safe, which is why we do not call it from the
+	// Recv goroutine even on heartbeat/ack paths. The send goroutine
+	// only exits when its context is done; the Recv loop drives that
+	// by cancelling sendCtx on its own return.
+	sendCtx, cancelSend := context.WithCancel(ctx)
+	var sendWG sync.WaitGroup
+	if s.RuleHub != nil {
+		sendWG.Add(1)
+		go func() {
+			defer sendWG.Done()
+			s.runSendLoop(sendCtx, hostID, stream)
+		}()
+	}
+	defer func() {
+		cancelSend()
+		sendWG.Wait()
+	}()
+
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
@@ -95,6 +123,36 @@ func (s *SessionService) Session(stream pb.AgentService_SessionServer) error {
 			return err
 		}
 		s.handle(ctx, hostID, msg)
+	}
+}
+
+// runSendLoop subscribes to the rule hub for this session and pushes
+// every RuleSet it receives on the stream. Exits when sendCtx is done
+// or stream.Send returns an error (broken transport — Recv will see it
+// next read and tear down).
+func (s *SessionService) runSendLoop(sendCtx context.Context, hostID string, stream pb.AgentService_SessionServer) {
+	subName := "session:" + hostID
+	updates := s.RuleHub.Subscribe(subName)
+	defer s.RuleHub.Unsubscribe(subName)
+
+	for {
+		select {
+		case <-sendCtx.Done():
+			return
+		case rs, ok := <-updates:
+			if !ok {
+				return
+			}
+			if rs == nil {
+				continue
+			}
+			if err := stream.Send(&pb.ServerMessage{
+				Kind: &pb.ServerMessage_RuleSet{RuleSet: rs},
+			}); err != nil {
+				return
+			}
+			s.Telem.IncRulesetsPushed()
+		}
 	}
 }
 

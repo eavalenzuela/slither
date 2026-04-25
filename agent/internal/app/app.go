@@ -14,11 +14,13 @@ import (
 	"github.com/t3rmit3/slither/agent/internal/config"
 	"github.com/t3rmit3/slither/agent/internal/enricher"
 	"github.com/t3rmit3/slither/agent/internal/output"
+
 	grpcsink "github.com/t3rmit3/slither/agent/internal/output/grpc"
 	"github.com/t3rmit3/slither/agent/internal/ruleengine"
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
 	"github.com/t3rmit3/slither/pkg/ocsf"
 	"github.com/t3rmit3/slither/pkg/version"
+	pb "github.com/t3rmit3/slither/proto/gen/slither/v1"
 )
 
 // Run assembles every stage described in IMPLEMENTATION.md §3.1 and blocks
@@ -51,7 +53,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	}
 	eng := ruleengine.New(rules, telem)
 
-	sink, err := newSink(cfg, telem)
+	sink, err := newSink(cfg, telem, eng)
 	if err != nil {
 		return fmt.Errorf("app: output sink: %w", err)
 	}
@@ -142,8 +144,9 @@ func isCancelled(err error, ctx context.Context) bool {
 // for dev + scenario tests; "grpc" opens a long-lived Session to the
 // server. The grpc sink needs host_id on disk (written by the Enroll
 // flow in #36) — a missing or empty file is a startup error, not a
-// silent degradation.
-func newSink(cfg *config.Config, telem *telemetry.Counters) (output.Sink, error) {
+// silent degradation. eng is wired in so the sink's ServerMessage
+// receiver can apply server-pushed RuleSets via Engine.ReplaceRules.
+func newSink(cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engine) (output.Sink, error) {
 	switch cfg.Output.Kind {
 	case "stdout", "":
 		return output.NewStdoutJSONL(os.Stdout), nil
@@ -158,9 +161,28 @@ func newSink(cfg *config.Config, telem *telemetry.Counters) (output.Sink, error)
 			HeartbeatInterval: g.HeartbeatInterval,
 			BufferSize:        g.BufferSize,
 			AgentVersion:      version.Version,
+			OnRuleSet:         applyRuleSetTo(eng),
 		}, telem)
 	}
 	return nil, fmt.Errorf("unknown output.kind %q", cfg.Output.Kind)
+}
+
+// applyRuleSetTo returns a callback that compiles a server-pushed
+// RuleSet and swaps it into the running engine. Compile errors on
+// individual rules are silently skipped so a single bad rule from the
+// server can't take all rules offline; the surviving rules ship.
+func applyRuleSetTo(eng ruleengine.Engine) func(*pb.RuleSet) {
+	return func(rs *pb.RuleSet) {
+		compiled, skipped, err := compileRuleSet(rs)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "agent: ruleset apply: %v\n", err)
+			return
+		}
+		if skipped > 0 {
+			fmt.Fprintf(os.Stderr, "agent: ruleset apply: %d rule(s) skipped (compile/version mismatch)\n", skipped)
+		}
+		eng.ReplaceRules(compiled)
+	}
 }
 
 // deviceIdentity builds the OCSF Device stamp used in every emitted event.
