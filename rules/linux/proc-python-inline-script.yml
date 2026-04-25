@@ -1,0 +1,37 @@
+title: Python inline script with suspicious payload tokens
+id: 8b7c4d00-0001-4000-8000-000000000014
+status: experimental
+description: |
+  python / python2 / python3 invoked with -c whose inline script carries
+  tokens commonly seen in reverse-shells, in-memory loaders, or staged
+  payloads (raw socket creation, pty.spawn, dup2 redirection, b64decode,
+  `__import__('os')`, /dev/tcp). Bare `python -c` is too noisy on managed
+  hosts (cloud-init, ansible fact gathering, dpkg postinsts); the
+  conjunction with these tokens is the actual signal. T1059.006 (LOLBAS).
+level: high
+tags:
+  - attack.execution
+  - attack.t1059.006
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  python_dash_c:
+    Image|endswith:
+      - /python
+      - /python2
+      - /python3
+    CommandLine|contains:
+      - ' -c '
+  suspicious_tokens:
+    CommandLine|contains:
+      - 'socket.socket('
+      - 'pty.spawn'
+      - 'os.dup2'
+      - 'b64decode'
+      - "__import__('os'"
+      - '__import__("os"'
+      - '/dev/tcp/'
+      - 'connect(("'
+      - "connect(('"
+  condition: python_dash_c and suspicious_tokens

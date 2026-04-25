@@ -1,0 +1,49 @@
+title: Process executed from world-writable staging directory
+id: 8b7c4d00-0001-4000-8000-000000000015
+status: experimental
+description: |
+  A binary or script located under a world-writable staging directory
+  (/tmp, /var/tmp, /dev/shm) was executed by a non-package-manager parent.
+  Classic dropper / staged-payload pattern (T1059.004 when interpreter-backed).
+  Excludes common benign exec-from-/tmp parents (dpkg/apt/rpm/dnf/snap/
+  flatpak, language-toolchain build runners, configuration-management
+  agents) and the `go-build` temp-binary path that `go test`/`go run`
+  routinely produce.
+level: high
+tags:
+  - attack.execution
+  - attack.t1059.004
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  staging_dir:
+    Image|startswith:
+      - /tmp/
+      - /var/tmp/
+      - /dev/shm/
+  benign_parent:
+    ParentImage|endswith:
+      - /dpkg
+      - /apt
+      - /apt-get
+      - /unattended-upgrade
+      - /rpm
+      - /dnf
+      - /yum
+      - /snap
+      - /snapd
+      - /flatpak
+      - /go
+      - /pip
+      - /pip3
+      - /cargo
+      - /ansible
+      - /ansible-playbook
+      - /salt-call
+      - /salt-minion
+      - /chef-client
+      - /puppet
+  go_build_binary:
+    Image|contains: /go-build
+  condition: staging_dir and not (benign_parent or go_build_binary)
