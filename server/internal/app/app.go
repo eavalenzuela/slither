@@ -27,6 +27,7 @@ import (
 
 	pb "github.com/t3rmit3/slither/proto/gen/slither/v1"
 	"github.com/t3rmit3/slither/server/internal/config"
+	"github.com/t3rmit3/slither/server/internal/console"
 	"github.com/t3rmit3/slither/server/internal/control"
 	"github.com/t3rmit3/slither/server/internal/grpcserv"
 	"github.com/t3rmit3/slither/server/internal/ingest"
@@ -117,13 +118,22 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		return fmt.Errorf("app: grpc listen: %w", err)
 	}
 
-	// Console placeholder — #41 replaces this with the templ-rendered
-	// login page + auth middleware. Today it just answers a fixed
-	// status string so the compose healthcheck and operator curl can
-	// distinguish "server up" from "server crashed".
+	// Console — Phase 2 #41 onwards. chi router with templ views,
+	// scs/pgxstore session manager, argon2id auth.
+	sessionKey, err := console.LoadOrCreateSessionKey(cfg.Console.SessionKeyFile)
+	if err != nil {
+		_ = enrollLis.Close()
+		_ = sessionLis.Close()
+		return fmt.Errorf("app: session key: %w", err)
+	}
+	consoleSvc := console.New(console.Options{
+		Store:      pgStore,
+		Telem:      telem,
+		SessionKey: sessionKey,
+	})
 	consoleSrv := &http.Server{
 		Addr:              cfg.Listeners.Console,
-		Handler:           consoleHandler(),
+		Handler:           consoleSvc.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -224,20 +234,3 @@ func stopGRPC(ctx context.Context, srv *grpc.Server) {
 // ensure the tls import isn't dropped by future refactors (LoadServerKeyPair
 // returns tls.Certificate and is consumed by ServerMTLSConfig).
 var _ = tls.Certificate{}
-
-// consoleHandler returns the console placeholder router. #41 replaces
-// it with the templ-rendered login page + auth middleware. /healthz is
-// a stable contract used by the compose healthcheck and operator
-// monitoring.
-func consoleHandler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintln(w, "ok")
-	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = fmt.Fprintln(w, "slither console — Phase 2 login page lands in #41")
-	})
-	return mux
-}

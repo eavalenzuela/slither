@@ -1,0 +1,104 @@
+/* Phase 2 #41 console — minimal hand-written CSS. A pinned Tailwind
+   build will replace this in a polish pass; the class names below are
+   chosen to overlap Tailwind utilities so the templ files don't need
+   to change when that swap happens. */
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, sans-serif;
+    background: #0f1419;
+    color: #d6deeb;
+    line-height: 1.5;
+}
+
+a { color: #82aaff; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.layout {
+    display: flex;
+    min-height: 100vh;
+}
+
+.sidebar {
+    width: 220px;
+    background: #1d2733;
+    border-right: 1px solid #2c3a4a;
+    padding: 1rem;
+}
+
+.sidebar h1 {
+    font-size: 1rem;
+    margin: 0 0 1rem 0;
+    color: #c792ea;
+}
+
+.sidebar nav a {
+    display: block;
+    padding: 0.4rem 0.5rem;
+    border-radius: 4px;
+    color: #d6deeb;
+}
+
+.sidebar nav a:hover { background: #2c3a4a; text-decoration: none; }
+
+.main {
+    flex: 1;
+    padding: 2rem;
+    max-width: 1100px;
+}
+
+.card {
+    background: #1d2733;
+    border: 1px solid #2c3a4a;
+    border-radius: 6px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+h2 { color: #c792ea; margin-top: 0; }
+
+input[type=text], input[type=password] {
+    display: block;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    margin: 0.25rem 0 1rem 0;
+    background: #0f1419;
+    border: 1px solid #2c3a4a;
+    color: #d6deeb;
+    border-radius: 4px;
+    font-size: 1rem;
+}
+
+input:focus { outline: none; border-color: #82aaff; }
+
+button {
+    background: #82aaff;
+    color: #0f1419;
+    border: 0;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+button:hover { background: #a3c0ff; }
+
+.flash {
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 1rem;
+    border-radius: 4px;
+    background: #5f3a3a;
+    border: 1px solid #8a4d4d;
+    color: #ffd6d6;
+}
+
+.login-card {
+    max-width: 360px;
+    margin: 4rem auto;
+}
+
+.muted { color: #8a99b3; font-size: 0.9rem; }

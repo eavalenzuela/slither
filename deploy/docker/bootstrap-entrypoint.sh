@@ -44,4 +44,16 @@ slither-ch --dsn "$CH_DSN" migrate
 echo "[bootstrap] seeding admin user…"
 slither-db --dsn "$PG_DSN" bootstrap-admin
 
+# Generate a session key for the console once. The server runs in
+# distroless-nonroot which can't write to the volume; generating here
+# means the volume can stay :ro on the server side. Idempotent — leave
+# the existing key alone if it's there so a server restart doesn't
+# invalidate every operator's cookie.
+SESSION_KEY="$PKI_DIR/session.key"
+if [ ! -f "$SESSION_KEY" ]; then
+    echo "[bootstrap] minting session key at $SESSION_KEY"
+    head -c 64 /dev/urandom > "$SESSION_KEY"
+    chmod 0644 "$SESSION_KEY"
+fi
+
 echo "[bootstrap] done"

@@ -2,8 +2,10 @@ package pg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -31,3 +33,43 @@ func (s *Store) InsertUser(ctx context.Context, username, passwordHash string, r
 	}
 	return uuidString(id), nil
 }
+
+// User is the projection returned by GetUserByUsername. Id is hex-
+// formatted to match the rest of the pg helpers; consumers store it
+// in the session as the actor identifier on subsequent audit rows.
+type User struct {
+	ID           string
+	Username     string
+	PasswordHash string
+	Role         UserRole
+}
+
+// GetUserByUsername loads the row for username. Returns ErrUserNotFound
+// when the row is missing — callers fold both cases into a generic
+// "invalid credentials" response so timing-leak about which side of the
+// pair was wrong is not handed to clients.
+func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, error) {
+	var (
+		id   pgtype.UUID
+		role string
+		out  User
+	)
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, username, password_hash, role
+		FROM users
+		WHERE username = $1
+	`, username).Scan(&id, &out.Username, &out.PasswordHash, &role)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, ErrUserNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("pg.GetUserByUsername: %w", err)
+	}
+	out.ID = uuidString(id)
+	out.Role = UserRole(role)
+	return out, nil
+}
+
+// ErrUserNotFound is returned by GetUserByUsername when the row is
+// absent. Callers map this + bad-password to the same response.
+var ErrUserNotFound = errors.New("pg: user not found")

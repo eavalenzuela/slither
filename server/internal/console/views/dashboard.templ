@@ -1,0 +1,17 @@
+package views
+
+// Dashboard is the authenticated landing page. Phase 2 #41 ships a
+// placeholder card; #42 adds the host inventory summary, #44 adds an
+// open-alerts widget.
+templ Dashboard(d DashboardData) {
+	@Layout("Dashboard") {
+		<div class="card">
+			<h2>Welcome, { d.Username }</h2>
+			<p class="muted">Role: { string(d.Role) }</p>
+			<p>The hosts, events, and alerts pages land in #42–#44.</p>
+		</div>
+		<form method="post" action="/logout">
+			<button type="submit">Sign out</button>
+		</form>
+	}
+}

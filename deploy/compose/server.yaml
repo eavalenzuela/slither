@@ -27,4 +27,6 @@ mtls:
   server_key:  /etc/slither/pki/server.key
 
 console:
+  # Bootstrap container mints this into the shared pki volume so the
+  # server image can keep its volume mount read-only.
   session_key_file: /etc/slither/pki/session.key

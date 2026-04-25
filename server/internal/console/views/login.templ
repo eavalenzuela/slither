@@ -1,0 +1,30 @@
+package views
+
+// Login is the unauthenticated landing page. Submits to POST /login
+// which sets a session cookie on success and redirects to /dashboard.
+templ Login(d LoginData) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>Login — slither</title>
+			<link rel="stylesheet" href="/static/app.css"/>
+		</head>
+		<body>
+			<div class="card login-card">
+				<h2>Sign in</h2>
+				if d.Flash != "" {
+					<div class="flash">{ d.Flash }</div>
+				}
+				<form method="post" action="/login">
+					<label for="username">Username</label>
+					<input id="username" name="username" type="text" autofocus autocomplete="username"/>
+					<label for="password">Password</label>
+					<input id="password" name="password" type="password" autocomplete="current-password"/>
+					<button type="submit">Sign in</button>
+				</form>
+			</div>
+		</body>
+	</html>
+}
