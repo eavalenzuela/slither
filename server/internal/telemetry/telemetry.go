@@ -20,6 +20,9 @@ type Counters struct {
 	enrollSuccess   atomic.Uint64
 	enrollRejected  atomic.Uint64
 	sessionsActive  atomic.Int64
+	sessionsClosed  atomic.Uint64
+	heartbeats      atomic.Uint64
+	authnFailures   atomic.Uint64
 }
 
 // NewCounters returns a zero-valued Counters.
@@ -55,7 +58,17 @@ func (c *Counters) IncEnrollRejected() { c.enrollRejected.Add(1) }
 
 // SessionOpened / SessionClosed track in-flight agent Sessions.
 func (c *Counters) SessionOpened() { c.sessionsActive.Add(1) }
-func (c *Counters) SessionClosed() { c.sessionsActive.Add(-1) }
+func (c *Counters) SessionClosed() {
+	c.sessionsActive.Add(-1)
+	c.sessionsClosed.Add(1)
+}
+
+// IncHeartbeat — Session handler received and applied one Heartbeat.
+func (c *Counters) IncHeartbeat() { c.heartbeats.Add(1) }
+
+// IncAuthnFailure — Session refused a stream (missing peer cert,
+// host_id parse error, host_id not in DB, ...).
+func (c *Counters) IncAuthnFailure() { c.authnFailures.Add(1) }
 
 // Snapshot captures the current counter values.
 type Snapshot struct {
@@ -68,6 +81,9 @@ type Snapshot struct {
 	EnrollSuccess   uint64
 	EnrollRejected  uint64
 	SessionsActive  int64
+	SessionsClosed  uint64
+	Heartbeats      uint64
+	AuthnFailures   uint64
 }
 
 // Snapshot returns a point-in-time view of the counters.
@@ -82,5 +98,8 @@ func (c *Counters) Snapshot() Snapshot {
 		EnrollSuccess:   c.enrollSuccess.Load(),
 		EnrollRejected:  c.enrollRejected.Load(),
 		SessionsActive:  c.sessionsActive.Load(),
+		SessionsClosed:  c.sessionsClosed.Load(),
+		Heartbeats:      c.heartbeats.Load(),
+		AuthnFailures:   c.authnFailures.Load(),
 	}
 }
