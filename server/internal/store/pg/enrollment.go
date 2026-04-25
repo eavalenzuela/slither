@@ -127,6 +127,103 @@ func (s *Store) ClaimEnrollmentToken(
 	}, nil
 }
 
+// EnrollmentTokenRow is the projection returned by ListEnrollmentTokens.
+// HostnameHint is exposed as a value (empty string when NULL) so the
+// template renders trivially. Status is derived in Go from the
+// expires_at + used_at columns rather than as a CASE in SQL — keeps
+// the source of truth in one place.
+type EnrollmentTokenRow struct {
+	ID           string
+	HostnameHint string
+	CreatedBy    string
+	CreatedAt    time.Time
+	ExpiresAt    time.Time
+	UsedAt       *time.Time
+	UsedByHost   string
+}
+
+// ListEnrollmentTokens returns every enrollment_tokens row, newest
+// first. Used + expired rows are kept so operators can see audit
+// trail at a glance; Phase 3 may add filters.
+func (s *Store) ListEnrollmentTokens(ctx context.Context) ([]EnrollmentTokenRow, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, COALESCE(hostname_hint, ''), created_by,
+		       created_at, expires_at, used_at,
+		       COALESCE(used_by_host::text, '')
+		FROM enrollment_tokens
+		ORDER BY created_at DESC
+		LIMIT 200
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("pg.ListEnrollmentTokens: %w", err)
+	}
+	defer rows.Close()
+
+	var out []EnrollmentTokenRow
+	for rows.Next() {
+		var (
+			r       EnrollmentTokenRow
+			id      pgtype.UUID
+			created pgtype.UUID
+			usedAt  pgtype.Timestamptz
+		)
+		if err := rows.Scan(&id, &r.HostnameHint, &created,
+			&r.CreatedAt, &r.ExpiresAt, &usedAt, &r.UsedByHost); err != nil {
+			return nil, fmt.Errorf("pg.ListEnrollmentTokens: scan: %w", err)
+		}
+		r.ID = uuidString(id)
+		r.CreatedBy = uuidString(created)
+		if usedAt.Valid {
+			t := usedAt.Time
+			r.UsedAt = &t
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// RevokeEnrollmentToken sets used_at = now() on a still-unused token
+// so the Enroll RPC's atomic ClaimEnrollmentToken treats it as
+// already-burnt on the next attempt. Returns ErrTokenUsed if the
+// token has already been revoked or claimed; ErrTokenNotFound for
+// unknown IDs. Idempotent in the same shape as RevokeHost.
+func (s *Store) RevokeEnrollmentToken(ctx context.Context, tokenID, actorID string) error {
+	id, err := parseUUID(tokenID)
+	if err != nil {
+		return fmt.Errorf("pg.RevokeEnrollmentToken: parse id: %w", err)
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE enrollment_tokens
+		SET used_at = now()
+		WHERE id = $1 AND used_at IS NULL
+	`, id)
+	if err != nil {
+		return fmt.Errorf("pg.RevokeEnrollmentToken: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		// Either unknown or already used. The console maps both to
+		// "gone" so there's no information leak between the two.
+		var exists bool
+		if err := s.pool.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM enrollment_tokens WHERE id = $1)`, id,
+		).Scan(&exists); err != nil {
+			return fmt.Errorf("pg.RevokeEnrollmentToken: probe: %w", err)
+		}
+		if !exists {
+			return ErrTokenNotFound
+		}
+		return ErrTokenUsed
+	}
+	_ = s.LogAudit(ctx, AuditEntry{
+		ActorType:  ActorUser,
+		ActorID:    actorID,
+		Action:     "enrollment_token.revoke",
+		TargetKind: "enrollment_token",
+		TargetID:   tokenID,
+	})
+	return nil
+}
+
 // InsertEnrollmentToken is used by operators (#45 console flow) and tests
 // to create a token record. Plaintext is never sent or stored; callers
 // generate it, display once, pass the hash here.

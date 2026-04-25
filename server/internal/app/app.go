@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -132,6 +133,11 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		Bus:        bus,
 		ChStore:    chStore,
 		SessionKey: sessionKey,
+		// /enrollment-tokens (#45) renders this into the copy-paste
+		// command. Operators override per-deployment via the
+		// SLITHER_LISTENERS_ENROLL config + a public hostname; the
+		// listener bind alone is good enough for compose smoke.
+		DefaultEnrollServer: defaultEnrollServer(cfg.Listeners.Enroll),
 	})
 	consoleSrv := &http.Server{
 		Addr:              cfg.Listeners.Console,
@@ -236,3 +242,17 @@ func stopGRPC(ctx context.Context, srv *grpc.Server) {
 // ensure the tls import isn't dropped by future refactors (LoadServerKeyPair
 // returns tls.Certificate and is consumed by ServerMTLSConfig).
 var _ = tls.Certificate{}
+
+// defaultEnrollServer renders the listener bind into a host:port the
+// console UI can paste into a `slither-agent enroll --server …`
+// command. ":9444" → "<server>:9444" so operators see the placeholder
+// to substitute; bound IPs round-trip unchanged.
+func defaultEnrollServer(bind string) string {
+	if bind == "" {
+		return "<server>:9444"
+	}
+	if strings.HasPrefix(bind, ":") {
+		return "<server>" + bind
+	}
+	return bind
+}

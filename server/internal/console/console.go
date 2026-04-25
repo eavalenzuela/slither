@@ -35,25 +35,29 @@ import (
 // cookies and rotate to a new key file on startup if missing. Bus is
 // optional — pass it to enable the live-tail SSE page (#42); leaving
 // it nil hides the route. ChStore is optional — pass it to enable the
-// events search page (#43).
+// events search page (#43). DefaultEnrollServer is the host:port the
+// /enrollment-tokens page renders into the copy-paste enroll command
+// (#45); empty value falls back to "<server>:9444".
 type Options struct {
-	Store          *pg.Store
-	Telem          *telemetry.Counters
-	Bus            *ingest.Bus
-	ChStore        *ch.Store
-	SessionKey     []byte
-	SessionTimeout time.Duration
+	Store               *pg.Store
+	Telem               *telemetry.Counters
+	Bus                 *ingest.Bus
+	ChStore             *ch.Store
+	SessionKey          []byte
+	SessionTimeout      time.Duration
+	DefaultEnrollServer string
 }
 
 // Server is the chi.Router built around Options. New returns a stdlib
 // http.Handler ready to be plugged into app.Run's console listener.
 type Server struct {
-	store   *pg.Store
-	telem   *telemetry.Counters
-	bus     *ingest.Bus
-	chStore *ch.Store
-	sm      *scs.SessionManager
-	mux     *chi.Mux
+	store               *pg.Store
+	telem               *telemetry.Counters
+	bus                 *ingest.Bus
+	chStore             *ch.Store
+	sm                  *scs.SessionManager
+	mux                 *chi.Mux
+	defaultEnrollServer string
 }
 
 // New constructs the console router. Panics on misconfiguration — a
@@ -82,12 +86,13 @@ func New(opts Options) *Server {
 	// reverse proxy and should set this in a config wrapper later.
 
 	s := &Server{
-		store:   opts.Store,
-		telem:   opts.Telem,
-		bus:     opts.Bus,
-		chStore: opts.ChStore,
-		sm:      sm,
-		mux:     chi.NewRouter(),
+		store:               opts.Store,
+		telem:               opts.Telem,
+		bus:                 opts.Bus,
+		chStore:             opts.ChStore,
+		sm:                  sm,
+		mux:                 chi.NewRouter(),
+		defaultEnrollServer: opts.DefaultEnrollServer,
 	}
 	s.routes()
 	return s
@@ -136,6 +141,13 @@ func (s *Server) routes() {
 		r.Get("/hosts", s.hostsList)
 		r.With(s.RequireRole(pg.RoleAdmin)).
 			Post("/hosts/{host_id}/revoke", s.hostsRevoke)
+
+		// Enrollment-token UX (#45) — admin-only across the board.
+		r.With(s.RequireRole(pg.RoleAdmin)).Group(func(r chi.Router) {
+			r.Get("/enrollment-tokens", s.enrollmentTokensList)
+			r.Post("/enrollment-tokens", s.enrollmentTokensCreate)
+			r.Post("/enrollment-tokens/{token_id}/revoke", s.enrollmentTokensRevoke)
+		})
 	})
 }
 

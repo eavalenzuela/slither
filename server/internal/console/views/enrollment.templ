@@ -1,0 +1,100 @@
+package views
+
+// EnrollmentTokens renders /enrollment-tokens. The JustMinted block
+// shows the plaintext token + a copy-paste enroll command exactly
+// once — the next page render (or a refresh) sees an empty value
+// because the flash entry has already been popped.
+templ EnrollmentTokens(d EnrollmentTokensPageData) {
+	@Layout("Enrollment tokens") {
+		<div class="card">
+			<h2>Mint enrolment token</h2>
+			<form method="post" action="/enrollment-tokens" class="live-filters">
+				<label>
+					hostname_hint (optional)
+					<input type="text" name="hostname_hint" placeholder="agent-prod-01"/>
+				</label>
+				<label>
+					TTL (e.g. 1h, 24h)
+					<input type="text" name="ttl" value="1h" placeholder="1h"/>
+				</label>
+				<button type="submit">Mint</button>
+			</form>
+		</div>
+
+		if d.JustMinted != "" {
+			<div class="card token-flash">
+				<h2>New token — copy now, it will not be shown again</h2>
+				if d.JustMintedHint != "" {
+					<p class="muted">hostname_hint: <code>{ d.JustMintedHint }</code></p>
+				}
+				<p>Token plaintext:</p>
+				<pre class="event-summary">{ d.JustMinted }</pre>
+				<p>Run on the agent host:</p>
+				<pre class="event-raw">slither-agent enroll \
+    --server { d.DefaultServer } \
+    --token  { d.JustMinted } \
+    --ca-cert /var/lib/slither/server-ca.crt \
+    --state-dir /var/lib/slither</pre>
+			</div>
+		}
+
+		<div class="card">
+			<h2>Existing tokens</h2>
+			if len(d.Tokens) == 0 {
+				<p class="muted">No tokens minted yet.</p>
+			} else {
+				<table class="events-table">
+					<thead>
+						<tr>
+							<th>status</th>
+							<th>hostname_hint</th>
+							<th>created_at</th>
+							<th>expires_at</th>
+							<th>used_at</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, t := range d.Tokens {
+							{{ status := TokenRowStatus(d, t) }}
+							<tr>
+								<td><span class={ "host-status", "host-status-" + tokenStatusClass(status) }>{ string(status) }</span></td>
+								<td>
+									if t.HostnameHint == "" {
+										<span class="muted">—</span>
+									} else {
+										<code>{ t.HostnameHint }</code>
+									}
+								</td>
+								<td class="muted">{ FormatTimestamp(t.CreatedAt) }</td>
+								<td class="muted">{ FormatTimestamp(t.ExpiresAt) }</td>
+								<td class="muted">{ FormatOptionalTimestamp(t.UsedAt) }</td>
+								<td>
+									if status == TokenStatusActive {
+										<form method="post" action={ templ.SafeURL("/enrollment-tokens/" + t.ID + "/revoke") }>
+											<button type="submit" class="danger">Revoke</button>
+										</form>
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	}
+}
+
+// tokenStatusClass maps the token state to the host-status badge
+// palette so we don't have to ship a parallel CSS rule set.
+func tokenStatusClass(s TokenStatus) string {
+	switch s {
+	case TokenStatusActive:
+		return "online"
+	case TokenStatusUsed:
+		return "revoked"
+	case TokenStatusExpired:
+		return "offline"
+	}
+	return "unknown"
+}
