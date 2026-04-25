@@ -1,8 +1,11 @@
 // Command slither-agent runs the Linux endpoint agent.
 //
-// Phase 1 shape: wire every internal stage end-to-end under a cancellable
-// context. The individual stages are stubs today; each Phase 1 task fills
-// one in.
+// Two subcommands:
+//
+//   - slither-agent run    — the long-running daemon (default if no
+//     subcommand given, for backward compat with the systemd unit).
+//   - slither-agent enroll — first-run enrollment: trade an operator
+//     token for a per-host client cert and persist it to the state dir.
 package main
 
 import (
@@ -13,30 +16,56 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/t3rmit3/slither/agent/internal/app"
 	"github.com/t3rmit3/slither/agent/internal/config"
+	"github.com/t3rmit3/slither/agent/internal/enroll"
 	"github.com/t3rmit3/slither/pkg/version"
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := dispatch(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	configPath := flag.String("config", "/etc/slither/agent.yaml", "Path to agent YAML config")
-	showVersion := flag.Bool("version", false, "Print version and exit")
-	flag.Parse()
-
-	dirty := ""
-	if version.Modified() {
-		dirty = "+dirty"
+// dispatch routes top-level subcommands. A bare `slither-agent` (no
+// subcommand) is treated as `run` so existing systemd units keep
+// working without an ExecStart edit.
+func dispatch(args []string) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "run":
+			return runCmd(args[1:])
+		case "enroll":
+			return enrollCmd(args[1:])
+		case "-h", "--help", "help":
+			printUsage()
+			return nil
+		}
 	}
-	banner := fmt.Sprintf("slither-agent %s (%s%s)", version.Version, version.Revision(), dirty)
+	return runCmd(args)
+}
 
+func printUsage() {
+	fmt.Fprintln(os.Stderr, `usage: slither-agent <command> [flags]
+
+Commands:
+  run      Run the agent (default)
+  enroll   Enrol this host with the slither server`)
+}
+
+func runCmd(args []string) error {
+	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	configPath := fs.String("config", "/etc/slither/agent.yaml", "Path to agent YAML config")
+	showVersion := fs.Bool("version", false, "Print version and exit")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	banner := buildBanner()
 	if *showVersion {
 		fmt.Println(banner)
 		return nil
@@ -56,4 +85,47 @@ func run() error {
 		return fmt.Errorf("agent: %w", err)
 	}
 	return nil
+}
+
+func enrollCmd(args []string) error {
+	fs := flag.NewFlagSet("enroll", flag.ExitOnError)
+	server := fs.String("server", "", "Server address (host:port) running the enrollment listener")
+	token := fs.String("token", "", "Single-use enrollment token issued by an operator")
+	stateDir := fs.String("state-dir", "/var/lib/slither", "Directory to persist key + certs + host_id")
+	caCert := fs.String("ca-cert", "", "Pre-pinned CA cert PEM used to verify the server")
+	insecure := fs.Bool("insecure-skip-verify", false, "Skip server-cert verification (dev only)")
+	serverName := fs.String("server-name", "", "Override SNI hostname (defaults to host portion of --server)")
+	timeout := fs.Duration("timeout", 30*time.Second, "Overall RPC timeout")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+
+	res, err := enroll.Enroll(ctx, enroll.Options{
+		ServerAddr:         *server,
+		Token:              *token,
+		StateDir:           *stateDir,
+		CAPath:             *caCert,
+		InsecureSkipVerify: *insecure,
+		ServerName:         *serverName,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "enrolled host %s\n", res.HostID)
+	fmt.Fprintf(os.Stderr, "  key:     %s\n", res.KeyPath)
+	fmt.Fprintf(os.Stderr, "  cert:    %s\n", res.CertPath)
+	fmt.Fprintf(os.Stderr, "  ca:      %s\n", res.CAPath)
+	fmt.Fprintf(os.Stderr, "  host_id: %s\n", res.HostIDPath)
+	return nil
+}
+
+func buildBanner() string {
+	dirty := ""
+	if version.Modified() {
+		dirty = "+dirty"
+	}
+	return fmt.Sprintf("slither-agent %s (%s%s)", version.Version, version.Revision(), dirty)
 }

@@ -57,7 +57,52 @@ Then copy onto the target:
 sudo install -Dm0755 bin/slither-agent /usr/local/bin/slither-agent
 ```
 
-## 2. Write the config
+## 2. Enrol this host (server deployments only)
+
+Skip this step if `output.kind` will stay `stdout`. For `output.kind: grpc`
+the agent needs a per-host client cert before it can connect; `slither-agent
+enroll` trades a single-use operator token for one and persists the result
+under the configured state directory.
+
+Prerequisites:
+
+- An operator-issued enrollment token (see server console).
+- The server reachable on its enrollment port (default `:8443`).
+- The server's CA cert PEM, transported out-of-band (`scp`, config
+  management, ...). The agent pins this for the TLS handshake — accepting
+  the CA the server returns inline would defeat the verification.
+- `/var/lib/slither` exists and is writeable by the user running the
+  command (the systemd unit's `StateDirectory` matches this path).
+
+```bash
+sudo install -d -m0750 /var/lib/slither
+sudo install -m0644 /tmp/slither-ca.crt /var/lib/slither/server-ca.crt
+sudo slither-agent enroll \
+    --server slither.example.com:8443 \
+    --token  "$ENROLL_TOKEN" \
+    --ca-cert /var/lib/slither/server-ca.crt \
+    --state-dir /var/lib/slither
+```
+
+On success the command writes:
+
+| Path                          | Purpose                                |
+| ----------------------------- | -------------------------------------- |
+| `/var/lib/slither/client.key` | Agent private key (mode `0600`)        |
+| `/var/lib/slither/client.crt` | Signed client cert (mTLS to server)    |
+| `/var/lib/slither/ca.crt`     | CA cert returned by the server         |
+| `/var/lib/slither/host_id`    | Server-assigned host identifier        |
+
+Point the `output.grpc.*` fields in `agent.yaml` at these paths and the
+agent will mTLS to the server on next start. Tokens are single-use; a
+`FailedPrecondition: token_used` error means the token has already been
+redeemed and the operator must mint a new one.
+
+For dev / docker-compose against an ephemeral CA, pass
+`--insecure-skip-verify` instead of `--ca-cert`. Never use it against a
+production server.
+
+## 3. Write the config
 
 ```bash
 sudo install -d -m0755 /etc/slither /etc/slither/rules
@@ -103,7 +148,7 @@ Set them in a systemd drop-in (`/etc/systemd/system/slither-agent.service.d/over
 Environment=SLITHER_AGENT_LOG_LEVEL=debug
 ```
 
-## 3. Install the systemd unit
+## 4. Install the systemd unit
 
 ```bash
 sudo install -m0644 deploy/systemd/slither-agent.service \
@@ -122,7 +167,7 @@ journalctl -u slither-agent.service -f
 With `output.kind: stdout`, OCSF events land in the journal. Swap to
 `grpc` in Phase 2 once the server handshake exists.
 
-## 4. Reloading rules and file filters
+## 5. Reloading rules and file filters
 
 The agent handles `SIGHUP` as a hot reload for **rules + file-collector
 include/exclude paths**. Everything else (collectors, hashing pool,
@@ -138,7 +183,7 @@ If the reloaded config fails to parse or compile, the agent logs the
 error to stderr and keeps running with the previous config — it does not
 replace the live config on error.
 
-## 5. Uninstall
+## 6. Uninstall
 
 ```bash
 sudo systemctl disable --now slither-agent.service
