@@ -27,6 +27,7 @@ type DropFunc func(subscriber string)
 type Bus struct {
 	mu     sync.RWMutex
 	subs   map[string]chan *pb.Envelope
+	dropFn map[string]func() // optional per-subscriber drop callback
 	closed bool
 	onDrop DropFunc
 }
@@ -40,8 +41,27 @@ func NewBus(onDrop DropFunc) *Bus {
 	}
 	return &Bus{
 		subs:   make(map[string]chan *pb.Envelope),
+		dropFn: make(map[string]func()),
 		onDrop: onDrop,
 	}
+}
+
+// SetDropObserver registers a per-subscriber callback fired in
+// addition to the global onDrop whenever name's channel was full at
+// Publish time. Used by the live-tail SSE handler so each connection
+// surfaces its own drop count to its UI footer. Safe to call before
+// or after Subscribe; cleared automatically by Unsubscribe.
+func (b *Bus) SetDropObserver(name string, fn func()) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return
+	}
+	if fn == nil {
+		delete(b.dropFn, name)
+		return
+	}
+	b.dropFn[name] = fn
 }
 
 // Subscribe registers a new subscriber under name with a buffered channel
@@ -66,7 +86,8 @@ func (b *Bus) Subscribe(name string, capacity int) <-chan *pb.Envelope {
 	return ch
 }
 
-// Unsubscribe removes name, closing its channel.
+// Unsubscribe removes name, closing its channel and dropping any
+// drop-observer registered for it.
 func (b *Bus) Unsubscribe(name string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -74,10 +95,12 @@ func (b *Bus) Unsubscribe(name string) {
 		close(ch)
 		delete(b.subs, name)
 	}
+	delete(b.dropFn, name)
 }
 
 // Publish fans env out to every subscriber. Drops on a full subscriber
-// channel; the publisher is never blocked.
+// channel; the publisher is never blocked. Both the global onDrop and
+// any per-subscriber observer fire on a drop.
 func (b *Bus) Publish(env *pb.Envelope) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -86,6 +109,9 @@ func (b *Bus) Publish(env *pb.Envelope) {
 		case ch <- env:
 		default:
 			b.onDrop(name)
+			if fn := b.dropFn[name]; fn != nil {
+				fn()
+			}
 		}
 	}
 }
@@ -103,4 +129,5 @@ func (b *Bus) Close() {
 		close(ch)
 	}
 	b.subs = nil
+	b.dropFn = nil
 }

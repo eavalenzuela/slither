@@ -24,16 +24,20 @@ import (
 
 	"github.com/t3rmit3/slither/server/internal/console/static"
 	"github.com/t3rmit3/slither/server/internal/console/views"
+	"github.com/t3rmit3/slither/server/internal/ingest"
 	"github.com/t3rmit3/slither/server/internal/store/pg"
 	"github.com/t3rmit3/slither/server/internal/telemetry"
 )
 
 // Options bundle the dependencies the console needs. Store is required;
 // SessionKey is the 64-byte secret HMAC key used to sign session
-// cookies and rotate to a new key file on startup if missing.
+// cookies and rotate to a new key file on startup if missing. Bus is
+// optional — pass it to enable the live-tail SSE page (#42); leaving
+// it nil hides the route.
 type Options struct {
 	Store          *pg.Store
 	Telem          *telemetry.Counters
+	Bus            *ingest.Bus
 	SessionKey     []byte
 	SessionTimeout time.Duration
 }
@@ -43,6 +47,7 @@ type Options struct {
 type Server struct {
 	store *pg.Store
 	telem *telemetry.Counters
+	bus   *ingest.Bus
 	sm    *scs.SessionManager
 	mux   *chi.Mux
 }
@@ -75,6 +80,7 @@ func New(opts Options) *Server {
 	s := &Server{
 		store: opts.Store,
 		telem: opts.Telem,
+		bus:   opts.Bus,
 		sm:    sm,
 		mux:   chi.NewRouter(),
 	}
@@ -114,6 +120,10 @@ func (s *Server) routes() {
 		r.Use(s.requireAuth)
 		r.Get("/", redirectTo("/dashboard"))
 		r.Get("/dashboard", s.dashboard)
+		if s.bus != nil {
+			r.Get("/live", s.livePage)
+			r.Get("/live/stream", s.liveStream)
+		}
 	})
 }
 

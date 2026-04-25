@@ -129,6 +129,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	consoleSvc := console.New(console.Options{
 		Store:      pgStore,
 		Telem:      telem,
+		Bus:        bus,
 		SessionKey: sessionKey,
 	})
 	consoleSrv := &http.Server{

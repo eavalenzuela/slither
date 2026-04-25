@@ -1,0 +1,46 @@
+package views
+
+// LiveTailData currently holds nothing — filters live in URL query
+// params parsed by the SSE handler, not server-rendered. The struct
+// stays present so future fields (saved-filter dropdowns, etc.) plug
+// in without rewiring the handler.
+type LiveTailData struct{}
+
+// LiveTail is the operator's real-time event stream view. The page
+// opens an EventSource to /live/stream; the JS handles pause/resume
+// and a per-connection drop counter reported by the server via a
+// "drops" SSE event.
+templ LiveTail(d LiveTailData) {
+	@Layout("Live tail") {
+		<div class="card">
+			<h2>Live tail</h2>
+			<p class="muted">
+				Streams OCSF events from the ingest bus as they arrive. Filters
+				are advisory — they narrow what your tab sees, but other tabs
+				and the ClickHouse writer still receive every event.
+			</p>
+
+			<div id="filters" class="live-filters">
+				<label>
+					host_id
+					<input id="filter-host" type="text" placeholder="UUID or substring"/>
+				</label>
+				<label>
+					class_uid
+					<input id="filter-class" type="text" placeholder="1007 / 1001 / 4001 / 2004"/>
+				</label>
+				<label>
+					contains
+					<input id="filter-text" type="text" placeholder="raw substring"/>
+				</label>
+				<button id="apply" type="button">Apply</button>
+				<button id="pause" type="button">Pause</button>
+			</div>
+
+			<div id="status" class="muted live-status">disconnected</div>
+			<pre id="events" class="live-stream"></pre>
+			<div id="footer" class="muted live-footer">drops: <span id="drops">0</span></div>
+		</div>
+		<script src="/static/livetail.js"></script>
+	}
+}

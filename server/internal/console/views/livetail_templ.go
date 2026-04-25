@@ -8,10 +8,17 @@ package views
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-// Dashboard is the authenticated landing page. Phase 2 #41 ships a
-// placeholder card; #42 adds the host inventory summary, #44 adds an
-// open-alerts widget.
-func Dashboard(d DashboardData) templ.Component {
+// LiveTailData currently holds nothing — filters live in URL query
+// params parsed by the SSE handler, not server-rendered. The struct
+// stays present so future fields (saved-filter dropdowns, etc.) plug
+// in without rewiring the handler.
+type LiveTailData struct{}
+
+// LiveTail is the operator's real-time event stream view. The page
+// opens an EventSource to /live/stream; the JS handles pause/resume
+// and a per-connection drop counter reported by the server via a
+// "drops" SSE event.
+func LiveTail(d LiveTailData) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -44,39 +51,13 @@ func Dashboard(d DashboardData) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"card\"><h2>Welcome, ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var3 string
-			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(d.Username)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `dashboard.templ`, Line: 9, Col: 28}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</h2><p class=\"muted\">Role: ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var4 string
-			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(string(d.Role))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `dashboard.templ`, Line: 10, Col: 42}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</p><p>The events search, hosts, and alerts pages land in #43–#44.</p></div><form method=\"post\" action=\"/logout\"><button type=\"submit\">Sign out</button></form>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"card\"><h2>Live tail</h2><p class=\"muted\">Streams OCSF events from the ingest bus as they arrive. Filters are advisory — they narrow what your tab sees, but other tabs and the ClickHouse writer still receive every event.</p><div id=\"filters\" class=\"live-filters\"><label>host_id <input id=\"filter-host\" type=\"text\" placeholder=\"UUID or substring\"></label> <label>class_uid <input id=\"filter-class\" type=\"text\" placeholder=\"1007 / 1001 / 4001 / 2004\"></label> <label>contains <input id=\"filter-text\" type=\"text\" placeholder=\"raw substring\"></label> <button id=\"apply\" type=\"button\">Apply</button> <button id=\"pause\" type=\"button\">Pause</button></div><div id=\"status\" class=\"muted live-status\">disconnected</div><pre id=\"events\" class=\"live-stream\"></pre><div id=\"footer\" class=\"muted live-footer\">drops: <span id=\"drops\">0</span></div></div><script src=\"/static/livetail.js\"></script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Dashboard").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Live tail").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
