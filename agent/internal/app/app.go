@@ -171,7 +171,15 @@ func newSink(cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engin
 // RuleSet and swaps it into the running engine. Compile errors on
 // individual rules are silently skipped so a single bad rule from the
 // server can't take all rules offline; the surviving rules ship.
+//
+// A single-line stderr summary fires only when the rule count changes
+// between successive applies — the steady-state pushes (debounced
+// Refresh + 30s fallback poll) would otherwise spam every cycle. The
+// transition log is enough to diagnose the empty-RuleSet failure mode
+// (e.g. server-side compile rejected every row) caught during #46
+// validation.
 func applyRuleSetTo(eng ruleengine.Engine) func(*pb.RuleSet) {
+	lastCount := -1
 	return func(rs *pb.RuleSet) {
 		compiled, skipped, err := compileRuleSet(rs)
 		if err != nil {
@@ -180,6 +188,10 @@ func applyRuleSetTo(eng ruleengine.Engine) func(*pb.RuleSet) {
 		}
 		if skipped > 0 {
 			fmt.Fprintf(os.Stderr, "agent: ruleset apply: %d rule(s) skipped (compile/version mismatch)\n", skipped)
+		}
+		if len(compiled) != lastCount {
+			fmt.Fprintf(os.Stderr, "agent: ruleset apply: engine now running %d rule(s) (was %d)\n", len(compiled), lastCount)
+			lastCount = len(compiled)
 		}
 		eng.ReplaceRules(compiled)
 	}

@@ -555,6 +555,22 @@ Task numbering continues from Phase 1 (which closed at #30). Dependency graph:
 
 **Estimated effort:** 6–8 weeks for one person. The two biggest unknowns are the ClickHouse schema/query-shape tuning (#38 + #43) and the enrollment + CRL plumbing (#33/#34/#44 together); budget slack there.
 
+### 4.2 Phase 2 follow-ups (non-blocking)
+
+Issues surfaced during #46's local stand-up validation (see `docs/phase2-validation.md`). These are environment-agnostic — they don't depend on the multi-VM workload — and shouldn't gate Phase 2 closure. Land in the early-Phase-3 window.
+
+1. **#47 — Server-push ruleset apply: structured stderr log.** During #46 the agent's silent happy-path made it impossible to tell whether server-pushed RuleSets were reaching the engine, were empty, or were failing to compile. A diagnostic line was added under `applyRuleSetTo` that fires on rule-count transitions; promote it to a proper log call (when the agent gets a real logger — see #49) with fields for `rule_count`, `skipped_count`, `ruleset_version`. **Exit:** operator running `journalctl -u slither-agent` can see, on every transition, that the agent received N rules from the server.
+
+2. **#48 — Control-hub publish observability.** `server/internal/control` has zero logging today. Refresh, NOTIFY-driven re-fans, subscriber publish all happen silently. Add a single stderr line per `Refresh()` (`hub: refreshed N enabled rules (skipped K)`) and a counter exposed via telemetry for `RulesetsPublished` per subscriber. **Exit:** server log shows `hub: refreshed …` on every rule INSERT/UPDATE; `slither-server` telemetry snapshot includes per-subscriber publish counts.
+
+3. **#49 — Agent + server: structured logging facade.** Both binaries currently use raw `fmt.Fprintf(os.Stderr, …)` everywhere. The `agent.log_level` config knob is parsed and validated but doesn't actually gate any output. Wire a minimal `slog`-shaped facade so info/debug levels become meaningful. Don't over-engineer — small wrapper around `log/slog` with text handler is enough; structured fields, no JSON-by-default. **Exit:** `SLITHER_AGENT_LOG_LEVEL=debug` actually produces more output than info; the same on the server side.
+
+4. **#50 — Console UK/US spelling consistency.** Sidebar nav says "Enrolment" (UK) but the route is `/enrollment-tokens` (US). Pick UK throughout (matches the misspell config — see `project_toolchain.md`). Rename route to `/enrolment-tokens`, update handlers + templates. **Exit:** grep for `enrollment` in `server/internal/console/` returns zero hits; misspell linter reports clean.
+
+5. **#51 — Operator-facing rule push helper.** `docs/phase2-validation.md` walks the operator through INSERTing a Sigma rule via raw `psql -c`. Terminal autoindent silently produces tab-indented YAML which YAML-parses fine but Sigma compile rejects, leading to an empty RuleSet and a silent agent — a 30-minute debug rabbit hole during #46. Ship `scripts/insert-rule.sh <yaml-path>` (or equivalent psql `\set`-based one-liner) that takes a file path, validates the YAML compiles via `pkg/ruleast`, then UPDATEs/INSERTs via psql variable substitution — bypasses both terminal autoindent and shell-quoting hazards. Update the runbook to use it. **Exit:** the runbook's "push a rule" step is one command, no SQL prose.
+
+6. **#52 — Runbook: fix server-pushed rule reload log claim.** `docs/phase2-validation.md` §9 says "agent journal logs `reload: applied N rules` within ~1 s". That's the SIGHUP-driven local-config reload (`applyReload` at `agent/internal/app/app.go`) — not the server-push path (`applyRuleSetTo`), which is currently silent. Once #47 lands, update the runbook to point at the new line. **Exit:** runbook accurately tells the operator which log line to grep.
+
 ## 5. Phase 3 — Detection (bullet)
 
 **Goal:** full Sigma (not just subset), edge/server partitioning, alerts with flow graphs, bounded-stateful on edge.
