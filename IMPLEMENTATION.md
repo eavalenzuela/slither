@@ -592,8 +592,8 @@ Task numbering continues from Phase 2 (#46 + §4.2 follow-ups #47–#52). Locked
 - **Alert dedupe (#60):** per-rule setting, not a global default. Fast-retriggering rules carry signal; that signal is preserved by letting analysts tune the window per rule.
 - **D2 SVG cache (#64):** on-disk under `/var/lib/slither/graphs/` (matches the systemd unit's `StateDirectory=slither` pattern), in-memory LRU on top.
 - **#70 / #46 overlap:** the deferred Phase 2 #46 multi-host load test folds into #70's cloud-VM run — one stand-up, both criteria satisfied. The §4.1 #46 ✅ flip happens alongside the §5.1 #70 flip.
-- **IOC agent storage (#67):** *open* — see scoping question at end of §5.1.
-- **Stateful cold-start (#59):** *open* — see scoping question at end of §5.1.
+- **IOC agent storage (#67):** in-memory map keyed by feed_id. ~10 MB per 100k-entry feed, native Go map lookup, atomic pointer swap on reload. Restart blindness is bounded by the agent's reconnect window (seconds). mmap'd-on-disk and Bloom-filter alternatives explicitly deferred — mmap until restart blindness is measured to matter, Bloom until ADR-0019's FP-handling story is worked out (Phase 4+).
+- **Stateful cold-start (#59):** opt-in per rule, default off. Rules with `lookback: true` get a CH replay of their `timeframe` window at rule push; everything else starts with an empty window and warms up live. Re-examine the hybrid (always-on with a `max_cold_start_lookback` cap) in Phase 5 once CH query telemetry shows the real cost of always-on on production data — recorded as Phase 5 follow-up below.
 
 Dependency graph:
 
@@ -618,7 +618,7 @@ Dependency graph:
 
 6. **#58 — Server detection engine: stream subscriber + plan executor.** New `server/internal/detect/` package subscribes to the ingest bus (existing in-proc fan-out from #37) as one more subscriber, runs server-only Sigma plans against incoming OCSF events, emits internal `Finding` to a follow-on alert sink. Plan executor handles aggregations + temporal joins (`count() by …` + `near`) using a bounded in-memory window keyed off `(rule_id, group_key)`; window default 1 h, cap config-surfaced; eviction on time + on cardinality. Touches: new `server/internal/detect/{engine,window,plan}.go`, wired in `server/internal/app/app.go`. **Exit:** synthetic 100k-event stream triggers deterministic count-by-host alert; backpressure: slow detect drops + counters increment; ingest never blocks.
 
-7. **#59 — Detection engine: ClickHouse lookback for cold-start.** On boot or rule change, optionally backfill the window from CH for stateful rules whose `lookback` ≤ retention. Touches: new `server/internal/detect/lookback.go`, `server/internal/store/ch/`. **Exit:** rule added at T fires on events from T-window if already in CH. *Default behaviour pending scoping decision (see open question 3 below).*
+7. **#59 — Detection engine: ClickHouse lookback for cold-start.** On boot or rule change, backfill the window from CH for stateful rules with `lookback: true` in their YAML, provided `lookback ≤ retention`. Default is off — rules without the flag start with an empty window and warm up live; this protects CH from read amplification at every rule push and keeps surprise scans out of the operator's day. Touches: new `server/internal/detect/lookback.go`, `server/internal/store/ch/`, `pkg/ruleast/sigma.go` (parse the `lookback` flag). **Exit:** rule with `lookback: true` added at T fires on events from T-window if already in CH; rule without the flag starts cold; CH query budget is bounded by the rules-with-lookback set, not the full ruleset.
 
 8. **#60 — Alert sink: write findings to existing `alerts` table.** Detection engine `Finding` → INSERT into `alerts` (already shipped in #32 / `00006_alerts.sql` with `rule_uid`, `host_id`, `event_ids[]`, `severity`, `status`, `reason_code`, `assigned_to`, lifecycle timestamps — no new migration). Edge `DetectionFinding` events take the same path so edge + server alerts share schema + UI. Per-rule dedupe window: new column `rules.dedupe_window_secs` (NULL = no dedupe), keyed on `(rule_uid, host_id, dedupe_window)`. Touches: new `server/internal/detect/sink.go`, `server/internal/ingest/router.go`, new `server/internal/store/pg/alerts.go`, new `server/migrations/00012_rules_dedupe_window.sql`. **Exit:** server-rule + edge-rule fires both produce alerts row with `event_ids` populated; per-rule dedupe respects the column; rules with NULL window deduplicate not at all (fast-retriggering rules carry signal).
 
@@ -634,7 +634,7 @@ Dependency graph:
 
 14. **#66 — IOC feed: server-side store + classification gate.** New `server/internal/ioc/` + `iocs` Postgres table (id, kind ∈ FeedKind, entries stored as a single row per feed with `entries text[]`, capped at 100k per ADR-0018, enforced server-side on insert). Console: `/iocs` admin CRUD. Sigma compiler (#54) recognises `ioc:<feed_id>` references; if any feed exceeds 100k, classifies the rule server-only. Touches: new `server/internal/ioc/`, new `server/migrations/00011_iocs.sql`, new `server/internal/console/iocs/`, `pkg/ruleast/serverplan/` integration. **Exit:** 100k SHA256 feed admits, 100001 rejects; rule referencing oversized feed compiles server-only with the ADR predicate cited.
 
-15. **#67 — IOC feed: agent storage + push over RuleSet.** Agent receives `IocFeed` via existing `RuleSet.ioc_feeds` field (proto already has it — no wire change). Agent-side storage shape *pending scoping decision (see open question 2 below).* Compiler emits `iocMatch(feed_id, value)` AST nodes; runtime resolves O(1). Touches: new `agent/internal/ruleengine/ioc.go`, `pkg/ruleast/runtime.go`. **Exit:** integration test — push 50k-IP feed, fire rule on matching `network_connection`; eviction on feed update is atomic.
+15. **#67 — IOC feed: agent storage + push over RuleSet.** Agent receives `IocFeed` via existing `RuleSet.ioc_feeds` field (proto already has it — no wire change). Storage is an in-memory map keyed by `feed_id` → set of entries (`[32]byte` for SHA256, `uint32` for IPv4, `[16]byte` for IPv6). Compiler emits `iocMatch(feed_id, value)` AST nodes; runtime resolves O(1). Reload: build the new map off the hot path, atomic pointer swap; old map GCs when the last in-flight lookup returns. Memory budget: ~10 MB per 100k-entry feed, well inside the agent's footprint. Restart blindness is bounded by reconnect window (seconds); deemed acceptable for v1. Touches: new `agent/internal/ruleengine/ioc.go`, `pkg/ruleast/runtime.go`. **Exit:** integration test — push 50k-IP feed, fire rule on matching `network_connection`; eviction on feed update is atomic; `-race` clean across reload + lookup interleavings.
 
 16. **#68 — ClickHouse retention + cardinality tuning.** Activates §10.4. Set TTL on each `ocsf_*` table (default 30d; configurable), add materialised-column choices informed by Phase 2 query shapes, document in `docs/adr/0033-clickhouse-retention-v1.md`. Touches: `server/clickhouse/migrations/`, new ADR. **Exit:** TTL applied; rowcount stable under sustained 36k events/s for 7 days in a soak test.
 
@@ -653,10 +653,7 @@ Dependency graph:
 
 **Start here:** #53 → #54 → #56. #53 is a one-day ADR pinning the artefact contract so #54 doesn't iterate on shape. #54 is the longest single block and gates the entire detection-engine track (#55, #58–#60). #56 (edge bounded-stateful) starts in parallel once #53's AST shape locks — touches `agent/internal/ruleengine/` rather than `pkg/ruleast/sigma.go`; the two converge cleanly at #57.
 
-**Open scoping questions:**
-
-- **#67 IOC agent storage:** in-memory map vs mmap'd on-disk file vs Bloom filter. *Pending operator decision.*
-- **#59 stateful cold-start default:** opt-in per rule vs always-on for any rule with `timeframe` ≤ retention. *Pending operator decision.*
+**Phase 5 follow-up parked here for visibility:** once #68's CH retention is in place and #59's lookback path has shipped, re-examine whether the hybrid cold-start (always-on with a `max_cold_start_lookback` cap) is worth the complexity. Decision needs real query telemetry from a production-shaped CH — premature in Phase 3.
 
 ## 6. Phase 4 — Response (bullet)
 
@@ -678,6 +675,7 @@ Dependency graph:
 - SBOM generation: syft, attached to release.
 - `.deb` + `.rpm` packages (nfpm).
 - Hardening docs, threat model doc (`docs/threat-model.md`).
+- **Re-examine §5.1 #59 stateful cold-start hybrid.** Phase 3 ships opt-in-per-rule (`lookback: true` flag, default off) to keep CH read amplification predictable. Once Phase 4 + Phase 5 hardening produces real production-shaped CH query telemetry, decide whether the hybrid (always-on with a `max_cold_start_lookback` cap, default ~1 h) is worth the complexity vs operator UX win. Decision belongs here, not earlier — premature without telemetry.
 
 ## 8. Phase 6 — Extensions & Console Expansion (bullet)
 
