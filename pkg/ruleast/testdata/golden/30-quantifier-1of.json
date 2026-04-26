@@ -1,0 +1,35 @@
+{
+  "category": "process_creation",
+  "condition": "1 of sel_*",
+  "cost": 2,
+  "description": "Exercises the \"1 of \u003cprefix\u003e*\" quantifier — fires on any matching branch.",
+  "id": "8b7c4d00-0001-4000-8000-00000000001e",
+  "level": "low",
+  "selections": [
+    {
+      "fields": [
+        {
+          "field": "Image",
+          "op": "endswith",
+          "values": [
+            "/bin/sh"
+          ]
+        }
+      ],
+      "name": "sel_a"
+    },
+    {
+      "fields": [
+        {
+          "field": "Image",
+          "op": "endswith",
+          "values": [
+            "/bin/bash"
+          ]
+        }
+      ],
+      "name": "sel_b"
+    }
+  ],
+  "title": "1 of selection_*"
+}

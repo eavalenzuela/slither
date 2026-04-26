@@ -1,0 +1,13 @@
+title: 1 of selection_*
+id: 8b7c4d00-0001-4000-8000-00000000001e
+description: Exercises the "1 of <prefix>*" quantifier — fires on any matching branch.
+level: low
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  sel_a:
+    Image|endswith: /bin/sh
+  sel_b:
+    Image|endswith: /bin/bash
+  condition: 1 of sel_*

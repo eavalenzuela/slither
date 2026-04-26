@@ -1,0 +1,15 @@
+title: All of them
+id: 8b7c4d00-0001-4000-8000-00000000001f
+description: Exercises "all of them" — every selection must match.
+level: medium
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  exec_tool:
+    Image|endswith: /usr/bin/curl
+  upload_flag:
+    CommandLine|contains: '--upload-file'
+  remote_target:
+    CommandLine|contains: 'http'
+  condition: all of them

@@ -154,17 +154,45 @@ func splitDetection(det map[string]any) (selections map[string]any, condition st
 }
 
 // compileSelection turns one selection YAML body into a Selection AST.
-// Sigma selections accept two shapes: a map[string]any, or a list of maps
-// (implicit OR of AND-maps). Phase 1 accepts only the map form; the list
-// form gets a rejection that cites the rule.
+// Sigma selections accept two shapes:
+//
+//   - map[string]any: a single branch where keys AND together.
+//   - []any of maps: one branch per list element, branches OR together.
+//
+// Both shapes feed the same Selection — the difference is whether
+// Selection.Branches has length 1 or N.
 func compileSelection(name string, body any) (*Selection, error) {
-	m, ok := body.(map[string]any)
-	if !ok {
-		if _, isList := body.([]any); isList {
-			return nil, fmt.Errorf("list-of-maps selection form not supported in Phase 1")
+	switch v := body.(type) {
+	case map[string]any:
+		preds, err := compileBranch(v)
+		if err != nil {
+			return nil, err
 		}
-		return nil, fmt.Errorf("must be a map of field -> value-or-list; got %T", body)
+		return &Selection{Name: name, Branches: [][]FieldPredicate{preds}}, nil
+	case []any:
+		if len(v) == 0 {
+			return nil, fmt.Errorf("empty list-of-maps selection")
+		}
+		branches := make([][]FieldPredicate, 0, len(v))
+		for i, elem := range v {
+			m, ok := elem.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("list-of-maps entry %d is %T, want map", i, elem)
+			}
+			preds, err := compileBranch(m)
+			if err != nil {
+				return nil, fmt.Errorf("list-of-maps entry %d: %w", i, err)
+			}
+			branches = append(branches, preds)
+		}
+		return &Selection{Name: name, Branches: branches}, nil
 	}
+	return nil, fmt.Errorf("must be a map or list-of-maps; got %T", body)
+}
+
+// compileBranch turns one map body into a single branch's worth of
+// FieldPredicates (AND across keys).
+func compileBranch(m map[string]any) ([]FieldPredicate, error) {
 	preds := make([]FieldPredicate, 0, len(m))
 	for rawKey, rawVal := range m {
 		field, op, mods, err := parseFieldKey(rawKey)
@@ -177,7 +205,7 @@ func compileSelection(name string, body any) (*Selection, error) {
 		}
 		preds = append(preds, pred)
 	}
-	return &Selection{Name: name, Fields: preds}, nil
+	return preds, nil
 }
 
 // parseFieldKey splits "Image|endswith|all" into ("Image", OpEndsWith,

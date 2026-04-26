@@ -1,0 +1,48 @@
+{
+  "category": "process_creation",
+  "condition": "selection",
+  "cost": 4,
+  "description": "Exercises the list-of-maps selection form — branches OR together.",
+  "id": "8b7c4d00-0001-4000-8000-00000000001d",
+  "level": "low",
+  "selections": [
+    {
+      "branches": [
+        [
+          {
+            "field": "CommandLine",
+            "op": "contains",
+            "values": [
+              "-i"
+            ]
+          },
+          {
+            "field": "Image",
+            "op": "endswith",
+            "values": [
+              "/bin/bash"
+            ]
+          }
+        ],
+        [
+          {
+            "field": "CommandLine",
+            "op": "contains",
+            "values": [
+              "-c"
+            ]
+          },
+          {
+            "field": "Image",
+            "op": "endswith",
+            "values": [
+              "/bin/sh"
+            ]
+          }
+        ]
+      ],
+      "name": "selection"
+    }
+  ],
+  "title": "List-of-maps selection (OR of AND-maps)"
+}

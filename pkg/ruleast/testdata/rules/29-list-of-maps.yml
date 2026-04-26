@@ -1,0 +1,14 @@
+title: List-of-maps selection (OR of AND-maps)
+id: 8b7c4d00-0001-4000-8000-00000000001d
+description: Exercises the list-of-maps selection form — branches OR together.
+level: low
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    - Image|endswith: /bin/bash
+      CommandLine|contains: '-i'
+    - Image|endswith: /bin/sh
+      CommandLine|contains: '-c'
+  condition: selection

@@ -165,25 +165,47 @@ type Env interface {
 	Lookup(field string) ([]string, bool)
 }
 
-// Selection is a named conjunction of field predicates. Sigma's selection
-// semantics: within a map, keys AND; the value side (scalar or list) ORs.
+// Selection is a named OR-of-AND group of field predicates. Sigma's
+// selection semantics:
+//
+//   - A map body produces a single branch where keys AND together.
+//   - A list-of-maps body (added in §5.1 #54c) produces one branch per
+//     list element; branches OR together. Each map within the list
+//     keeps the standard keys-AND semantics.
+//
+// Single-branch selections (the common case) keep len(Branches) == 1
+// so the golden output stays identical to pre-#54c.
 type Selection struct {
-	Name   string
-	Fields []FieldPredicate
+	Name     string
+	Branches [][]FieldPredicate
 }
 
-// Eval returns true when every FieldPredicate matches.
+// Eval returns true when at least one branch's predicates all match.
 func (s *Selection) Eval(env Env) bool {
-	for i := range s.Fields {
-		if !s.Fields[i].Eval(env) {
-			return false
+	for _, branch := range s.Branches {
+		all := true
+		for i := range branch {
+			if !branch[i].Eval(env) {
+				all = false
+				break
+			}
+		}
+		if all {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
-// Cost reports the number of predicates in the selection.
-func (s *Selection) Cost() int { return len(s.Fields) }
+// Cost reports the total number of predicates across every branch —
+// the engine uses this to order rules cheap-first.
+func (s *Selection) Cost() int {
+	n := 0
+	for _, b := range s.Branches {
+		n += len(b)
+	}
+	return n
+}
 
 // FieldPredicate is a single "field[|modifier...]: value-or-list" entry.
 // Encoding modifiers (base64, utf16*) are applied at compile time to
@@ -313,3 +335,49 @@ type NodeNot struct{ X Expr }
 func (n *NodeNot) Eval(env Env) bool { return !n.X.Eval(env) }
 func (n *NodeNot) Cost() int         { return n.X.Cost() }
 func (n *NodeNot) String() string    { return fmt.Sprintf("(not %s)", n.X) }
+
+// NodeQuantifier is the compiled form of "<count> of <target>".
+// Targets are pre-resolved at compile time so runtime evaluation never
+// touches the selection map. Threshold reflects the effective count
+// after wildcard expansion ("all" → len(targets), "any" → 1, numeric
+// counts clamped to len(targets) so "5 of x*" with 3 matches becomes
+// AND across all 3).
+type NodeQuantifier struct {
+	Threshold int
+	Targets   []*Selection
+	Label     string
+}
+
+// Eval short-circuits as soon as Threshold matches accumulate.
+func (n *NodeQuantifier) Eval(env Env) bool {
+	if n.Threshold <= 0 || len(n.Targets) == 0 {
+		return false
+	}
+	hits := 0
+	for _, sel := range n.Targets {
+		if sel.Eval(env) {
+			hits++
+			if hits >= n.Threshold {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Cost is the sum of target selection costs — the engine treats
+// quantifiers as the "compound" expense of every branch they cover.
+func (n *NodeQuantifier) Cost() int {
+	total := 0
+	for _, sel := range n.Targets {
+		total += sel.Cost()
+	}
+	return total
+}
+
+func (n *NodeQuantifier) String() string {
+	if n.Label != "" {
+		return n.Label
+	}
+	return fmt.Sprintf("%d of (%d targets)", n.Threshold, len(n.Targets))
+}

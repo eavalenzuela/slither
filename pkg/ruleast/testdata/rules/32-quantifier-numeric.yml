@@ -1,0 +1,17 @@
+title: 2 of <prefix>*
+id: 8b7c4d00-0001-4000-8000-000000000020
+description: Exercises numeric thresholds — at least N branches match.
+level: medium
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  hint_a:
+    CommandLine|contains: 'curl '
+  hint_b:
+    CommandLine|contains: 'http'
+  hint_c:
+    CommandLine|contains: '--upload'
+  hint_d:
+    CommandLine|contains: '--secret'
+  condition: 2 of hint_*

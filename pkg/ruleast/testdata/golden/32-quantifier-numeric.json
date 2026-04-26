@@ -1,0 +1,59 @@
+{
+  "category": "process_creation",
+  "condition": "2 of hint_*",
+  "cost": 4,
+  "description": "Exercises numeric thresholds — at least N branches match.",
+  "id": "8b7c4d00-0001-4000-8000-000000000020",
+  "level": "medium",
+  "selections": [
+    {
+      "fields": [
+        {
+          "field": "CommandLine",
+          "op": "contains",
+          "values": [
+            "curl "
+          ]
+        }
+      ],
+      "name": "hint_a"
+    },
+    {
+      "fields": [
+        {
+          "field": "CommandLine",
+          "op": "contains",
+          "values": [
+            "http"
+          ]
+        }
+      ],
+      "name": "hint_b"
+    },
+    {
+      "fields": [
+        {
+          "field": "CommandLine",
+          "op": "contains",
+          "values": [
+            "--upload"
+          ]
+        }
+      ],
+      "name": "hint_c"
+    },
+    {
+      "fields": [
+        {
+          "field": "CommandLine",
+          "op": "contains",
+          "values": [
+            "--secret"
+          ]
+        }
+      ],
+      "name": "hint_d"
+    }
+  ],
+  "title": "2 of \u003cprefix\u003e*"
+}
