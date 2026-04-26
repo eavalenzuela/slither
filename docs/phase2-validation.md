@@ -20,6 +20,31 @@ Per IMPLEMENTATION.md §4.1 task #46:
 When every step below passes, Phase 2 is closed and Phase 3 (edge
 eligibility, stateful detection, hunt) opens per ADR-0019.
 
+## Status (2026-04-26): partial pass, multi-host load test deferred
+
+Steps 1-11 (single-host smoke against 127.0.0.1-bound listeners)
+passed end-to-end on 2026-04-25 — every event class lands in
+`/events`, server-pushed Sigma rule fires + disable cleanly drops
+to 0 active rules. Diagnostic surfaces caught during that pass have
+since been closed by §4.2 follow-ups #47-#52 (commit `f6b7bd3`).
+
+Steps 12-14 (3-agent stress-ng load test, drop_rate <1 % on agent +
+server) **remain unfinished** and **cannot be marked complete on a
+single host**. Single-host runs share CPU between agents and the
+compose stack, so the drop-rate numbers are not comparable to Phase
+1's per-host baselines and would be misleading if captured.
+
+Phase 2 cannot close without a live load-test pass across separated
+hosts — cloud VMs are the recommended path (~$5-20 per run, picks
+up the RHEL 10 / Debian 13 kernel matrix in passing). A second
+physical machine on the dev LAN is acceptable. Phase 3 prototyping
+(edge eligibility, stateful detection seams) may proceed in
+parallel; only the formal §4.1 #46 ✅ flip is gated on the load
+test.
+
+`§4.1 #46` stays unchecked in `IMPLEMENTATION.md` until those
+captures land in `phase2_validation/05-load-test.txt`.
+
 ## 0. Prerequisites
 
 **Server host (where compose runs):**
