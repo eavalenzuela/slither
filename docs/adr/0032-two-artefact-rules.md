@@ -56,7 +56,7 @@ v1 agents that don't understand v2 emit a `DiagReport.warnings`
 entry and skip that rule; v1-only rules continue to ride
 `ast_version = 1` so v1 agents keep working unmodified.
 
-`EdgeRule` gains three additive fields exposing the classification
+`EdgeRule` gains two additive fields exposing the runtime bounds
 the compiler computed, so agents can enforce ADR-0018 at runtime
 even if a misconfigured server pushes an over-cap rule:
 
@@ -65,17 +65,23 @@ message EdgeRule {
   // ... existing fields 1-8 unchanged ...
   uint32 state_window_secs = 9;   // 0 = stateless
   uint32 state_cap         = 10;  // 0 = stateless
-  bool   force_edge        = 11;  // operator override; rejected
-                                  // by compiler if it fails an
-                                  // edge predicate
 }
 ```
 
 These are the *output* of the compiler's classification — they
 describe what the agent should expect, not what the operator
 requested. Operators encode the request in YAML (`force: edge` on
-the rule); the compiler emits classification metadata into these
-fields after evaluating the four ADR-0018 predicates.
+the rule); the compiler evaluates the four ADR-0018 predicates and
+emits the runtime-bound metadata above.
+
+`force_edge` itself is **not** on the wire — agents don't need it
+(the compiler has already filtered which rules ride `EdgeRule` at
+all). It lives only in pg (`rules.force_edge boolean`) so the
+console + audit log can show whether a row got onto the agent via
+operator override vs natural classification. Keeping it server-side
+also means the wire stays minimal and a future telemetry surface
+(e.g., agent-side counters per force-edged rule) becomes a
+deliberate ADR rather than a quiet wire add.
 
 ### Storage: `rules.server_plan jsonb` + `rules.classification text`
 
@@ -84,8 +90,9 @@ A new goose migration (`00010_rules_server_plan.sql`) extends the
 
 ```sql
 ALTER TABLE rules
-  ADD COLUMN server_plan   jsonb,
-  ADD COLUMN classification text NOT NULL DEFAULT 'edge_only';
+  ADD COLUMN server_plan    jsonb,
+  ADD COLUMN classification text    NOT NULL DEFAULT 'edge_only',
+  ADD COLUMN force_edge     boolean NOT NULL DEFAULT false;
 
 ALTER TABLE rules
   ADD CONSTRAINT rules_classification_chk
@@ -120,8 +127,8 @@ When the agent decodes an `EdgeRule` and finds either:
 - An `ast_version` it doesn't recognise, or
 - A `state_window_secs > 300` or `state_cap > 1024` (ADR-0018
   hard caps), or
-- A `force_edge = true` rule whose edge artefact won't validate
-  (sanity check — server should have caught this at compile),
+- A malformed AST that fails agent-side validation (sanity check
+  — server should have caught this at compile),
 
 it skips the rule (does not load it into the engine) and appends
 one entry to `DiagReport.warnings` of the form:
@@ -175,10 +182,10 @@ so this is structural-only — no proto change needed.
   `server_only` rules in their wire form. Existing `Refresh()`
   fans out everything; that needs a single SQL-level filter
   added.
-- The wire format gains three new `EdgeRule` fields. Field
-  numbers 9, 10, 11 are now claimed; a future ADR that wants to
-  add a *fourth* metadata field needs to use 12+ (proto3
-  field-number stability rule).
+- The wire format gains two new `EdgeRule` fields. Field numbers
+  9 and 10 are now claimed; a future ADR that wants to add a
+  *third* metadata field needs to use 11+ (proto3 field-number
+  stability rule).
 
 **Follow-up work:**
 
