@@ -1,0 +1,14 @@
+title: Outbound to RFC 1918 ranges
+id: 8b7c4d00-0001-4000-8000-000000000018
+description: Exercises the |cidr modifier — value parses as a netip.Prefix.
+level: low
+logsource:
+  product: linux
+  category: network_connection
+detection:
+  selection:
+    DestinationIp|cidr:
+      - 10.0.0.0/8
+      - 192.168.0.0/16
+      - 172.16.0.0/12
+  condition: selection

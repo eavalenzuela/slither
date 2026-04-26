@@ -1,0 +1,29 @@
+{
+  "category": "process_creation",
+  "condition": "selection",
+  "cost": 2,
+  "description": "Exercises the |null modifier — field absence as a positive match.",
+  "id": "8b7c4d00-0001-4000-8000-000000000019",
+  "level": "low",
+  "selections": [
+    {
+      "fields": [
+        {
+          "field": "Image",
+          "op": "endswith",
+          "values": [
+            "/bin/sh"
+          ]
+        },
+        {
+          "field": "ParentImage",
+          "mods": "null",
+          "op": "equals",
+          "values": null
+        }
+      ],
+      "name": "selection"
+    }
+  ],
+  "title": "Process with no parent image"
+}

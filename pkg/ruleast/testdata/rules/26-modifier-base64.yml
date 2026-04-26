@@ -1,0 +1,12 @@
+title: Base64-encoded reverse-shell marker
+id: 8b7c4d00-0001-4000-8000-00000000001a
+description: Exercises the |base64 modifier — value transforms at compile time.
+level: medium
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    CommandLine|base64|contains:
+      - "/bin/bash -i"
+  condition: selection

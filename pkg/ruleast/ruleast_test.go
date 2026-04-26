@@ -223,6 +223,99 @@ func TestMatchNestedParens(t *testing.T) {
 	}
 }
 
+func TestModifierAll(t *testing.T) {
+	art, _, _, err := Compile(readRule(t, "testdata/rules/23-modifier-all.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := art.Rule
+	if !rule.Match(mapEnv{"CommandLine": {"./tool --upload --secret token"}}) {
+		t.Errorf("|all should match when both substrings present")
+	}
+	if rule.Match(mapEnv{"CommandLine": {"./tool --upload only"}}) {
+		t.Errorf("|all should not match when one value missing")
+	}
+}
+
+func TestModifierCIDR(t *testing.T) {
+	art, _, _, err := Compile(readRule(t, "testdata/rules/24-modifier-cidr.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := art.Rule
+	if !rule.Match(mapEnv{"DestinationIp": {"10.5.6.7"}}) {
+		t.Errorf("|cidr should match address inside one of the prefixes")
+	}
+	if !rule.Match(mapEnv{"DestinationIp": {"192.168.1.1"}}) {
+		t.Errorf("|cidr should match a second prefix")
+	}
+	if rule.Match(mapEnv{"DestinationIp": {"8.8.8.8"}}) {
+		t.Errorf("|cidr should not match a public address")
+	}
+	if rule.Match(mapEnv{"DestinationIp": {"not-an-ip"}}) {
+		t.Errorf("|cidr should not match a non-IP value")
+	}
+}
+
+func TestModifierNull(t *testing.T) {
+	art, _, _, err := Compile(readRule(t, "testdata/rules/25-modifier-null.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := art.Rule
+	if !rule.Match(mapEnv{"Image": {"/bin/sh"}}) {
+		t.Errorf("|null should treat absent ParentImage as a positive match")
+	}
+	if rule.Match(mapEnv{"Image": {"/bin/sh"}, "ParentImage": {"/bin/bash"}}) {
+		t.Errorf("|null should not match when field is present")
+	}
+}
+
+func TestModifierBase64(t *testing.T) {
+	art, _, _, err := Compile(readRule(t, "testdata/rules/26-modifier-base64.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := art.Rule
+	// "/bin/bash -i" base64 = L2Jpbi9iYXNoIC1p
+	if !rule.Match(mapEnv{"CommandLine": {"echo L2Jpbi9iYXNoIC1p | base64 -d | sh"}}) {
+		t.Errorf("|base64 should match the encoded form embedded in cmdline")
+	}
+	if rule.Match(mapEnv{"CommandLine": {"/bin/bash -i"}}) {
+		t.Errorf("|base64 should not match the plaintext form")
+	}
+}
+
+func TestModifierBase64Offset(t *testing.T) {
+	art, _, _, err := Compile(readRule(t, "testdata/rules/27-modifier-base64offset.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := art.Rule
+	// base64("AKIA") = "QUtJQQ"; the offset 0 form should appear unaltered.
+	if !rule.Match(mapEnv{"CommandLine": {"prefix QUtJQQ suffix"}}) {
+		t.Errorf("|base64offset should match the offset-0 encoding")
+	}
+	if rule.Match(mapEnv{"CommandLine": {"AKIA in plain text"}}) {
+		t.Errorf("|base64offset should not match the unencoded value")
+	}
+}
+
+func TestModifierUTF16LE(t *testing.T) {
+	art, _, _, err := Compile(readRule(t, "testdata/rules/28-modifier-utf16le.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := art.Rule
+	wide := encodeUTF16LE("powershell")
+	if !rule.Match(mapEnv{"CommandLine": {"junk " + wide + " junk"}}) {
+		t.Errorf("|utf16le should match the wide-encoded substring")
+	}
+	if rule.Match(mapEnv{"CommandLine": {"powershell"}}) {
+		t.Errorf("|utf16le should not match the ASCII form")
+	}
+}
+
 func TestCostOrdering(t *testing.T) {
 	simpleArt, _, _, err := Compile(readRule(t, "testdata/rules/05-find-suid.yml"))
 	if err != nil {
@@ -280,11 +373,15 @@ func ruleGolden(r *Rule) map[string]any {
 		fields := make([]any, 0, len(sel.Fields))
 		for i := range sel.Fields {
 			fp := sel.Fields[i]
-			fields = append(fields, map[string]any{
+			row := map[string]any{
 				"field":  fp.Field,
 				"op":     fp.Op.String(),
 				"values": fp.Values,
-			})
+			}
+			if fp.Mods != 0 {
+				row["mods"] = fp.Mods.String()
+			}
+			fields = append(fields, row)
 		}
 		sort.SliceStable(fields, func(i, j int) bool {
 			a := fields[i].(map[string]any)

@@ -1,0 +1,12 @@
+title: UTF-16 LE encoded marker
+id: 8b7c4d00-0001-4000-8000-00000000001c
+description: Exercises the |utf16le modifier — value transforms to wide bytes.
+level: low
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    CommandLine|utf16le|contains:
+      - "powershell"
+  condition: selection

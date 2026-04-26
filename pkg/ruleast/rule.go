@@ -2,6 +2,7 @@ package ruleast
 
 import (
 	"fmt"
+	"net/netip"
 	"regexp"
 	"strings"
 )
@@ -27,8 +28,10 @@ const (
 	LevelCritical      Level = "critical"
 )
 
-// Operator enumerates the Sigma field modifiers we honour. The default (no
-// modifier) is OpEquals; Sigma matches on substring equality after case-fold.
+// Operator enumerates the Sigma field-match shapes we honour. The default
+// (no modifier) is OpEquals; Sigma matches on case-insensitive equality.
+// OpCIDR replaces the match shape entirely — values are parsed as CIDR
+// prefixes and the field is checked with Prefix.Contains.
 type Operator uint8
 
 const (
@@ -37,6 +40,7 @@ const (
 	OpStartsWith
 	OpEndsWith
 	OpRegex
+	OpCIDR
 )
 
 func (o Operator) String() string {
@@ -51,8 +55,76 @@ func (o Operator) String() string {
 		return "endswith"
 	case OpRegex:
 		return "regex"
+	case OpCIDR:
+		return "cidr"
 	}
 	return fmt.Sprintf("op(%d)", o)
+}
+
+// Modifiers is a bitmask of the orthogonal Sigma modifiers that compose
+// with an Operator. The encoding modifiers (Base64, Base64Offset,
+// UTF16LE, UTF16BE) transform the *value* at compile time; the result
+// lands directly in FieldPredicate.Values so the runtime hot path
+// stays branch-light. ModAll changes value-side semantics from OR to
+// AND. ModNull short-circuits Eval to check field absence.
+type Modifiers uint16
+
+const (
+	// ModAll: every value in the predicate must match (instead of any).
+	ModAll Modifiers = 1 << iota
+	// ModNull: predicate matches when the field is unset / empty.
+	// Standalone — combines with no other modifier.
+	ModNull
+	// ModBase64: each value is base64-encoded at compile time so the
+	// runtime sees only the encoded form. Match shape stays whatever
+	// the operator says (equals by default, or contains if chained).
+	ModBase64
+	// ModBase64Offset: each value is encoded three times at offsets
+	// 0/1/2 to detect base64-embedded substrings regardless of byte
+	// alignment. Implies contains semantics — exact-match offsets are
+	// not meaningful.
+	ModBase64Offset
+	// ModUTF16LE: UTF-16 little-endian encoded value. Each ASCII byte
+	// becomes (low, 0).
+	ModUTF16LE
+	// ModUTF16BE: UTF-16 big-endian. Each ASCII byte becomes (0, low).
+	ModUTF16BE
+	// ModUTF16: equivalent to ModUTF16LE plus a UTF-16 BOM (0xFF 0xFE)
+	// prefix on each value.
+	ModUTF16
+)
+
+func (m Modifiers) Has(flag Modifiers) bool { return m&flag != 0 }
+
+// String renders the active flags for debugging / golden tests.
+// Returns "" for an empty mask so leaf-only predicates stay readable.
+func (m Modifiers) String() string {
+	if m == 0 {
+		return ""
+	}
+	parts := make([]string, 0, 4)
+	if m.Has(ModAll) {
+		parts = append(parts, "all")
+	}
+	if m.Has(ModNull) {
+		parts = append(parts, "null")
+	}
+	if m.Has(ModBase64) {
+		parts = append(parts, "base64")
+	}
+	if m.Has(ModBase64Offset) {
+		parts = append(parts, "base64offset")
+	}
+	if m.Has(ModUTF16LE) {
+		parts = append(parts, "utf16le")
+	}
+	if m.Has(ModUTF16BE) {
+		parts = append(parts, "utf16be")
+	}
+	if m.Has(ModUTF16) {
+		parts = append(parts, "utf16")
+	}
+	return strings.Join(parts, "|")
 }
 
 // Rule is the compiled form of a Sigma YAML document.
@@ -113,21 +185,53 @@ func (s *Selection) Eval(env Env) bool {
 // Cost reports the number of predicates in the selection.
 func (s *Selection) Cost() int { return len(s.Fields) }
 
-// FieldPredicate is a single "field[|modifier]: value-or-list" entry.
+// FieldPredicate is a single "field[|modifier...]: value-or-list" entry.
+// Encoding modifiers (base64, utf16*) are applied at compile time to
+// produce the strings in Values; the runtime evaluator deals only with
+// the post-transform forms.
 type FieldPredicate struct {
 	Field   string
 	Op      Operator
-	Values  []string // OR across values
+	Mods    Modifiers
+	Values  []string // OR across values, unless ModAll flips to AND
 	regexps []*regexp.Regexp
+	cidrs   []netip.Prefix // populated when Op == OpCIDR
 }
 
-// Eval returns true when at least one of Values matches any bound value of
-// Field according to Op. Case-insensitive string comparison follows Sigma
-// defaults for equals/contains/startswith/endswith; regex is case-sensitive.
+// Eval returns true when the predicate's match condition holds against
+// env. Semantics by modifier:
+//
+//   - ModNull alone: true when the field is absent or has no values.
+//   - ModAll: every value in Values must match somewhere in the field's
+//     bound values. Without ModAll: any single value match suffices.
+//   - OpCIDR: at least one CIDR contains the field's value (or all,
+//     under ModAll). Field values must parse as netip.Addr; non-IP
+//     values match nothing.
+//   - default: Op-specific case-insensitive string match across the
+//     bound values × Values cross product.
 func (p *FieldPredicate) Eval(env Env) bool {
+	if p.Mods.Has(ModNull) {
+		bound, ok := env.Lookup(p.Field)
+		return !ok || len(bound) == 0
+	}
 	bound, ok := env.Lookup(p.Field)
-	if !ok {
+	if !ok || len(bound) == 0 {
 		return false
+	}
+	if p.Mods.Has(ModAll) {
+		for i, want := range p.Values {
+			matched := false
+			for _, have := range bound {
+				if p.matchOne(have, want, i) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return false
+			}
+		}
+		return true
 	}
 	for _, have := range bound {
 		for i, want := range p.Values {
@@ -154,6 +258,15 @@ func (p *FieldPredicate) matchOne(have, want string, idx int) bool {
 			return false
 		}
 		return p.regexps[idx].MatchString(have)
+	case OpCIDR:
+		if idx < 0 || idx >= len(p.cidrs) || !p.cidrs[idx].IsValid() {
+			return false
+		}
+		addr, err := netip.ParseAddr(have)
+		if err != nil {
+			return false
+		}
+		return p.cidrs[idx].Contains(addr)
 	}
 	return false
 }

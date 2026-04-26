@@ -1,0 +1,12 @@
+title: Base64-embedded credential string
+id: 8b7c4d00-0001-4000-8000-00000000001b
+description: Exercises the |base64offset modifier — three offset encodings.
+level: medium
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    CommandLine|base64offset:
+      - "AKIA"
+  condition: selection

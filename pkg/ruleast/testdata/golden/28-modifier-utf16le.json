@@ -1,0 +1,24 @@
+{
+  "category": "process_creation",
+  "condition": "selection",
+  "cost": 1,
+  "description": "Exercises the |utf16le modifier — value transforms to wide bytes.",
+  "id": "8b7c4d00-0001-4000-8000-00000000001c",
+  "level": "low",
+  "selections": [
+    {
+      "fields": [
+        {
+          "field": "CommandLine",
+          "mods": "utf16le",
+          "op": "contains",
+          "values": [
+            "p\u0000o\u0000w\u0000e\u0000r\u0000s\u0000h\u0000e\u0000l\u0000l\u0000"
+          ]
+        }
+      ],
+      "name": "selection"
+    }
+  ],
+  "title": "UTF-16 LE encoded marker"
+}

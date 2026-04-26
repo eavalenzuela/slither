@@ -1,7 +1,10 @@
 package ruleast
 
 import (
+	"encoding/base64"
 	"fmt"
+	"math/bits"
+	"net/netip"
 	"regexp"
 	"strings"
 
@@ -164,11 +167,11 @@ func compileSelection(name string, body any) (*Selection, error) {
 	}
 	preds := make([]FieldPredicate, 0, len(m))
 	for rawKey, rawVal := range m {
-		field, op, err := parseFieldKey(rawKey)
+		field, op, mods, err := parseFieldKey(rawKey)
 		if err != nil {
 			return nil, fmt.Errorf("field %q: %w", rawKey, err)
 		}
-		pred, err := buildPredicate(field, op, rawVal)
+		pred, err := buildPredicate(field, op, mods, rawVal)
 		if err != nil {
 			return nil, fmt.Errorf("field %q: %w", rawKey, err)
 		}
@@ -177,46 +180,127 @@ func compileSelection(name string, body any) (*Selection, error) {
 	return &Selection{Name: name, Fields: preds}, nil
 }
 
-// parseFieldKey splits "Image|endswith" into ("Image", OpEndsWith).
-func parseFieldKey(key string) (string, Operator, error) {
+// parseFieldKey splits "Image|endswith|all" into ("Image", OpEndsWith,
+// ModAll). The first segment is always the field name; subsequent
+// segments are modifiers. A single-segment key is a bare equals match
+// with no flags.
+func parseFieldKey(key string) (string, Operator, Modifiers, error) {
 	parts := strings.Split(key, "|")
 	if len(parts) == 1 {
-		return parts[0], OpEquals, nil
+		return parts[0], OpEquals, 0, nil
 	}
-	if len(parts) != 2 {
-		return "", 0, fmt.Errorf("only one modifier allowed per field in Phase 1")
+	field := parts[0]
+	op := OpEquals
+	opSeen := false
+	var mods Modifiers
+	setOp := func(o Operator, name string) error {
+		if opSeen {
+			return fmt.Errorf("multiple match operators in modifier chain (already saw %s, also %s)", op, name)
+		}
+		op = o
+		opSeen = true
+		return nil
 	}
-	switch strings.ToLower(parts[1]) {
-	case "contains":
-		return parts[0], OpContains, nil
-	case "startswith":
-		return parts[0], OpStartsWith, nil
-	case "endswith":
-		return parts[0], OpEndsWith, nil
-	case "re", "regex":
-		return parts[0], OpRegex, nil
-	case "all":
-		return "", 0, fmt.Errorf("modifier \"all\" not supported (Phase 1 list semantics are OR-only)")
-	case "cased":
-		return "", 0, fmt.Errorf("modifier \"cased\" not supported in Phase 1")
-	case "base64", "base64offset", "utf16", "utf16le", "utf16be", "wide":
-		return "", 0, fmt.Errorf("modifier %q not supported in Phase 1", parts[1])
+	for _, raw := range parts[1:] {
+		seg := strings.ToLower(raw)
+		switch seg {
+		case "contains":
+			if err := setOp(OpContains, seg); err != nil {
+				return "", 0, 0, err
+			}
+		case "startswith":
+			if err := setOp(OpStartsWith, seg); err != nil {
+				return "", 0, 0, err
+			}
+		case "endswith":
+			if err := setOp(OpEndsWith, seg); err != nil {
+				return "", 0, 0, err
+			}
+		case "re", "regex":
+			if err := setOp(OpRegex, seg); err != nil {
+				return "", 0, 0, err
+			}
+		case "cidr":
+			if err := setOp(OpCIDR, seg); err != nil {
+				return "", 0, 0, err
+			}
+		case "all":
+			mods |= ModAll
+		case "null":
+			mods |= ModNull
+		case "base64":
+			mods |= ModBase64
+		case "base64offset":
+			mods |= ModBase64Offset
+		case "utf16le", "wide":
+			mods |= ModUTF16LE
+		case "utf16be":
+			mods |= ModUTF16BE
+		case "utf16":
+			mods |= ModUTF16
+		case "cased":
+			return "", 0, 0, fmt.Errorf("modifier %q not supported (Sigma defaults are case-insensitive)", raw)
+		default:
+			return "", 0, 0, fmt.Errorf("unknown modifier %q", raw)
+		}
 	}
-	return "", 0, fmt.Errorf("unknown modifier %q", parts[1])
+	if mods.Has(ModBase64Offset) && !opSeen {
+		// base64offset is meaningful only with contains semantics — the
+		// three-offset trick exists to detect base64 substrings at any
+		// byte alignment. Default to contains rather than reject so
+		// authors can write "Field|base64offset: x" naturally.
+		op = OpContains
+	}
+	if err := validateModifierComposition(mods, op); err != nil {
+		return "", 0, 0, err
+	}
+	return field, op, mods, nil
 }
 
-// buildPredicate normalises scalar/list values into []string and precompiles
-// regexes up front so runtime Match stays allocation-free.
-func buildPredicate(field string, op Operator, raw any) (FieldPredicate, error) {
-	values, err := coerceValues(raw)
+// validateModifierComposition rejects modifier combinations whose
+// semantics would be ambiguous or undefined. Better to fail loud at
+// compile time than silently apply a guess.
+func validateModifierComposition(mods Modifiers, op Operator) error {
+	if mods.Has(ModNull) && mods != ModNull {
+		return fmt.Errorf("modifier \"null\" must be standalone (no other modifiers)")
+	}
+	if op == OpCIDR && mods != 0 {
+		return fmt.Errorf("modifier \"cidr\" composes with no other modifiers")
+	}
+	if op == OpRegex && mods&^ModAll != 0 {
+		return fmt.Errorf("modifier \"regex\" composes only with \"all\"")
+	}
+	encodings := mods & (ModBase64 | ModBase64Offset | ModUTF16LE | ModUTF16BE | ModUTF16)
+	if bits.OnesCount16(uint16(encodings&(ModBase64|ModBase64Offset))) > 1 {
+		return fmt.Errorf("modifiers \"base64\" and \"base64offset\" are mutually exclusive")
+	}
+	utfCount := bits.OnesCount16(uint16(encodings & (ModUTF16LE | ModUTF16BE | ModUTF16)))
+	if utfCount > 1 {
+		return fmt.Errorf("UTF-16 modifiers (utf16le/utf16be/utf16/wide) are mutually exclusive")
+	}
+	return nil
+}
+
+// buildPredicate normalises scalar/list values into []string, applies
+// any compile-time value transforms (encoding modifiers, CIDR parse),
+// and precompiles regexes so the runtime Match stays allocation-free.
+func buildPredicate(field string, op Operator, mods Modifiers, raw any) (FieldPredicate, error) {
+	values, err := coerceValues(raw, mods.Has(ModNull))
 	if err != nil {
 		return FieldPredicate{}, err
+	}
+	if mods.Has(ModNull) {
+		// "null" is a presence check; the YAML value is irrelevant.
+		// Allow `Field|null: null` and `Field|null: true` interchangeably.
+		return FieldPredicate{Field: field, Op: op, Mods: mods}, nil
 	}
 	if len(values) == 0 {
 		return FieldPredicate{}, fmt.Errorf("empty value list")
 	}
-	pred := FieldPredicate{Field: field, Op: op, Values: values}
-	if op == OpRegex {
+	values = applyEncodingModifiers(values, mods)
+	pred := FieldPredicate{Field: field, Op: op, Mods: mods, Values: values}
+	switch op {
+	case OpRegex:
 		pred.regexps = make([]*regexp.Regexp, len(values))
 		for i, v := range values {
 			re, err := regexp.Compile(v)
@@ -225,11 +309,122 @@ func buildPredicate(field string, op Operator, raw any) (FieldPredicate, error) 
 			}
 			pred.regexps[i] = re
 		}
+	case OpCIDR:
+		pred.cidrs = make([]netip.Prefix, len(values))
+		for i, v := range values {
+			p, err := netip.ParsePrefix(v)
+			if err != nil {
+				// Allow bare IPs as /32 or /128 to keep the YAML
+				// natural for single-address blocks.
+				addr, addrErr := netip.ParseAddr(v)
+				if addrErr != nil {
+					return FieldPredicate{}, fmt.Errorf("cidr %q: %w", v, err)
+				}
+				p = netip.PrefixFrom(addr, addr.BitLen())
+			}
+			pred.cidrs[i] = p
+		}
 	}
 	return pred, nil
 }
 
-func coerceValues(raw any) ([]string, error) {
+// applyEncodingModifiers rewrites values into the encoded forms the
+// runtime should match against. Base64 modifiers replace each value
+// with its encoded byte string; UTF-16 modifiers similarly. The order
+// is deterministic (UTF-16 first, then base64) so a future
+// "Field|utf16le|base64" combination produces the same bytes pySigma
+// would. Phase 3 v1 doesn't compose UTF-16 with base64; the order
+// hook is preserved to avoid a re-architecture later.
+func applyEncodingModifiers(values []string, mods Modifiers) []string {
+	if !mods.Has(ModBase64) && !mods.Has(ModBase64Offset) &&
+		!mods.Has(ModUTF16LE) && !mods.Has(ModUTF16BE) && !mods.Has(ModUTF16) {
+		return values
+	}
+	switch {
+	case mods.Has(ModUTF16LE):
+		values = mapValues(values, encodeUTF16LE)
+	case mods.Has(ModUTF16BE):
+		values = mapValues(values, encodeUTF16BE)
+	case mods.Has(ModUTF16):
+		values = mapValues(values, encodeUTF16WithBOM)
+	}
+	switch {
+	case mods.Has(ModBase64):
+		values = mapValues(values, encodeBase64)
+	case mods.Has(ModBase64Offset):
+		out := make([]string, 0, len(values)*3)
+		for _, v := range values {
+			out = append(out, base64Offsets(v)...)
+		}
+		values = out
+	}
+	return values
+}
+
+func mapValues(in []string, fn func(string) string) []string {
+	out := make([]string, len(in))
+	for i, v := range in {
+		out[i] = fn(v)
+	}
+	return out
+}
+
+func encodeBase64(s string) string {
+	return base64.StdEncoding.EncodeToString([]byte(s))
+}
+
+// base64Offsets returns the three offset-encoded forms of v that
+// pySigma would emit for `base64offset`. The trick: prepend 0, 1, or 2
+// padding bytes before encoding, then trim the encoded prefix that
+// would change with surrounding data. Each output is the substring an
+// operator should look for in the field.
+func base64Offsets(v string) []string {
+	out := make([]string, 0, 3)
+	for off := 0; off < 3; off++ {
+		buf := make([]byte, 0, off+len(v))
+		for i := 0; i < off; i++ {
+			buf = append(buf, 0)
+		}
+		buf = append(buf, v...)
+		enc := base64.StdEncoding.EncodeToString(buf)
+		// Strip the leading characters introduced by the padding
+		// bytes — they vary with surrounding data and would prevent
+		// a contains-style match.
+		strip := (off * 4) / 3
+		if strip > len(enc) {
+			strip = len(enc)
+		}
+		// Strip the trailing '=' padding the same way pySigma does;
+		// it isn't significant inside a containing string.
+		enc = strings.TrimRight(enc, "=")
+		if strip < len(enc) {
+			out = append(out, enc[strip:])
+		}
+	}
+	return out
+}
+
+func encodeUTF16LE(s string) string {
+	b := make([]byte, 0, len(s)*2)
+	for _, r := range s {
+		b = append(b, byte(r), byte(r>>8))
+	}
+	return string(b)
+}
+
+func encodeUTF16BE(s string) string {
+	b := make([]byte, 0, len(s)*2)
+	for _, r := range s {
+		b = append(b, byte(r>>8), byte(r))
+	}
+	return string(b)
+}
+
+func encodeUTF16WithBOM(s string) string {
+	return string([]byte{0xFF, 0xFE}) + encodeUTF16LE(s)
+}
+
+func coerceValues(raw any, allowNull bool) ([]string, error) {
 	switch v := raw.(type) {
 	case string:
 		return []string{v}, nil
@@ -247,7 +442,7 @@ func coerceValues(raw any) ([]string, error) {
 	case []any:
 		out := make([]string, 0, len(v))
 		for _, x := range v {
-			sub, err := coerceValues(x)
+			sub, err := coerceValues(x, allowNull)
 			if err != nil {
 				return nil, err
 			}
@@ -255,7 +450,10 @@ func coerceValues(raw any) ([]string, error) {
 		}
 		return out, nil
 	case nil:
-		return nil, fmt.Errorf("null values not allowed")
+		if allowNull {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("null values not allowed (use \"|null\" modifier for presence checks)")
 	}
 	return nil, fmt.Errorf("unsupported value type %T", raw)
 }
