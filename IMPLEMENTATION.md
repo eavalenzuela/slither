@@ -584,6 +584,80 @@ Issues surfaced during #46's local stand-up validation (see `docs/phase2-validat
 - Process-tree mini-graph endpoint uses same D2 pipeline.
 - Small IOC feed push (hashes, IPs ≤ 100k entries) to agents via control stream.
 
+### 5.1 Phase 3 task breakdown
+
+Task numbering continues from Phase 2 (#46 + §4.2 follow-ups #47–#52). Locked scoping calls (2026-04-26):
+
+- **Wire format:** additive bumps inside `slither.v1` (no `slither.v2` namespace). `EdgeRule.ast_version` 1→2; agents that don't speak v2 stateful nodes refuse via `DiagReport`.
+- **Alert dedupe (#60):** per-rule setting, not a global default. Fast-retriggering rules carry signal; that signal is preserved by letting analysts tune the window per rule.
+- **D2 SVG cache (#64):** on-disk under `/var/lib/slither/graphs/` (matches the systemd unit's `StateDirectory=slither` pattern), in-memory LRU on top.
+- **#70 / #46 overlap:** the deferred Phase 2 #46 multi-host load test folds into #70's cloud-VM run — one stand-up, both criteria satisfied. The §4.1 #46 ✅ flip happens alongside the §5.1 #70 flip.
+- **IOC agent storage (#67):** *open* — see scoping question at end of §5.1.
+- **Stateful cold-start (#59):** *open* — see scoping question at end of §5.1.
+
+Dependency graph:
+
+- **A. Compiler split (gates almost everything):** #53 → #54 → #55
+- **B. Edge stateful runtime:** #56 → #57 (parallel with C; needs #54)
+- **C. Server detection engine:** #58 → #59 → #60 (needs #54)
+- **D. Alert lifecycle:** #61 → #62 (after #60)
+- **E. D2 graphs:** #63 → #64 → #65 (after #61)
+- **F. IOC feeds:** #66 → #67 (parallel; needs #54)
+- **G. Cross-cutting:** #68 (CH retention §10.4), #69 (rule reload §10.1)
+- **Exit gate:** #70 (subsumes deferred #46 multi-host criterion)
+
+1. **#53 — ADR + scoping spike for two-artefact rule shape.** Locked: additive `slither.v1` bumps. Pin the wire and storage representation: edge artefact stays `EdgeRule.compiled_ast` with `ast_version` 2 for stateful nodes; server plan is server-only (never on the wire) and lives next to the rule row in pg. Touches: new `docs/adr/0032-two-artefact-rules.md`, `proto/slither/v1/control.proto` review note, `PROJECT.md §3.6` cross-reference. **Exit:** ADR accepted with concrete answers to (a) classification metadata fields surfaced on `EdgeRule` (e.g. `state_window_secs`, `state_cap`) so agents enforce ADR-0018 at runtime, (b) server-plan column shape on `rules`, (c) `DiagReport` shape for v1-only agents that get v2 rules.
+
+2. **#54 — Sigma compiler: full-grammar promotion + dual-artefact emit.** Extend `pkg/ruleast/sigma.go` + `condition.go` to accept the rest of the Sigma spec: `N of`, `them`, pipe aggregations (`| count() by …`), `near` (server-only), list-of-maps selections, `all`/`base64`/`base64offset`/`utf16*` modifiers, the `timeframe` field. Compiler now emits `(EdgeArtefact, ServerPlan, Classification)` per rule; `Classification` evaluates the four ADR-0018 predicates and reports the failed predicate by name on `force: edge` violations. Touches: `pkg/ruleast/`, new `pkg/ruleast/serverplan/`, expanded `testdata/rules/` corpus covering all four predicates + every new modifier. **Exit:** golden tests for the full Sigma feature set; `force: edge` on a 2-host-join rule fails compile with the predicate cited; existing 22-rule Phase 1 corpus still compiles (regression guard).
+
+3. **#55 — Wire & storage plumbing for two-artefact rules.** Bump `EdgeRule.ast_version` to 2 (additive — v1 agents still get v1 rules; v2 rules omitted with a `DiagReport` per agent). Add classification metadata fields to `EdgeRule` per #53. Extend `rules` Postgres table with `server_plan jsonb` + `classification text` via a new goose migration; `server/internal/control/hub.go` stops pushing server-only rules to agents and routes them only to the engine in #58. Touches: `proto/slither/v1/control.proto`, regen `proto/gen/…`, new `server/migrations/00010_rules_server_plan.sql`, `server/internal/store/pg/rules.go`, `server/internal/control/{hub,runner}.go`. **Exit:** mixed ruleset (edge + server-only + force-server-override) round-trips through pg → hub → agent with the correct rules dropped/kept on each side; per-rule classification logged via the slog facade from #49.
+
+4. **#56 — Edge runtime: bounded-stateful evaluator (`count()` + `timeframe`).** Extend `agent/internal/ruleengine/` with a state subsystem. State is a per-(host, rule) ring of monotonic timestamps keyed by the `by`-tuple; window ≤ 300 s and ≤ 1024 keys per ADR-0018, enforced at runtime (over-cap → drop oldest + bump per-rule `state_evicted` counter). Janitor goroutine prunes expired keys on a coarse tick to keep the hot path lock-light. Touches: new `agent/internal/ruleengine/state.go`, `ruleengine/engine.go`, `pkg/ruleast/runtime.go` evaluator dispatch. **Exit:** unit test fires `count() > 5 within 60s` correctly across boundary conditions (window edge, eviction, restart-clears-state); `-race` clean; benchmark ≤2× per-event cost vs stateless rules.
+
+5. **#57 — Edge: ast_version=2 deserialise + classification refusal.** Agent rejects rules with `state_window_secs > 300` or `state_cap > 1024` even if a misconfigured server pushes them, citing ADR-0018, reports via `DiagReport.message`. Touches: `agent/internal/ruleengine/loader.go`, `agent/internal/output/grpc/session.go` (DiagReport plumbing). **Exit:** integration test — server pushes oversize rule, agent refuses, server log shows the diag.
+
+6. **#58 — Server detection engine: stream subscriber + plan executor.** New `server/internal/detect/` package subscribes to the ingest bus (existing in-proc fan-out from #37) as one more subscriber, runs server-only Sigma plans against incoming OCSF events, emits internal `Finding` to a follow-on alert sink. Plan executor handles aggregations + temporal joins (`count() by …` + `near`) using a bounded in-memory window keyed off `(rule_id, group_key)`; window default 1 h, cap config-surfaced; eviction on time + on cardinality. Touches: new `server/internal/detect/{engine,window,plan}.go`, wired in `server/internal/app/app.go`. **Exit:** synthetic 100k-event stream triggers deterministic count-by-host alert; backpressure: slow detect drops + counters increment; ingest never blocks.
+
+7. **#59 — Detection engine: ClickHouse lookback for cold-start.** On boot or rule change, optionally backfill the window from CH for stateful rules whose `lookback` ≤ retention. Touches: new `server/internal/detect/lookback.go`, `server/internal/store/ch/`. **Exit:** rule added at T fires on events from T-window if already in CH. *Default behaviour pending scoping decision (see open question 3 below).*
+
+8. **#60 — Alert sink: write findings to existing `alerts` table.** Detection engine `Finding` → INSERT into `alerts` (already shipped in #32 / `00006_alerts.sql` with `rule_uid`, `host_id`, `event_ids[]`, `severity`, `status`, `reason_code`, `assigned_to`, lifecycle timestamps — no new migration). Edge `DetectionFinding` events take the same path so edge + server alerts share schema + UI. Per-rule dedupe window: new column `rules.dedupe_window_secs` (NULL = no dedupe), keyed on `(rule_uid, host_id, dedupe_window)`. Touches: new `server/internal/detect/sink.go`, `server/internal/ingest/router.go`, new `server/internal/store/pg/alerts.go`, new `server/migrations/00012_rules_dedupe_window.sql`. **Exit:** server-rule + edge-rule fires both produce alerts row with `event_ids` populated; per-rule dedupe respects the column; rules with NULL window deduplicate not at all (fast-retriggering rules carry signal).
+
+9. **#61 — Alert lifecycle endpoints + audit.** RBAC-gated transitions `new → acknowledged → in_progress → closed`, set `reason_code`, assign `assigned_to`. Every transition writes to `audit_log` (#32) with operator id, before/after state, free-text note. Console: `/alerts` list + `/alerts/{id}` detail with action buttons. Touches: new `server/internal/console/alerts/`, `server/internal/store/pg/alerts.go`, `server/internal/console/views/alerts*`. **Exit:** analyst can ack → in-progress → close; viewer cannot; audit_log shows the chain; CHECK on `alerts.closed_at` (already in #00006) honoured.
+
+10. **#62 — Console: alert list filters + cursor pagination.** Filters: status, severity, host, rule, assignee, time range. Cursor pagination on `(created_at DESC, id DESC)` matching the #43 events page pattern. Touches: `server/internal/console/alerts/`. **Exit:** 100k seeded alerts; filter combinations return <300 ms localhost.
+
+11. **#63 — D2 vendoring + render harness.** Add `oss.terrastruct.com/d2` to `server/go.mod`; isolate behind `server/internal/graph/` exposing `Render(ctx, source string) ([]byte, error)` (SVG bytes). Document Apache 2.0 / MIT compatibility note in ADR-0024 references; pin the version. Touches: `server/go.mod`, new `server/internal/graph/{render,render_test}.go`. **Exit:** smoke test renders 5-node D2 source to SVG; binary-size delta noted.
+
+12. **#64 — Detection flow graph: DAG builder + caching.** For each alert, build a DAG from `alerts.event_ids[]` walking parent/child + causality edges out of CH (process exec → spawned net connect → file write, etc.), emit D2 source, render via #63, cache the SVG keyed on `(alert_id, ruleset_version)`. In-memory LRU on top of on-disk cache under `/var/lib/slither/graphs/` (matches systemd unit's StateDirectory pattern); size cap + LRU eviction on disk. Touches: new `server/internal/detect/graph.go`, `server/internal/console/alerts/detail.go`. **Exit:** alert detail page shows the SVG; second load is a cache hit; cache invalidates when alert's event_ids change.
+
+13. **#65 — Process-tree mini-graph endpoint.** `/hosts/{id}/process-tree?pid=…&depth=…` reuses `server/internal/graph/` to render a depth-bounded process tree from CH `process_activity`. Same cache shape as #64 keyed on `(host_id, root_pid, depth)`. Touches: new `server/internal/console/hosts/process_tree.go`. **Exit:** depth=4 tree renders <500 ms on a 1M-row CH table.
+
+14. **#66 — IOC feed: server-side store + classification gate.** New `server/internal/ioc/` + `iocs` Postgres table (id, kind ∈ FeedKind, entries stored as a single row per feed with `entries text[]`, capped at 100k per ADR-0018, enforced server-side on insert). Console: `/iocs` admin CRUD. Sigma compiler (#54) recognises `ioc:<feed_id>` references; if any feed exceeds 100k, classifies the rule server-only. Touches: new `server/internal/ioc/`, new `server/migrations/00011_iocs.sql`, new `server/internal/console/iocs/`, `pkg/ruleast/serverplan/` integration. **Exit:** 100k SHA256 feed admits, 100001 rejects; rule referencing oversized feed compiles server-only with the ADR predicate cited.
+
+15. **#67 — IOC feed: agent storage + push over RuleSet.** Agent receives `IocFeed` via existing `RuleSet.ioc_feeds` field (proto already has it — no wire change). Agent-side storage shape *pending scoping decision (see open question 2 below).* Compiler emits `iocMatch(feed_id, value)` AST nodes; runtime resolves O(1). Touches: new `agent/internal/ruleengine/ioc.go`, `pkg/ruleast/runtime.go`. **Exit:** integration test — push 50k-IP feed, fire rule on matching `network_connection`; eviction on feed update is atomic.
+
+16. **#68 — ClickHouse retention + cardinality tuning.** Activates §10.4. Set TTL on each `ocsf_*` table (default 30d; configurable), add materialised-column choices informed by Phase 2 query shapes, document in `docs/adr/0033-clickhouse-retention-v1.md`. Touches: `server/clickhouse/migrations/`, new ADR. **Exit:** TTL applied; rowcount stable under sustained 36k events/s for 7 days in a soak test.
+
+17. **#69 — Rule hot-reload decision (closes §10.1).** Phase 2 ships server-pushed `ReplaceRules` (#39) + agent SIGHUP for local rules (#10). This task is the formal §10.1 close-out: confirm server-push is the sole production path; agent SIGHUP is dev-only. Touches: `IMPLEMENTATION.md §10.1`, `docs/install.md`. **Exit:** §10.1 marked resolved; install doc clarifies.
+
+18. **#70 — Phase 3 exit validation (subsumes deferred #46 multi-host criterion).** Doc-backed manual run on cloud VMs (mirrors #29 + #46 pattern): `make compose-up`, enrol 3 agent VMs, push a mixed ruleset (5 stateless edge, 3 bounded-stateful edge with `count() within 60s`, 4 server-only including one `near` + one cross-host aggregation, 2 IOC-driven). Drive a synthetic adversary scenario (brute-force ssh, IOC-hit network connection, multi-step exec → net → file write). Confirm: edge stateful rules fire without server round-trip; server-only rules fire from the bus; alerts land with correct lifecycle initial state; flow graph renders for a multi-step alert; process-tree mini-graph renders; **plus** the deferred Phase 2 #46 load criterion (3 agents × stress-ng baseline workload, drop_rate <1 % at agent + server-subscriber level). Commit `docs/phase3-validation.md` with raw outputs under `phase3_validation/`. **Exit:** all green; §4.1 #46 ✅ flipped alongside §5.1 #70 ✅; Phase 3 closed; Phase 4 scope unlocks.
+
+**Cross-cutting notes:**
+
+- **Wire freeze stays intact.** Additive `ast_version=2` keeps `slither.v1`; v1 agents that don't understand v2 stateful nodes refuse the rule via `DiagReport`. Any non-additive change → ADR + `slither.v2` discussion per §2.4.
+- **ADR-0018 enforced twice.** Compile-time on server (#54), runtime on agent (#57). Both must cite the failed predicate by name on rejection. No silent classification.
+- **D2 dependency.** #63 is the only task pulling in a non-trivial new Go dep. Kept behind `server/internal/graph/`'s single surface so swapping for graphviz CLI shell-out later is a one-package change.
+- **Deferred technical questions activated by this phase:** §10.1 (closed by #69), §10.4 (closed by #68); §10.2/§10.5 (cert storage, rule signing) remain Phase 5; §10.3 (CH schema evolution) remains Phase 5; §10.7 (SSO) remains Phase 5/6.
+
+**Estimated effort:** 6–8 weeks for one person. Biggest unknowns: #54 (`near` semantics + aggregation IR are real design surface) and #58 (server detection engine's window/eviction shape). Budget slack there.
+
+**Start here:** #53 → #54 → #56. #53 is a one-day ADR pinning the artefact contract so #54 doesn't iterate on shape. #54 is the longest single block and gates the entire detection-engine track (#55, #58–#60). #56 (edge bounded-stateful) starts in parallel once #53's AST shape locks — touches `agent/internal/ruleengine/` rather than `pkg/ruleast/sigma.go`; the two converge cleanly at #57.
+
+**Open scoping questions:**
+
+- **#67 IOC agent storage:** in-memory map vs mmap'd on-disk file vs Bloom filter. *Pending operator decision.*
+- **#59 stateful cold-start default:** opt-in per rule vs always-on for any rule with `timeframe` ≤ retention. *Pending operator decision.*
+
 ## 6. Phase 4 — Response (bullet)
 
 **Goal:** manual response primitives; opt-in immediate response from edge.
