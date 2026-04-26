@@ -1,0 +1,48 @@
+title: ssh / scp invoked with non-interactive auth flags
+id: 8b7c4d00-0001-4000-8000-000000000029
+status: experimental
+description: |
+  ssh, scp, or sftp invoked with BatchMode=yes or
+  StrictHostKeyChecking=no by a parent that isn't an authorised
+  configuration-management / CI / orchestration tool. T1021.004
+  (Remote Services: SSH). Ansible / salt / terraform / packer / docker
+  legitimately use these flags constantly; the tightening is the
+  parent allowlist. In a hand-rolled CI environment the operator
+  should extend benign_parent locally.
+level: medium
+tags:
+  - attack.lateral_movement
+  - attack.t1021.004
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  ssh_family:
+    Image|endswith:
+      - /ssh
+      - /scp
+      - /sftp
+  scripted_flags:
+    CommandLine|contains:
+      - 'BatchMode=yes'
+      - 'StrictHostKeyChecking=no'
+      - 'StrictHostKeyChecking no'
+      - 'UserKnownHostsFile=/dev/null'
+  benign_parent:
+    ParentImage|endswith:
+      - /ansible-playbook
+      - /ansible
+      - /salt-call
+      - /salt-minion
+      - /terraform
+      - /tofu
+      - /opentofu
+      - /packer
+      - /docker
+      - /docker-machine
+      - /vagrant
+      - /capistrano
+      - /chef-client
+      - /puppet
+      - /kured
+  condition: ssh_family and scripted_flags and not benign_parent

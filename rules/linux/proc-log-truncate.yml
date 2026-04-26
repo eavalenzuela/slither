@@ -1,0 +1,38 @@
+title: System log truncated
+id: 8b7c4d00-0001-4000-8000-000000000016
+status: experimental
+description: |
+  A well-known system-log file (messages, syslog, auth.log, secure,
+  kern.log) was truncated via `truncate -s 0`, `: >`, or `cat /dev/null
+  >`. T1070.002 (Indicator Removal: Clear Linux or Mac System Logs).
+  Matches both real /var/log paths and the basename-only sandbox paths
+  used by eyeexam smoke tests.
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1070.002
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  truncate_tool:
+    Image|endswith:
+      - /truncate
+      - /cat
+      - /tee
+      - /bash
+      - /sh
+  log_target:
+    CommandLine|contains:
+      - /messages
+      - /syslog
+      - /auth.log
+      - /secure
+      - /kern.log
+  truncate_idiom:
+    CommandLine|contains:
+      - '/dev/null'
+      - 'truncate -s 0'
+      - 'truncate --size=0'
+      - ': >'
+  condition: truncate_tool and log_target and truncate_idiom

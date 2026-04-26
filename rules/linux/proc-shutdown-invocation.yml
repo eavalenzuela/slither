@@ -1,0 +1,35 @@
+title: shutdown / halt / poweroff / reboot invoked
+id: 8b7c4d00-0001-4000-8000-000000000035
+status: experimental
+description: |
+  shutdown, halt, poweroff, or reboot invoked outside known
+  maintenance-tooling parents (unattended-upgrade, cloud-init,
+  ansible-playbook, salt-call, puppet, anacron, kured). T1529 (System
+  Shutdown/Reboot). Even the wall-message-only `shutdown -k` is a
+  preliminary attacker probe.
+level: medium
+tags:
+  - attack.impact
+  - attack.t1529
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith:
+      - /shutdown
+      - /halt
+      - /poweroff
+      - /reboot
+  benign_parent:
+    ParentImage|endswith:
+      - /unattended-upgrade
+      - /cloud-init
+      - /ansible-playbook
+      - /salt-call
+      - /salt-minion
+      - /puppet
+      - /chef-client
+      - /anacron
+      - /kured
+  condition: selection and not benign_parent

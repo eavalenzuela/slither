@@ -1,0 +1,37 @@
+title: Systemd user-scope unit file written
+id: 8b7c4d00-0001-4000-8000-000000000026
+status: experimental
+description: |
+  A .service / .timer / .socket file was written under
+  ~/.config/systemd/user/ or /etc/systemd/system/ outside the package
+  manager. Persistence via systemd unit (T1543.002 User-Scope, T1543.001
+  System-Scope when /etc path).
+level: high
+tags:
+  - attack.persistence
+  - attack.t1543.002
+  - attack.t1543.001
+logsource:
+  product: linux
+  category: file_event
+detection:
+  user_unit:
+    TargetFilename|contains:
+      - /.config/systemd/user/
+  system_unit:
+    TargetFilename|startswith:
+      - /etc/systemd/system/
+      - /usr/lib/systemd/system/
+  unit_extension:
+    TargetFilename|endswith:
+      - .service
+      - .timer
+      - .socket
+      - .path
+  benign:
+    Image|endswith:
+      - /dpkg
+      - /rpm
+      - /dnf
+      - /apt
+  condition: (user_unit or system_unit) and unit_extension and not benign

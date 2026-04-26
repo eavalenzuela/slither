@@ -1,0 +1,26 @@
+title: /etc/passwd read via cat or getent
+id: 8b7c4d00-0001-4000-8000-000000000018
+status: experimental
+description: |
+  cat /etc/passwd or getent passwd — account enumeration (T1087.001).
+  /etc/passwd is world-readable so the signal is noisy on its own; pair
+  with execution context for higher confidence in production.
+level: low
+tags:
+  - attack.discovery
+  - attack.t1087.001
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  cat_or_getent:
+    Image|endswith:
+      - /cat
+      - /getent
+      - /less
+      - /more
+  passwd_target:
+    CommandLine|contains:
+      - /etc/passwd
+      - 'getent passwd'
+  condition: cat_or_getent and passwd_target

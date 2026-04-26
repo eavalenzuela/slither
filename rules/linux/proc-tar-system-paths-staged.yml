@@ -1,0 +1,38 @@
+title: tar archive of system paths staged in /tmp
+id: 8b7c4d00-0001-4000-8000-00000000002c
+status: experimental
+description: |
+  tar invoked with create-archive flags whose argv references both a
+  /tmp/ or /dev/shm/ output path AND a system source path
+  (/etc, /var/log, /home, /root). T1560.001 (Archive Collected Data:
+  Archive via Utility) followed by staging.
+level: medium
+tags:
+  - attack.collection
+  - attack.t1560.001
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  archiver:
+    Image|endswith:
+      - /tar
+  create_flags:
+    CommandLine|contains:
+      - ' -c'
+      - 'czf'
+      - 'cvf'
+      - 'cjf'
+      - 'cJf'
+      - '--create'
+  staging_target:
+    CommandLine|contains:
+      - /tmp/
+      - /dev/shm/
+  system_source:
+    CommandLine|contains:
+      - /etc/
+      - /var/log/
+      - /home/
+      - /root/
+  condition: archiver and create_flags and staging_target and system_source

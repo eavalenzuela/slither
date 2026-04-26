@@ -1,0 +1,32 @@
+title: curl invoked with a custom Agent-shaped User-Agent
+id: 8b7c4d00-0001-4000-8000-000000000023
+status: experimental
+description: |
+  curl / wget called with -A or --user-agent setting a string matching
+  the 'Foo/version' pattern typical of custom implant beacons. T1071.001
+  (HTTP/S C2). Tunable via additional User-Agent allowlists in
+  production; default rule fires on any custom Agent-style UA.
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1071.001
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  downloader:
+    Image|endswith:
+      - /curl
+      - /wget
+  ua_flag:
+    CommandLine|contains:
+      - ' -A '
+      - ' --user-agent '
+      - ' -A"'
+      - ' -A '''
+  agent_shape:
+    CommandLine|contains:
+      - 'Agent/'
+      - 'Beacon/'
+      - 'Implant/'
+  condition: downloader and ua_flag and agent_shape

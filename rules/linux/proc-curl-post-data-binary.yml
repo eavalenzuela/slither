@@ -1,0 +1,28 @@
+title: curl uploading a file payload
+id: 8b7c4d00-0001-4000-8000-00000000002f
+status: experimental
+description: |
+  curl invoked with a file-payload reference: `--data-binary @<file>`,
+  `--data @<file>`, `-d @<file>`, `-T <file>`, or `--upload-file <file>`.
+  The file-payload is the signal — bare `-X POST` is matched by every
+  scripted REST/webhook call and is not by itself suspicious. T1041
+  (Exfiltration Over C2 Channel).
+level: high
+tags:
+  - attack.exfiltration
+  - attack.t1041
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  curl:
+    Image|endswith:
+      - /curl
+  file_payload:
+    CommandLine|contains:
+      - '--data-binary @'
+      - '--data @'
+      - '-d @'
+      - ' -T '
+      - ' --upload-file '
+  condition: curl and file_payload

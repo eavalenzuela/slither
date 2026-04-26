@@ -1,0 +1,25 @@
+title: update-motd.d script written
+id: 8b7c4d00-0001-4000-8000-000000000027
+status: experimental
+description: |
+  A file was written under an update-motd.d/ directory. T1037.004
+  (Boot or Logon Initialization Scripts: RC Scripts) — motd scripts
+  execute on every interactive login and are a low-friction persistence
+  primitive. Matches both the canonical /etc/update-motd.d/ path and
+  any sandboxed equivalent containing 'update-motd.d/'.
+level: high
+tags:
+  - attack.persistence
+  - attack.t1037.004
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection:
+    TargetFilename|contains:
+      - update-motd.d/
+  benign:
+    Image|endswith:
+      - /dpkg
+      - /rpm
+  condition: selection and not benign

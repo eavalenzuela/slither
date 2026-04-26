@@ -1,0 +1,22 @@
+title: Connection to a well-known Tor port
+id: 8b7c4d00-0001-4000-8000-000000000025
+status: experimental
+description: |
+  Outbound connection to TCP 9050 (Tor SOCKS), 9051 (Tor control), or
+  9001 (Tor relay/OR). T1090.003 (Multi-hop Proxy: Tor). Connection
+  attempts to these ports — even on loopback — are unusual outside of
+  Tor itself running.
+level: high
+tags:
+  - attack.command_and_control
+  - attack.t1090.003
+logsource:
+  product: linux
+  category: network_connection
+detection:
+  selection:
+    DestinationPort:
+      - 9050
+      - 9051
+      - 9001
+  condition: selection

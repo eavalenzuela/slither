@@ -1,0 +1,30 @@
+title: dd reading from /dev/urandom or /dev/zero into a file
+id: 8b7c4d00-0001-4000-8000-000000000032
+status: experimental
+description: |
+  dd invoked with if=/dev/urandom or if=/dev/zero AND of= a file path
+  (not /dev/null). T1561.001 (Disk Content Wipe) when targeting block
+  devices; data-destruction primitive when targeting files.
+level: high
+tags:
+  - attack.impact
+  - attack.t1561.001
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  dd:
+    Image|endswith:
+      - /dd
+  random_source:
+    CommandLine|contains:
+      - 'if=/dev/urandom'
+      - 'if=/dev/zero'
+      - 'if=/dev/random'
+  file_target:
+    CommandLine|contains:
+      - 'of=/'
+  not_null:
+    CommandLine|contains:
+      - 'of=/dev/null'
+  condition: dd and random_source and file_target and not not_null

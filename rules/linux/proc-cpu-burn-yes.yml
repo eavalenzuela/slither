@@ -1,0 +1,28 @@
+title: yes piped to /dev/null (CPU burn)
+id: 8b7c4d00-0001-4000-8000-000000000034
+status: experimental
+description: |
+  Shell pipeline `yes > /dev/null` (or yes | dd of=/dev/null) — a
+  common cryptojacking-stand-in / CPU-saturation primitive. T1496
+  (Resource Hijacking). Low-confidence on its own; pair with
+  long-runtime correlation in production.
+level: low
+tags:
+  - attack.impact
+  - attack.t1496
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  shell:
+    Image|endswith:
+      - /bash
+      - /sh
+      - /dash
+      - /zsh
+  yes_burn:
+    CommandLine|contains:
+      - 'yes > /dev/null'
+      - 'yes >/dev/null'
+      - 'yes | dd of=/dev/null'
+  condition: shell and yes_burn

@@ -1,0 +1,22 @@
+title: Host metadata enumeration via hostnamectl
+id: 8b7c4d00-0001-4000-8000-000000000017
+status: experimental
+description: |
+  hostnamectl prints kernel + machine-id + chassis info — a recon
+  primitive (T1082 System Information Discovery). Any single
+  invocation is a weak signal on its own; sysadmins also run this
+  interactively. Treated as a hunting pivot rather than a paging
+  finding — pair with other recon events on the same host or shell
+  session for higher confidence.
+level: low
+tags:
+  - attack.discovery
+  - attack.t1082
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith:
+      - /hostnamectl
+  condition: selection

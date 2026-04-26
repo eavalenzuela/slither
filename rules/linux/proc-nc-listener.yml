@@ -1,0 +1,30 @@
+title: nc / ncat / socat invoked in listener mode
+id: 8b7c4d00-0001-4000-8000-000000000024
+status: experimental
+description: |
+  nc / ncat with -l (listener) or socat with a LISTEN: spec — bind-shell
+  staging primitive (T1095 Non-Application Layer Protocol). Noisy on
+  dev hosts; pair with execution context in production.
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1095
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  tool:
+    Image|endswith:
+      - /nc
+      - /ncat
+      - /socat
+  listen_flag:
+    CommandLine|contains:
+      - ' -l '
+      - ' -lp '
+      - ' -lp'
+      - ' -lk '
+      - ' --listen'
+      - 'LISTEN:'
+      - 'TCP-LISTEN:'
+  condition: tool and listen_flag

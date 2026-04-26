@@ -1,0 +1,28 @@
+title: Shell fork-bomb pattern in argv
+id: 8b7c4d00-0001-4000-8000-000000000033
+status: experimental
+description: |
+  bash / sh invoked with the canonical fork-bomb function definition
+  ':(){ :|:& };:' or recognizable variants. T1499 (Endpoint Denial of
+  Service: Resource Exhaustion). Shape is unique enough to be a
+  near-zero-FP marker.
+level: high
+tags:
+  - attack.impact
+  - attack.t1499
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  shell:
+    Image|endswith:
+      - /bash
+      - /sh
+      - /dash
+      - /zsh
+  bomb_shape:
+    CommandLine|contains:
+      - ':(){'
+      - ':|:&'
+      - ':|: &'
+  condition: shell and bomb_shape

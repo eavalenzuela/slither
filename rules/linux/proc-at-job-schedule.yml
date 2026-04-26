@@ -1,0 +1,21 @@
+title: at-job scheduled
+id: 8b7c4d00-0001-4000-8000-000000000028
+status: experimental
+description: |
+  `at` invoked to schedule a one-shot future command. T1053.002
+  (Scheduled Task/Job: At). Far rarer than cron in production; any
+  invocation is signal-worthy.
+level: medium
+tags:
+  - attack.persistence
+  - attack.execution
+  - attack.t1053.002
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith:
+      - /at
+      - /batch
+  condition: selection

@@ -1,0 +1,35 @@
+title: curl PUT to a cloud object-storage endpoint
+id: 8b7c4d00-0001-4000-8000-000000000030
+status: experimental
+description: |
+  curl invoked with PUT against a cloud-storage hostname
+  (s3.amazonaws.com, storage.googleapis.com, *.blob.core.windows.net).
+  T1567.002 (Exfiltration to Cloud Storage). Even when the request
+  fails (DNS, auth, etc.) the URL pattern is the signal.
+level: high
+tags:
+  - attack.exfiltration
+  - attack.t1567.002
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  curl:
+    Image|endswith:
+      - /curl
+      - /wget
+  put_method:
+    CommandLine|contains:
+      - ' -X PUT'
+      - ' --request PUT'
+      - ' -T '
+      - ' --upload-file '
+  cloud_host:
+    CommandLine|contains:
+      - s3.amazonaws.com
+      - .s3.
+      - storage.googleapis.com
+      - .blob.core.windows.net
+      - .digitaloceanspaces.com
+      - r2.cloudflarestorage.com
+  condition: curl and put_method and cloud_host

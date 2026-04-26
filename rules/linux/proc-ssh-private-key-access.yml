@@ -1,0 +1,33 @@
+title: SSH private key referenced by file-handling tool
+id: 8b7c4d00-0001-4000-8000-00000000001d
+status: experimental
+description: |
+  cat / cp / scp / rsync / tar invoked against an SSH private-key
+  filename (id_rsa, id_ed25519, id_ecdsa, id_dsa). T1552.004 (Unsecured
+  Credentials: Private Keys). Matches the basename so sandboxed BAS
+  tests under /tmp also fire.
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1552.004
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  file_tool:
+    Image|endswith:
+      - /cat
+      - /cp
+      - /install
+      - /scp
+      - /rsync
+      - /tar
+      - /xxd
+      - /base64
+  key_filename:
+    CommandLine|contains:
+      - id_rsa
+      - id_ed25519
+      - id_ecdsa
+      - id_dsa
+  condition: file_tool and key_filename

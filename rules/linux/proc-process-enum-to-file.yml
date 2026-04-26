@@ -1,0 +1,29 @@
+title: Process listing dumped to a sandbox file
+id: 8b7c4d00-0001-4000-8000-00000000001a
+status: experimental
+description: |
+  ps -ef / ps auxf with output redirected to /tmp or /dev/shm. T1057
+  (Process Discovery) followed by staging — pair signal that's much
+  higher confidence than ps alone.
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1057
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  ps_dump:
+    CommandLine|contains:
+      - 'ps -ef'
+      - 'ps auxf'
+      - 'ps aux'
+  staging_target:
+    CommandLine|contains:
+      - '> /tmp/'
+      - '>/tmp/'
+      - '> /dev/shm/'
+      - '>/dev/shm/'
+      - '>> /tmp/'
+      - '>>/tmp/'
+  condition: ps_dump and staging_target

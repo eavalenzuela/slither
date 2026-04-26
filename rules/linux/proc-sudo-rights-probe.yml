@@ -1,0 +1,25 @@
+title: Non-interactive sudo rights probe
+id: 8b7c4d00-0001-4000-8000-00000000001b
+status: experimental
+description: |
+  sudo -n -l (or sudo --non-interactive --list) — probes what the
+  current user can run via sudo without prompting. Strong recon signal
+  (T1033 / T1069.001) and rare in normal interactive sessions.
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1033
+  - attack.t1069.001
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  sudo_probe:
+    Image|endswith:
+      - /sudo
+    CommandLine|contains:
+      - '-n -l'
+      - '-l -n'
+      - '--non-interactive --list'
+      - '--list --non-interactive'
+  condition: sudo_probe

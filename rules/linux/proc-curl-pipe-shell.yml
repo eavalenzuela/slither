@@ -1,19 +1,29 @@
 title: Download and pipe to shell
 id: 8b7c4d00-0001-4000-8000-000000000003
-description: curl / wget piped directly into a shell interpreter.
+description: |
+  curl / wget piped directly into a shell interpreter. Matches the parent
+  shell process — not curl/wget — because the pipeline only appears in the
+  shell's argv (the redirect/pipe is processed by the shell before exec).
 level: high
 logsource:
   product: linux
   category: process_creation
 detection:
-  downloader:
+  shell:
     Image|endswith:
-      - /curl
-      - /wget
+      - /sh
+      - /bash
+      - /dash
+      - /zsh
+      - /ksh
+  downloader_in_cmdline:
+    CommandLine|contains:
+      - 'curl '
+      - 'wget '
   pipe_to_shell:
     CommandLine|contains:
       - '| sh'
       - '| bash'
       - '|sh'
       - '|bash'
-  condition: downloader and pipe_to_shell
+  condition: shell and downloader_in_cmdline and pipe_to_shell

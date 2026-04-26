@@ -1,0 +1,29 @@
+title: /proc/*/environ scraped for credentials
+id: 8b7c4d00-0001-4000-8000-00000000001f
+status: experimental
+description: |
+  cat / grep / strings against a /proc/<pid>/environ path. Process
+  environment scraping is a credential-harvesting technique
+  (T1552.001 / T1003) and rare outside diagnostic tooling.
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1552.001
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  reader:
+    Image|endswith:
+      - /cat
+      - /grep
+      - /egrep
+      - /strings
+      - /xxd
+  proc_environ:
+    CommandLine|contains:
+      - /environ
+  proc_path:
+    CommandLine|contains:
+      - /proc/
+  condition: reader and proc_environ and proc_path

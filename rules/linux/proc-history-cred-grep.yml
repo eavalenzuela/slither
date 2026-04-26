@@ -1,0 +1,38 @@
+title: Shell history grepped for credential-shaped strings
+id: 8b7c4d00-0001-4000-8000-00000000001c
+status: experimental
+description: |
+  grep / awk / rg invoked against a shell history file looking for
+  password=, api_key=, secret=, token=. T1552.003 (Unsecured Credentials:
+  Bash History).
+level: medium
+tags:
+  - attack.credential_access
+  - attack.t1552.003
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  search_tool:
+    Image|endswith:
+      - /grep
+      - /egrep
+      - /awk
+      - /rg
+      - /sed
+  cred_pattern:
+    CommandLine|contains:
+      - 'password='
+      - 'passwd='
+      - 'api_key='
+      - 'apikey='
+      - 'secret='
+      - 'token='
+      - 'AWS_SECRET'
+  history_target:
+    CommandLine|contains:
+      - .bash_history
+      - .zsh_history
+      - .history
+      - /history
+  condition: search_tool and cred_pattern and history_target

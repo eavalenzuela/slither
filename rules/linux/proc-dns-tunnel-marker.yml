@@ -1,0 +1,26 @@
+title: DNS query containing base32-padded subdomain
+id: 8b7c4d00-0001-4000-8000-000000000022
+status: experimental
+description: |
+  dig / host / nslookup whose argv contains '====' — base32 padding,
+  which is unique to encoded DNS-tunnel subdomain payloads
+  (T1572 Protocol Tunneling). Real domain names never contain '====';
+  this is a near-zero-false-positive marker.
+level: high
+tags:
+  - attack.command_and_control
+  - attack.t1572
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  resolver:
+    Image|endswith:
+      - /dig
+      - /host
+      - /nslookup
+      - /drill
+  base32_padding:
+    CommandLine|contains:
+      - '===='
+  condition: resolver and base32_padding

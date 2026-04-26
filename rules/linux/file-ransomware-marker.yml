@@ -1,0 +1,32 @@
+title: Ransomware-shaped file marker
+id: 8b7c4d00-0001-4000-8000-000000000031
+status: experimental
+description: |
+  A file was written whose basename or extension matches common
+  ransomware artifacts: RANSOM_NOTE.txt / DECRYPT_INSTRUCTIONS.* or
+  files renamed with .locked / .encrypted / .ransom / .crypt suffixes.
+  T1486 (Data Encrypted for Impact). Even one such write on a host is
+  signal-worthy; sustained writes are page-immediately material.
+level: high
+tags:
+  - attack.impact
+  - attack.t1486
+logsource:
+  product: linux
+  category: file_event
+detection:
+  ransom_note:
+    TargetFilename|contains:
+      - /RANSOM_NOTE
+      - /HOW_TO_DECRYPT
+      - /DECRYPT_INSTRUCTIONS
+      - /README_FOR_DECRYPT
+  locked_extension:
+    TargetFilename|endswith:
+      - .locked
+      - .encrypted
+      - .ransom
+      - .crypt
+      - .crypted
+      - .eyeexam-locked
+  condition: ransom_note or locked_extension

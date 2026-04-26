@@ -1,0 +1,28 @@
+title: Network listener enumeration via ss/netstat
+id: 8b7c4d00-0001-4000-8000-000000000019
+status: experimental
+description: |
+  ss or netstat invoked with the -tulpn / -atn / -plntu flag combos used
+  by recon to inventory listening sockets and owning processes.
+  T1016 (System Network Configuration Discovery).
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1016
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  enum_tool:
+    Image|endswith:
+      - /ss
+      - /netstat
+  enum_flags:
+    CommandLine|contains:
+      - '-tulpn'
+      - '-tulp'
+      - '-tulnp'
+      - '-plntu'
+      - '-atn'
+      - '-anp'
+  condition: enum_tool and enum_flags
