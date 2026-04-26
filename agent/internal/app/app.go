@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"runtime"
@@ -18,6 +19,7 @@ import (
 	grpcsink "github.com/t3rmit3/slither/agent/internal/output/grpc"
 	"github.com/t3rmit3/slither/agent/internal/ruleengine"
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
+	applog "github.com/t3rmit3/slither/pkg/log"
 	"github.com/t3rmit3/slither/pkg/ocsf"
 	"github.com/t3rmit3/slither/pkg/version"
 	pb "github.com/t3rmit3/slither/proto/gen/slither/v1"
@@ -34,6 +36,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	if cfg == nil {
 		return fmt.Errorf("app: nil config")
 	}
+	applog.Init(cfg.Agent.LogLevel)
 
 	telem := telemetry.NewCounters()
 
@@ -88,6 +91,10 @@ report:
 	// Phase 1 DiagReport: dump the final counter snapshot to stderr on
 	// exit (exit-criterion #3 in §3.5). Load tests parse this to compute
 	// drop-rate baselines; operators use it for quick health checks.
+	//
+	// Operational contract: scripts/load-test.sh greps `^telemetry:` from
+	// agent stderr — keep this as a raw fmt.Fprintf rather than slog so
+	// the line shape stays stable across log_level changes.
 	snap := telem.Snapshot()
 	fmt.Fprintf(os.Stderr,
 		"telemetry: events=%d dropped=%d (collector=%d dispatch=%d enricher=%d engine=%d output=%d) detections=%d ringbuf_overflows=%d output_reconnects=%d heartbeats_sent=%d\n",
@@ -123,17 +130,17 @@ func watchReload(ctx context.Context, configPath string, enr enricher.Enricher, 
 func applyReload(configPath string, enr enricher.Enricher, eng ruleengine.Engine) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "reload: %v\n", err)
+		slog.Error("reload: read config", "err", err)
 		return
 	}
 	rules, err := loadRules(cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "reload rules: %v\n", err)
+		slog.Error("reload: compile rules", "err", err)
 		return
 	}
 	eng.ReplaceRules(rules)
 	enr.ReloadFileFilter(cfg.Collectors.File)
-	fmt.Fprintf(os.Stderr, "reload: applied %d rules\n", len(rules))
+	slog.Info("reload: applied rules", "rule_count", len(rules), "source", "sighup")
 }
 
 func isCancelled(err error, ctx context.Context) bool {
@@ -172,26 +179,33 @@ func newSink(cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engin
 // individual rules are silently skipped so a single bad rule from the
 // server can't take all rules offline; the surviving rules ship.
 //
-// A single-line stderr summary fires only when the rule count changes
-// between successive applies — the steady-state pushes (debounced
-// Refresh + 30s fallback poll) would otherwise spam every cycle. The
-// transition log is enough to diagnose the empty-RuleSet failure mode
-// (e.g. server-side compile rejected every row) caught during #46
-// validation.
+// The rule-count transition is logged at info; steady-state pushes
+// (debounced Refresh + 30s fallback poll) log at debug so operators
+// running --log-level=info see only changes. The transition log is
+// enough to diagnose the empty-RuleSet failure mode (e.g. server-side
+// compile rejected every row) caught during #46 validation.
 func applyRuleSetTo(eng ruleengine.Engine) func(*pb.RuleSet) {
 	lastCount := -1
 	return func(rs *pb.RuleSet) {
 		compiled, skipped, err := compileRuleSet(rs)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "agent: ruleset apply: %v\n", err)
+			slog.Error("ruleset apply",
+				"err", err,
+				"ruleset_version", rs.GetVersion())
 			return
 		}
-		if skipped > 0 {
-			fmt.Fprintf(os.Stderr, "agent: ruleset apply: %d rule(s) skipped (compile/version mismatch)\n", skipped)
+		fields := []any{
+			"rule_count", len(compiled),
+			"skipped_count", skipped,
+			"ruleset_version", rs.GetVersion(),
+			"source", "server-push",
 		}
 		if len(compiled) != lastCount {
-			fmt.Fprintf(os.Stderr, "agent: ruleset apply: engine now running %d rule(s) (was %d)\n", len(compiled), lastCount)
+			slog.Info("ruleset apply: rule count changed",
+				append(fields, "previous_count", lastCount)...)
 			lastCount = len(compiled)
+		} else {
+			slog.Debug("ruleset apply: steady state", fields...)
 		}
 		eng.ReplaceRules(compiled)
 	}

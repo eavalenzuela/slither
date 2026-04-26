@@ -7,22 +7,35 @@
 // the struct + final-snapshot DiagReport line.
 package telemetry
 
-import "sync/atomic"
+import (
+	"sync"
+	"sync/atomic"
+)
 
 // Counters aggregates server-wide metrics. Methods are safe for concurrent use.
 type Counters struct {
-	eventsReceived  atomic.Uint64
-	eventsDropped   atomic.Uint64
-	dropsIngest     atomic.Uint64
-	dropsSubscriber atomic.Uint64
-	batchesFlushed  atomic.Uint64
-	rulesetsPushed  atomic.Uint64
-	enrollSuccess   atomic.Uint64
-	enrollRejected  atomic.Uint64
-	sessionsActive  atomic.Int64
-	sessionsClosed  atomic.Uint64
-	heartbeats      atomic.Uint64
-	authnFailures   atomic.Uint64
+	eventsReceived   atomic.Uint64
+	eventsDropped    atomic.Uint64
+	dropsIngest      atomic.Uint64
+	dropsSubscriber  atomic.Uint64
+	batchesFlushed   atomic.Uint64
+	rulesetRefreshes atomic.Uint64
+	rulesetsPushed   atomic.Uint64
+	enrollSuccess    atomic.Uint64
+	enrollRejected   atomic.Uint64
+	sessionsActive   atomic.Int64
+	sessionsClosed   atomic.Uint64
+	heartbeats       atomic.Uint64
+	authnFailures    atomic.Uint64
+
+	// subscriberPublishes counts pushes per Session subscriber name
+	// (e.g. "session:host-1"). Populated by IncSubscriberPublish on
+	// every successful stream.Send of a RuleSet so operators can see
+	// which agents are converging without hunting through Session
+	// goroutines. sync.Map fits the read-heavy snapshot path; the
+	// stored values are *atomic.Uint64 so per-key increments stay
+	// lock-free.
+	subscriberPublishes sync.Map
 }
 
 // NewCounters returns a zero-valued Counters.
@@ -47,8 +60,25 @@ func (c *Counters) IncDropSubscriber() {
 // IncBatchesFlushed — ClickHouse writer flushed one batch.
 func (c *Counters) IncBatchesFlushed() { c.batchesFlushed.Add(1) }
 
+// IncRulesetRefreshes — control hub recompiled and fanned out a RuleSet
+// snapshot. Bumped once per Refresh regardless of subscriber count.
+func (c *Counters) IncRulesetRefreshes() { c.rulesetRefreshes.Add(1) }
+
 // IncRulesetsPushed — server pushed a RuleSet to one agent session.
 func (c *Counters) IncRulesetsPushed() { c.rulesetsPushed.Add(1) }
+
+// IncSubscriberPublish bumps the per-subscriber publish counter for
+// name. Names are arbitrary strings (the SessionService uses
+// "session:<hostID>"); lazy-initialised on first observation.
+func (c *Counters) IncSubscriberPublish(name string) {
+	v, ok := c.subscriberPublishes.Load(name)
+	if !ok {
+		v, _ = c.subscriberPublishes.LoadOrStore(name, &atomic.Uint64{})
+	}
+	if counter, ok := v.(*atomic.Uint64); ok {
+		counter.Add(1)
+	}
+}
 
 // IncEnrollSuccess — Enroll RPC returned a signed cert.
 func (c *Counters) IncEnrollSuccess() { c.enrollSuccess.Add(1) }
@@ -72,34 +102,47 @@ func (c *Counters) IncAuthnFailure() { c.authnFailures.Add(1) }
 
 // Snapshot captures the current counter values.
 type Snapshot struct {
-	EventsReceived  uint64
-	EventsDropped   uint64
-	DropsIngest     uint64
-	DropsSubscriber uint64
-	BatchesFlushed  uint64
-	RulesetsPushed  uint64
-	EnrollSuccess   uint64
-	EnrollRejected  uint64
-	SessionsActive  int64
-	SessionsClosed  uint64
-	Heartbeats      uint64
-	AuthnFailures   uint64
+	EventsReceived      uint64
+	EventsDropped       uint64
+	DropsIngest         uint64
+	DropsSubscriber     uint64
+	BatchesFlushed      uint64
+	RulesetRefreshes    uint64
+	RulesetsPushed      uint64
+	EnrollSuccess       uint64
+	EnrollRejected      uint64
+	SessionsActive      int64
+	SessionsClosed      uint64
+	Heartbeats          uint64
+	AuthnFailures       uint64
+	SubscriberPublishes map[string]uint64
 }
 
 // Snapshot returns a point-in-time view of the counters.
 func (c *Counters) Snapshot() Snapshot {
+	subs := make(map[string]uint64)
+	c.subscriberPublishes.Range(func(k, v any) bool {
+		name, nameOK := k.(string)
+		counter, counterOK := v.(*atomic.Uint64)
+		if nameOK && counterOK {
+			subs[name] = counter.Load()
+		}
+		return true
+	})
 	return Snapshot{
-		EventsReceived:  c.eventsReceived.Load(),
-		EventsDropped:   c.eventsDropped.Load(),
-		DropsIngest:     c.dropsIngest.Load(),
-		DropsSubscriber: c.dropsSubscriber.Load(),
-		BatchesFlushed:  c.batchesFlushed.Load(),
-		RulesetsPushed:  c.rulesetsPushed.Load(),
-		EnrollSuccess:   c.enrollSuccess.Load(),
-		EnrollRejected:  c.enrollRejected.Load(),
-		SessionsActive:  c.sessionsActive.Load(),
-		SessionsClosed:  c.sessionsClosed.Load(),
-		Heartbeats:      c.heartbeats.Load(),
-		AuthnFailures:   c.authnFailures.Load(),
+		EventsReceived:      c.eventsReceived.Load(),
+		EventsDropped:       c.eventsDropped.Load(),
+		DropsIngest:         c.dropsIngest.Load(),
+		DropsSubscriber:     c.dropsSubscriber.Load(),
+		BatchesFlushed:      c.batchesFlushed.Load(),
+		RulesetRefreshes:    c.rulesetRefreshes.Load(),
+		RulesetsPushed:      c.rulesetsPushed.Load(),
+		EnrollSuccess:       c.enrollSuccess.Load(),
+		EnrollRejected:      c.enrollRejected.Load(),
+		SessionsActive:      c.sessionsActive.Load(),
+		SessionsClosed:      c.sessionsClosed.Load(),
+		Heartbeats:          c.heartbeats.Load(),
+		AuthnFailures:       c.authnFailures.Load(),
+		SubscriberPublishes: subs,
 	}
 }

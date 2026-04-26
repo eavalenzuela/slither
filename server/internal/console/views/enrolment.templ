@@ -1,14 +1,14 @@
 package views
 
-// EnrollmentTokens renders /enrollment-tokens. The JustMinted block
+// EnrolmentTokens renders /enrolment-tokens. The JustMinted block
 // shows the plaintext token + a copy-paste enroll command exactly
 // once — the next page render (or a refresh) sees an empty value
 // because the flash entry has already been popped.
-templ EnrollmentTokens(d EnrollmentTokensPageData) {
-	@Layout("Enrollment tokens") {
+templ EnrolmentTokens(d EnrolmentTokensPageData) {
+	@Layout("Enrolment tokens") {
 		<div class="card">
 			<h2>Mint enrolment token</h2>
-			<form method="post" action="/enrollment-tokens" class="live-filters">
+			<form method="post" action="/enrolment-tokens" class="live-filters">
 				<label>
 					hostname_hint (optional)
 					<input type="text" name="hostname_hint" placeholder="agent-prod-01"/>
@@ -71,7 +71,7 @@ templ EnrollmentTokens(d EnrollmentTokensPageData) {
 								<td class="muted">{ FormatOptionalTimestamp(t.UsedAt) }</td>
 								<td>
 									if status == TokenStatusActive {
-										<form method="post" action={ templ.SafeURL("/enrollment-tokens/" + t.ID + "/revoke") }>
+										<form method="post" action={ templ.SafeURL("/enrolment-tokens/" + t.ID + "/revoke") }>
 											<button type="submit" class="danger">Revoke</button>
 										</form>
 									}

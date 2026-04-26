@@ -11,12 +11,15 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/t3rmit3/slither/pkg/ruleast"
 	"github.com/t3rmit3/slither/pkg/version"
 	"github.com/t3rmit3/slither/server/internal/store/pg"
 )
@@ -66,10 +69,88 @@ func run() error {
 		return pg.Status(ctx, *dsn)
 	case "bootstrap-admin":
 		return bootstrapAdmin(ctx, *dsn, flag.Args()[1:])
+	case "insert-rule":
+		return insertRule(ctx, *dsn, flag.Args()[1:])
 	default:
 		usage()
 		return fmt.Errorf("unknown subcommand %q", sub)
 	}
+}
+
+// insertRule reads a Sigma YAML file (or stdin), validates that it
+// compiles via pkg/ruleast, then upserts it into the rules table. The
+// uid stamped on the row comes from the compiled rule's `id` so an
+// operator can't accidentally write a row whose uid disagrees with
+// the YAML body. updatedBy resolves a username through the users
+// table; defaults to "admin".
+func insertRule(ctx context.Context, dsn string, args []string) error {
+	fs := flag.NewFlagSet("insert-rule", flag.ExitOnError)
+	file := fs.String("file", "", "Path to Sigma YAML file ('-' = stdin)")
+	enabled := fs.Bool("enabled", true, "Insert with enabled=true (default true)")
+	updatedBy := fs.String("updated-by", "admin", "Username whose ID stamps updated_by")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *file == "" {
+		return fmt.Errorf("insert-rule: --file required ('-' for stdin)")
+	}
+
+	yamlBytes, err := readRuleSource(*file)
+	if err != nil {
+		return fmt.Errorf("insert-rule: read %s: %w", *file, err)
+	}
+
+	compiled, err := ruleast.CompileSigma(yamlBytes)
+	if err != nil {
+		return fmt.Errorf("insert-rule: compile: %w", err)
+	}
+	if compiled.ID == "" {
+		return fmt.Errorf("insert-rule: rule has no id (Sigma `id:` field is required)")
+	}
+	name := compiled.Title
+	if name == "" {
+		name = compiled.ID
+	}
+
+	store, err := pg.Open(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("insert-rule: pg open: %w", err)
+	}
+	defer store.Close()
+
+	var updatedByID string
+	user, err := store.GetUserByUsername(ctx, *updatedBy)
+	switch {
+	case errors.Is(err, pg.ErrUserNotFound):
+		return fmt.Errorf("insert-rule: --updated-by user %q not found (run bootstrap-admin first)", *updatedBy)
+	case err != nil:
+		return fmt.Errorf("insert-rule: lookup user: %w", err)
+	default:
+		updatedByID = user.ID
+	}
+
+	inserted, err := store.UpsertRule(ctx, compiled.ID, name, string(yamlBytes), updatedByID, *enabled)
+	if err != nil {
+		return err
+	}
+	verb := "updated"
+	if inserted {
+		verb = "inserted"
+	}
+	fmt.Fprintf(os.Stderr, "slither-db: %s rule %s (%s)\n", verb, compiled.ID, name)
+	return nil
+}
+
+// readRuleSource returns the bytes of path, or all of stdin when path
+// is "-". Anything else hits the filesystem so operators can pass a
+// path inside a docker volume mount.
+func readRuleSource(path string) ([]byte, error) {
+	if path == "-" {
+		return io.ReadAll(os.Stdin)
+	}
+	// #nosec G304 -- operator-supplied YAML path; insert-rule is a CLI
+	// admin tool, not a network endpoint.
+	return os.ReadFile(path)
 }
 
 // bootstrapAdmin seeds an admin user idempotently. Username defaults to
@@ -138,6 +219,11 @@ Subcommands:
                                    credentials to stdout when password is
                                    randomly generated. Honours
                                    $SLITHER_BOOTSTRAP_PASSWORD.
+  insert-rule --file YAML          Validate Sigma YAML via pkg/ruleast and
+                                   upsert into the rules table. Use '-' to
+                                   read from stdin. Flags:
+                                     --enabled (default true)
+                                     --updated-by USERNAME (default admin).
 
 Environment:
   SLITHER_STORAGE_POSTGRES_DSN  default DSN if --dsn not given

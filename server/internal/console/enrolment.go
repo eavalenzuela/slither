@@ -25,12 +25,12 @@ const (
 // without one. 1h matches the form default.
 const defaultTokenTTL = time.Hour
 
-// maxTokenTTL caps how long an enrollment token can sit unredeemed.
+// maxTokenTTL caps how long an enrolment token can sit unredeemed.
 // 7d is enough for a slow rollout; longer windows should mint new
 // tokens rather than holding one open.
 const maxTokenTTL = 7 * 24 * time.Hour
 
-func (s *Server) enrollmentTokensList(w http.ResponseWriter, r *http.Request) {
+func (s *Server) enrolmentTokensList(w http.ResponseWriter, r *http.Request) {
 	tokens, err := s.store.ListEnrollmentTokens(r.Context())
 	if err != nil {
 		http.Error(w, "list tokens failed", http.StatusInternalServerError)
@@ -38,7 +38,7 @@ func (s *Server) enrollmentTokensList(w http.ResponseWriter, r *http.Request) {
 	}
 	plain, _ := s.sm.Pop(r.Context(), flashTokenPlaintext).(string)
 	hint, _ := s.sm.Pop(r.Context(), flashTokenHint).(string)
-	render(w, r, views.EnrollmentTokens(views.EnrollmentTokensPageData{
+	render(w, r, views.EnrolmentTokens(views.EnrolmentTokensPageData{
 		Tokens:         tokens,
 		JustMinted:     plain,
 		JustMintedHint: hint,
@@ -47,11 +47,13 @@ func (s *Server) enrollmentTokensList(w http.ResponseWriter, r *http.Request) {
 	}))
 }
 
-// enrollmentTokensCreate handles POST /enrollment-tokens. Generates a
+// enrolmentTokensCreate handles POST /enrolment-tokens. Generates a
 // fresh random plaintext, hashes it, stores the row, and stashes the
 // plaintext in scs flash so the redirect renders it once. Wrapped in
-// RequireRole(admin) at registration.
-func (s *Server) enrollmentTokensCreate(w http.ResponseWriter, r *http.Request) {
+// RequireRole(admin) at registration. The pg-facing helpers retain
+// "Enrollment" in their names because the underlying schema table is
+// `enrollment_tokens` — schema migrations are append-only.
+func (s *Server) enrolmentTokensCreate(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4*1024)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
@@ -90,6 +92,8 @@ func (s *Server) enrollmentTokensCreate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Audit action string keeps the legacy "enrollment_token.create"
+	// spelling so historical audit log queries don't break.
 	_ = s.store.LogAudit(r.Context(), pg.AuditEntry{
 		ActorType: pg.ActorUser,
 		ActorID:   s.userID(r),
@@ -102,10 +106,10 @@ func (s *Server) enrollmentTokensCreate(w http.ResponseWriter, r *http.Request) 
 
 	s.sm.Put(r.Context(), flashTokenPlaintext, plaintext)
 	s.sm.Put(r.Context(), flashTokenHint, hint)
-	http.Redirect(w, r, "/enrollment-tokens", http.StatusSeeOther)
+	http.Redirect(w, r, "/enrolment-tokens", http.StatusSeeOther)
 }
 
-func (s *Server) enrollmentTokensRevoke(w http.ResponseWriter, r *http.Request) {
+func (s *Server) enrolmentTokensRevoke(w http.ResponseWriter, r *http.Request) {
 	tokenID := chi.URLParam(r, "token_id")
 	if tokenID == "" {
 		http.Error(w, "missing token_id", http.StatusBadRequest)
@@ -119,7 +123,7 @@ func (s *Server) enrollmentTokensRevoke(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "revoke failed", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/enrollment-tokens", http.StatusSeeOther)
+	http.Redirect(w, r, "/enrolment-tokens", http.StatusSeeOther)
 }
 
 // mintTokenPlaintext returns 24 random bytes as URL-safe base64. The

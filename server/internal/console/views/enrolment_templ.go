@@ -8,11 +8,11 @@ package views
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-// EnrollmentTokens renders /enrollment-tokens. The JustMinted block
+// EnrolmentTokens renders /enrolment-tokens. The JustMinted block
 // shows the plaintext token + a copy-paste enroll command exactly
 // once — the next page render (or a refresh) sees an empty value
 // because the flash entry has already been popped.
-func EnrollmentTokens(d EnrollmentTokensPageData) templ.Component {
+func EnrolmentTokens(d EnrolmentTokensPageData) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -45,7 +45,7 @@ func EnrollmentTokens(d EnrollmentTokensPageData) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"card\"><h2>Mint enrolment token</h2><form method=\"post\" action=\"/enrollment-tokens\" class=\"live-filters\"><label>hostname_hint (optional) <input type=\"text\" name=\"hostname_hint\" placeholder=\"agent-prod-01\"></label> <label>TTL (e.g. 1h, 24h) <input type=\"text\" name=\"ttl\" value=\"1h\" placeholder=\"1h\"></label> <button type=\"submit\">Mint</button></form></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"card\"><h2>Mint enrolment token</h2><form method=\"post\" action=\"/enrolment-tokens\" class=\"live-filters\"><label>hostname_hint (optional) <input type=\"text\" name=\"hostname_hint\" placeholder=\"agent-prod-01\"></label> <label>TTL (e.g. 1h, 24h) <input type=\"text\" name=\"ttl\" value=\"1h\" placeholder=\"1h\"></label> <button type=\"submit\">Mint</button></form></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -62,7 +62,7 @@ func EnrollmentTokens(d EnrollmentTokensPageData) templ.Component {
 					var templ_7745c5c3_Var3 string
 					templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(d.JustMintedHint)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `enrollment.templ`, Line: 28, Col: 61}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `server/internal/console/views/enrolment.templ`, Line: 28, Col: 61}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 					if templ_7745c5c3_Err != nil {
@@ -80,7 +80,7 @@ func EnrollmentTokens(d EnrollmentTokensPageData) templ.Component {
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(d.JustMinted)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `enrollment.templ`, Line: 31, Col: 45}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `server/internal/console/views/enrolment.templ`, Line: 31, Col: 45}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -93,7 +93,7 @@ func EnrollmentTokens(d EnrollmentTokensPageData) templ.Component {
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(d.DefaultServer)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `enrollment.templ`, Line: 34, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `server/internal/console/views/enrolment.templ`, Line: 34, Col: 30}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -106,7 +106,7 @@ func EnrollmentTokens(d EnrollmentTokensPageData) templ.Component {
 				var templ_7745c5c3_Var6 string
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(d.JustMinted)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `enrollment.templ`, Line: 35, Col: 27}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `server/internal/console/views/enrolment.templ`, Line: 35, Col: 27}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 				if templ_7745c5c3_Err != nil {
@@ -149,7 +149,7 @@ func EnrollmentTokens(d EnrollmentTokensPageData) templ.Component {
 					var templ_7745c5c3_Var8 string
 					templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var7).String())
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `enrollment.templ`, Line: 1, Col: 0}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `server/internal/console/views/enrolment.templ`, Line: 1, Col: 0}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 					if templ_7745c5c3_Err != nil {
@@ -162,7 +162,7 @@ func EnrollmentTokens(d EnrollmentTokensPageData) templ.Component {
 					var templ_7745c5c3_Var9 string
 					templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(string(status))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `enrollment.templ`, Line: 61, Col: 101}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `server/internal/console/views/enrolment.templ`, Line: 61, Col: 101}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 					if templ_7745c5c3_Err != nil {
@@ -185,7 +185,7 @@ func EnrollmentTokens(d EnrollmentTokensPageData) templ.Component {
 						var templ_7745c5c3_Var10 string
 						templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(t.HostnameHint)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `enrollment.templ`, Line: 66, Col: 32}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `server/internal/console/views/enrolment.templ`, Line: 66, Col: 32}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 						if templ_7745c5c3_Err != nil {
@@ -203,7 +203,7 @@ func EnrollmentTokens(d EnrollmentTokensPageData) templ.Component {
 					var templ_7745c5c3_Var11 string
 					templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(FormatTimestamp(t.CreatedAt))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `enrollment.templ`, Line: 69, Col: 56}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `server/internal/console/views/enrolment.templ`, Line: 69, Col: 56}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 					if templ_7745c5c3_Err != nil {
@@ -216,7 +216,7 @@ func EnrollmentTokens(d EnrollmentTokensPageData) templ.Component {
 					var templ_7745c5c3_Var12 string
 					templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(FormatTimestamp(t.ExpiresAt))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `enrollment.templ`, Line: 70, Col: 56}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `server/internal/console/views/enrolment.templ`, Line: 70, Col: 56}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 					if templ_7745c5c3_Err != nil {
@@ -229,7 +229,7 @@ func EnrollmentTokens(d EnrollmentTokensPageData) templ.Component {
 					var templ_7745c5c3_Var13 string
 					templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(FormatOptionalTimestamp(t.UsedAt))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `enrollment.templ`, Line: 71, Col: 61}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `server/internal/console/views/enrolment.templ`, Line: 71, Col: 61}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 					if templ_7745c5c3_Err != nil {
@@ -245,9 +245,9 @@ func EnrollmentTokens(d EnrollmentTokensPageData) templ.Component {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var14 templ.SafeURL
-						templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/enrollment-tokens/" + t.ID + "/revoke"))
+						templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/enrolment-tokens/" + t.ID + "/revoke"))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `enrollment.templ`, Line: 74, Col: 94}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `server/internal/console/views/enrolment.templ`, Line: 74, Col: 93}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 						if templ_7745c5c3_Err != nil {
@@ -274,7 +274,7 @@ func EnrollmentTokens(d EnrollmentTokensPageData) templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Enrollment tokens").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Enrolment tokens").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

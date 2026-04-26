@@ -6,11 +6,11 @@ import (
 	"github.com/t3rmit3/slither/server/internal/store/pg"
 )
 
-// EnrollmentTokensPageData drives /enrollment-tokens. JustMinted is
+// EnrolmentTokensPageData drives /enrolment-tokens. JustMinted is
 // the plaintext token shown exactly once on the redirect after a
-// successful POST /enrollment-tokens (carried via the scs flash
+// successful POST /enrolment-tokens (carried via the scs flash
 // store). Empty on every page after the first.
-type EnrollmentTokensPageData struct {
+type EnrolmentTokensPageData struct {
 	Tokens         []pg.EnrollmentTokenRow
 	JustMinted     string // plaintext, displayed once
 	JustMintedHint string // hostname_hint that was attached
@@ -31,7 +31,7 @@ const (
 // Status returns the current state of a token row given the current
 // wallclock. Used trumps expired (a token used right before expiry
 // is functionally consumed; the audit row still tells the full story).
-func TokenRowStatus(d EnrollmentTokensPageData, r pg.EnrollmentTokenRow) TokenStatus {
+func TokenRowStatus(d EnrolmentTokensPageData, r pg.EnrollmentTokenRow) TokenStatus {
 	if r.UsedAt != nil {
 		return TokenStatusUsed
 	}

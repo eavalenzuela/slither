@@ -36,7 +36,7 @@ import (
 // optional — pass it to enable the live-tail SSE page (#42); leaving
 // it nil hides the route. ChStore is optional — pass it to enable the
 // events search page (#43). DefaultEnrollServer is the host:port the
-// /enrollment-tokens page renders into the copy-paste enroll command
+// /enrolment-tokens page renders into the copy-paste enroll command
 // (#45); empty value falls back to "<server>:9444".
 type Options struct {
 	Store               *pg.Store
@@ -142,11 +142,11 @@ func (s *Server) routes() {
 		r.With(s.RequireRole(pg.RoleAdmin)).
 			Post("/hosts/{host_id}/revoke", s.hostsRevoke)
 
-		// Enrollment-token UX (#45) — admin-only across the board.
+		// Enrolment-token UX (#45) — admin-only across the board.
 		r.With(s.RequireRole(pg.RoleAdmin)).Group(func(r chi.Router) {
-			r.Get("/enrollment-tokens", s.enrollmentTokensList)
-			r.Post("/enrollment-tokens", s.enrollmentTokensCreate)
-			r.Post("/enrollment-tokens/{token_id}/revoke", s.enrollmentTokensRevoke)
+			r.Get("/enrolment-tokens", s.enrolmentTokensList)
+			r.Post("/enrolment-tokens", s.enrolmentTokensCreate)
+			r.Post("/enrolment-tokens/{token_id}/revoke", s.enrolmentTokensRevoke)
 		})
 	})
 }

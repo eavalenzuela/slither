@@ -67,6 +67,38 @@ func (s *Store) InsertRule(ctx context.Context, uid, name, sourceYAML, updatedBy
 	return nil
 }
 
+// UpsertRule inserts a rule row, or updates name/source_yaml/enabled/
+// updated_at/updated_by when uid already exists. Operator-facing
+// convenience: re-running the insert-rule helper on the same YAML
+// edits the row in place rather than failing the unique constraint.
+// Returns whether the row was inserted (true) or updated (false).
+func (s *Store) UpsertRule(ctx context.Context, uid, name, sourceYAML, updatedBy string, enabled bool) (inserted bool, err error) {
+	var updatedByArg any
+	if updatedBy != "" {
+		u, perr := parseUUID(updatedBy)
+		if perr != nil {
+			return false, fmt.Errorf("pg.UpsertRule: parse updated_by: %w", perr)
+		}
+		updatedByArg = u
+	}
+	var xmaxIsZero bool
+	err = s.pool.QueryRow(ctx, `
+		INSERT INTO rules (uid, name, source_yaml, enabled, updated_by)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (uid) DO UPDATE SET
+			name = EXCLUDED.name,
+			source_yaml = EXCLUDED.source_yaml,
+			enabled = EXCLUDED.enabled,
+			updated_by = EXCLUDED.updated_by,
+			updated_at = now()
+		RETURNING (xmax = 0) AS inserted
+	`, uid, name, sourceYAML, enabled, updatedByArg).Scan(&xmaxIsZero)
+	if err != nil {
+		return false, fmt.Errorf("pg.UpsertRule: %w", err)
+	}
+	return xmaxIsZero, nil
+}
+
 // SetRuleEnabled toggles the enabled flag and bumps updated_at. The
 // trigger fires either way so a flip-then-flop within the LISTEN poll
 // window still produces at least one notification.

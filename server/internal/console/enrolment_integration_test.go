@@ -1,9 +1,9 @@
 //go:build integration
 
 // End-to-end tests for #45 enrollment-token UX. Verifies:
-//   - Admin POST /enrollment-tokens mints a row + flashes the
+//   - Admin POST /enrolment-tokens mints a row + flashes the
 //     plaintext exactly once on the next render.
-//   - Subsequent /enrollment-tokens GET no longer shows the plaintext.
+//   - Subsequent /enrolment-tokens GET no longer shows the plaintext.
 //   - Revoke flips used_at; the Enroll RPC's ClaimEnrollmentToken
 //     then errors with ErrTokenUsed for that token.
 //   - Viewer denied on POST mint + revoke.
@@ -22,14 +22,14 @@ import (
 	"github.com/t3rmit3/slither/server/internal/store/pg"
 )
 
-func TestEnrollmentTokens_AdminMintRevokeFlow(t *testing.T) {
+func TestEnrolmentTokens_AdminMintRevokeFlow(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	env := setupHostsEnv(ctx, t, pg.RoleAdmin)
 	defer env.cleanup()
 
 	// Mint via the admin form.
-	resp := postFormCookie(t, env.ts, env.cookie, "/enrollment-tokens", url.Values{
+	resp := postFormCookie(t, env.ts, env.cookie, "/enrolment-tokens", url.Values{
 		"hostname_hint": {"agent-mint-1"},
 		"ttl":           {"2h"},
 	})
@@ -38,7 +38,7 @@ func TestEnrollmentTokens_AdminMintRevokeFlow(t *testing.T) {
 	}
 
 	// First GET after mint shows the plaintext block.
-	body := getBody(t, env.ts, env.cookie, "/enrollment-tokens")
+	body := getBody(t, env.ts, env.cookie, "/enrolment-tokens")
 	if !strings.Contains(body, "copy now, it will not be shown again") {
 		t.Errorf("flash banner missing on first render after mint")
 	}
@@ -49,7 +49,7 @@ func TestEnrollmentTokens_AdminMintRevokeFlow(t *testing.T) {
 	}
 
 	// Second GET — flash already popped.
-	body2 := getBody(t, env.ts, env.cookie, "/enrollment-tokens")
+	body2 := getBody(t, env.ts, env.cookie, "/enrolment-tokens")
 	if strings.Contains(body2, plaintext) {
 		t.Errorf("plaintext leaked on second render — flash should have been one-shot")
 	}
@@ -71,14 +71,14 @@ func TestEnrollmentTokens_AdminMintRevokeFlow(t *testing.T) {
 	}
 
 	// Mint another token, then revoke it before any agent claims it.
-	resp = postFormCookie(t, env.ts, env.cookie, "/enrollment-tokens", url.Values{
+	resp = postFormCookie(t, env.ts, env.cookie, "/enrolment-tokens", url.Values{
 		"hostname_hint": {"agent-revoke-1"},
 		"ttl":           {"1h"},
 	})
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("second mint status = %d", resp.StatusCode)
 	}
-	body3 := getBody(t, env.ts, env.cookie, "/enrollment-tokens")
+	body3 := getBody(t, env.ts, env.cookie, "/enrolment-tokens")
 	plaintext2 := extractTokenPlaintext(t, body3)
 	if plaintext2 == "" {
 		t.Fatal("second mint plaintext missing")
@@ -86,7 +86,7 @@ func TestEnrollmentTokens_AdminMintRevokeFlow(t *testing.T) {
 
 	tokenID := getActiveTokenID(ctx, t, env.store, "agent-revoke-1")
 	resp = postFormCookie(t, env.ts, env.cookie,
-		"/enrollment-tokens/"+tokenID+"/revoke", url.Values{})
+		"/enrolment-tokens/"+tokenID+"/revoke", url.Values{})
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("revoke status = %d, want 303", resp.StatusCode)
 	}
@@ -102,25 +102,25 @@ func TestEnrollmentTokens_AdminMintRevokeFlow(t *testing.T) {
 
 	// Re-revoke = 404 (mapped from "not found OR already used").
 	resp = postFormCookie(t, env.ts, env.cookie,
-		"/enrollment-tokens/"+tokenID+"/revoke", url.Values{})
+		"/enrolment-tokens/"+tokenID+"/revoke", url.Values{})
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("re-revoke status = %d, want 404", resp.StatusCode)
 	}
 }
 
-func TestEnrollmentTokens_ViewerDenied(t *testing.T) {
+func TestEnrolmentTokens_ViewerDenied(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	env := setupHostsEnv(ctx, t, pg.RoleViewer)
 	defer env.cleanup()
 
 	// Even the GET is admin-only — viewers shouldn't see the page.
-	body := getBody(t, env.ts, env.cookie, "/enrollment-tokens")
+	body := getBody(t, env.ts, env.cookie, "/enrolment-tokens")
 	if strings.Contains(body, "Mint enrolment token") {
 		t.Errorf("viewer should not see the mint form")
 	}
 
-	resp := postFormCookie(t, env.ts, env.cookie, "/enrollment-tokens", url.Values{
+	resp := postFormCookie(t, env.ts, env.cookie, "/enrolment-tokens", url.Values{
 		"hostname_hint": {"x"}, "ttl": {"1h"},
 	})
 	if resp.StatusCode != http.StatusForbidden {
@@ -129,13 +129,13 @@ func TestEnrollmentTokens_ViewerDenied(t *testing.T) {
 
 	// Direct revoke also 403s.
 	resp = postFormCookie(t, env.ts, env.cookie,
-		"/enrollment-tokens/00000000-0000-0000-0000-000000000000/revoke", url.Values{})
+		"/enrolment-tokens/00000000-0000-0000-0000-000000000000/revoke", url.Values{})
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("viewer revoke status = %d, want 403", resp.StatusCode)
 	}
 }
 
-func TestEnrollmentTokens_BadTTLRejected(t *testing.T) {
+func TestEnrolmentTokens_BadTTLRejected(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	env := setupHostsEnv(ctx, t, pg.RoleAdmin)
@@ -149,7 +149,7 @@ func TestEnrollmentTokens_BadTTLRejected(t *testing.T) {
 	}
 	for name, ttl := range cases {
 		t.Run(name, func(t *testing.T) {
-			resp := postFormCookie(t, env.ts, env.cookie, "/enrollment-tokens", url.Values{
+			resp := postFormCookie(t, env.ts, env.cookie, "/enrolment-tokens", url.Values{
 				"ttl": {ttl},
 			})
 			if resp.StatusCode != http.StatusBadRequest {

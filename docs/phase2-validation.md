@@ -75,7 +75,7 @@ scp /tmp/server-ca.crt agent-vm-1:/tmp/server-ca.crt
 
 (Repeat for each agent VM.)
 
-## 3. Mint an enrollment token
+## 3. Mint an enrolment token
 
 ```
 http://localhost:8080 → admin / slither-admin-dev → Enrolment
@@ -171,23 +171,51 @@ into `phase2_validation/03-events.txt`.
 
 ## 7. Server-pushed rule fires on the edge
 
-This proves the #39 rule-distribution path end-to-end. Insert a rule
-directly via `slither-db` (or via SQL through `docker compose exec
-postgres psql`):
+This proves the #39 rule-distribution path end-to-end. Push the rule
+through `scripts/insert-rule.sh`, which compiles it via `pkg/ruleast`
+before upserting — bypasses both terminal autoindent (which silently
+produces tab-indented YAML the Sigma compiler rejects) and SQL
+escape-quoting hazards. Save this YAML to `phase2-rule.yml` first:
 
-```sql
-INSERT INTO rules (uid, name, source_yaml, enabled, updated_by)
-VALUES (
-  '8b7c4d00-0001-4000-8000-000000000099',
-  'Phase 2 validation: bash exec',
-  E'title: Phase 2 validation\nid: 8b7c4d00-0001-4000-8000-000000000099\ndescription: bash launch on validation host\nlevel: medium\nlogsource:\n  product: linux\n  category: process_creation\ndetection:\n  selection:\n    Image|endswith:\n      - /bin/bash\n  condition: selection\n',
-  true,
-  (SELECT id FROM users WHERE username = 'admin' LIMIT 1)
-);
+```yaml
+title: Phase 2 validation
+id: 8b7c4d00-0001-4000-8000-000000000099
+description: bash launch on validation host
+level: medium
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith:
+      - /bin/bash
+  condition: selection
 ```
 
-Within ~1 second the agent's stderr should log
-`reload: applied N rules` (where N is one more than before).
+Then push it:
+
+```bash
+scripts/insert-rule.sh phase2-rule.yml
+```
+
+The script forwards through the bootstrap container's `slither-db
+insert-rule` subcommand, which validates the YAML, looks up the
+admin user (override with `--updated-by USERNAME`), and upserts the
+row keyed by Sigma `id`. Re-running on the same file edits in place.
+
+Within ~1 second the agent's stderr should log a structured info
+line from the server-push code path:
+
+```
+level=INFO msg="ruleset apply: rule count changed" rule_count=N skipped_count=0 ruleset_version=… source=server-push previous_count=N-1
+```
+
+(For the operator: this is from `applyRuleSetTo` in
+`agent/internal/app/app.go`, which fires at info on every rule-count
+transition. Steady-state pushes log at debug; raise the agent's
+`log_level` if you want to see the no-op pushes too.) The local
+SIGHUP-driven reload path emits a different `reload: applied N rules
+source=sighup` line — it does *not* fire on server-push.
 
 Trigger the rule on the agent:
 
@@ -199,17 +227,17 @@ The console's `/events` filtered by `class_uid=2004` should show a
 new `DetectionFinding` whose `rule.uid` matches
 `8b7c4d00-0001-4000-8000-000000000099`. Disable the rule:
 
-```sql
-UPDATE rules SET enabled = false
-WHERE uid = '8b7c4d00-0001-4000-8000-000000000099';
+```bash
+docker compose exec postgres psql -U slither slither -c \
+  "UPDATE rules SET enabled = false WHERE uid = '8b7c4d00-0001-4000-8000-000000000099';"
 ```
 
 Trigger again — no new finding should fire (within ~1 s of the
 disable taking effect through NOTIFY+debounce+push).
 
-**Capture** the SQL outputs, agent journal lines showing the
-ruleset reload, and the resulting `DetectionFinding` detail into
-`phase2_validation/04-rule-push.txt`.
+**Capture** the helper output, agent journal lines showing the
+ruleset apply transition, and the resulting `DetectionFinding`
+detail into `phase2_validation/04-rule-push.txt`.
 
 ## 8. Load test — 3 agents × stress-ng
 

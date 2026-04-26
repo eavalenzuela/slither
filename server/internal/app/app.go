@@ -15,6 +15,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"strings"
@@ -26,6 +27,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	applog "github.com/t3rmit3/slither/pkg/log"
 	pb "github.com/t3rmit3/slither/proto/gen/slither/v1"
 	"github.com/t3rmit3/slither/server/internal/config"
 	"github.com/t3rmit3/slither/server/internal/console"
@@ -46,13 +48,15 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		return fmt.Errorf("app: nil config")
 	}
 	_ = configPath
+	applog.Init(cfg.Server.LogLevel)
 
 	telem := telemetry.NewCounters()
 
-	fmt.Fprintf(os.Stderr,
-		"slither-server: log_level=%s grpc=%q enroll=%q console=%q\n",
-		cfg.Server.LogLevel,
-		cfg.Listeners.GRPC, cfg.Listeners.Enroll, cfg.Listeners.Console)
+	slog.Info("slither-server: starting",
+		"log_level", cfg.Server.LogLevel,
+		"grpc", cfg.Listeners.GRPC,
+		"enroll", cfg.Listeners.Enroll,
+		"console", cfg.Listeners.Console)
 
 	// --- Stores ---
 	pgStore, err := pg.Open(ctx, cfg.Storage.Postgres.DSN)
@@ -86,7 +90,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		FlushInterval: cfg.Storage.CH.FlushInterval,
 	})
 	writer.SetFlushErrorHandler(func(err error) {
-		fmt.Fprintf(os.Stderr, "ch flush: %v\n", err)
+		slog.Error("ch flush", "err", err)
 	})
 
 	// --- Rule distribution hub ---
@@ -133,7 +137,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		Bus:        bus,
 		ChStore:    chStore,
 		SessionKey: sessionKey,
-		// /enrollment-tokens (#45) renders this into the copy-paste
+		// /enrolment-tokens (#45) renders this into the copy-paste
 		// command. Operators override per-deployment via the
 		// SLITHER_LISTENERS_ENROLL config + a public hostname; the
 		// listener bind alone is good enough for compose smoke.
@@ -145,9 +149,10 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	fmt.Fprintf(os.Stderr,
-		"slither-server: listeners up — enroll=%s grpc=%s console=%s\n",
-		enrollLis.Addr(), sessionLis.Addr(), cfg.Listeners.Console)
+	slog.Info("slither-server: listeners up",
+		"enroll", enrollLis.Addr().String(),
+		"grpc", sessionLis.Addr().String(),
+		"console", cfg.Listeners.Console)
 
 	// --- Subsystem goroutines ---
 	var wg sync.WaitGroup
@@ -198,7 +203,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	select {
 	case <-ctx.Done():
 	case runErr = <-errs:
-		fmt.Fprintf(os.Stderr, "slither-server: shutting down on subsystem error: %v\n", runErr)
+		slog.Error("slither-server: shutting down on subsystem error", "err", runErr)
 	}
 
 	// Graceful shutdown — bounded so a hung Send doesn't block forever.
@@ -211,15 +216,23 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	_ = consoleSrv.Shutdown(shutdownCtx) //nolint:contextcheck // detached on purpose
 	wg.Wait()
 
+	// Operational contract: docs/phase2-validation.md greps `telemetry:`
+	// from server logs at shutdown — keep this as a raw fmt.Fprintf so
+	// the line shape stays stable across log_level changes.
 	snap := telem.Snapshot()
 	fmt.Fprintf(os.Stderr,
-		"telemetry: events_received=%d dropped=%d (ingest=%d subscriber=%d) batches_flushed=%d rulesets_pushed=%d enroll=%d/%d sessions_active=%d sessions_closed=%d heartbeats=%d authn_failures=%d\n",
+		"telemetry: events_received=%d dropped=%d (ingest=%d subscriber=%d) batches_flushed=%d ruleset_refreshes=%d rulesets_pushed=%d enroll=%d/%d sessions_active=%d sessions_closed=%d heartbeats=%d authn_failures=%d\n",
 		snap.EventsReceived, snap.EventsDropped,
 		snap.DropsIngest, snap.DropsSubscriber,
-		snap.BatchesFlushed, snap.RulesetsPushed,
+		snap.BatchesFlushed, snap.RulesetRefreshes, snap.RulesetsPushed,
 		snap.EnrollSuccess, snap.EnrollRejected,
 		snap.SessionsActive, snap.SessionsClosed,
 		snap.Heartbeats, snap.AuthnFailures)
+	for sub, n := range snap.SubscriberPublishes {
+		slog.Info("hub: subscriber publish total",
+			"subscriber", sub,
+			"publishes", n)
+	}
 
 	return runErr
 }

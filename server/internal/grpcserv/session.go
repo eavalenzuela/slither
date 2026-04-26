@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -152,6 +153,11 @@ func (s *SessionService) runSendLoop(sendCtx context.Context, hostID string, str
 				return
 			}
 			s.Telem.IncRulesetsPushed()
+			s.Telem.IncSubscriberPublish(subName)
+			slog.Debug("hub: subscriber received",
+				"subscriber", subName,
+				"version", rs.GetVersion(),
+				"rule_count", len(rs.GetRules()))
 		}
 	}
 }

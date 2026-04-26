@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -94,7 +95,12 @@ func (h *Hub) Refresh(ctx context.Context) (skipped int, err error) {
 	for _, ch := range subs {
 		h.publishOne(ch, rs)
 	}
-	h.telem.IncRulesetsPushed()
+	h.telem.IncRulesetRefreshes()
+	slog.Info("hub: refreshed",
+		"rule_count", len(rs.GetRules()),
+		"skipped", skipped,
+		"version", rs.GetVersion(),
+		"subscribers", len(subs))
 	return skipped, nil
 }
 
