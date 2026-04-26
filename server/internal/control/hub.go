@@ -37,8 +37,8 @@ import (
 )
 
 // astVersion is the wire format identifier for EdgeRule.compiled_ast.
-// 1 == raw Sigma YAML bytes; the agent runs CompileSigma on them.
-const astVersion = 1
+// 1 == raw Sigma YAML bytes; the agent decodes via ruleast.Compile.
+const astVersion = uint32(1)
 
 // RuleSource lists enabled rules; pg.Store satisfies it. Factored as
 // an interface so tests can pass a stub without spinning up Postgres.
@@ -156,15 +156,16 @@ func (h *Hub) publishOne(ch chan *pb.RuleSet, rs *pb.RuleSet) {
 	}
 }
 
-// buildRuleSet compiles each row's YAML to extract metadata (name,
-// severity, mitre tags) and bundles the result into a pb.RuleSet whose
-// EdgeRule.compiled_ast carries the YAML bytes for the agent to
-// recompile. version is the monotonic ruleset version assigned by the
-// caller. Returns the count of rows that failed compilation.
+// buildRuleSet compiles each row's YAML, drops server-only rules from
+// the wire payload (per ADR-0032 server plans never reach agents), and
+// bundles the rest into a pb.RuleSet whose EdgeRule.compiled_ast still
+// carries the YAML bytes for v1 agents. #54d lights up the v2 path for
+// stateful rules. Returns the count of rows that failed compilation or
+// were classified server-only — both are skipped from the agent push.
 func buildRuleSet(rows []pg.Rule, version uint64) (rs *pb.RuleSet, skipped int) {
 	rules := make([]*pb.EdgeRule, 0, len(rows))
 	for _, r := range rows {
-		compiled, err := ruleast.CompileSigma([]byte(r.SourceYAML))
+		artefact, _, class, err := ruleast.Compile([]byte(r.SourceYAML))
 		if err != nil {
 			// A row that no longer compiles is dropped from the wire
 			// payload but kept in the table — operators see the row
@@ -173,13 +174,17 @@ func buildRuleSet(rows []pg.Rule, version uint64) (rs *pb.RuleSet, skipped int) 
 			skipped++
 			continue
 		}
+		if class == ruleast.ClassificationServerOnly {
+			skipped++
+			continue
+		}
 		rules = append(rules, &pb.EdgeRule{
 			RuleId:      r.UID,
-			Name:        ruleDisplayName(r, compiled),
-			Severity:    levelToSeverity(compiled.Level),
-			MitreIds:    compiled.Tags,
+			Name:        ruleDisplayName(r, artefact.Rule),
+			Severity:    levelToSeverity(artefact.Rule.Level),
+			MitreIds:    artefact.Rule.Tags,
 			CompiledAst: []byte(r.SourceYAML),
-			AstVersion:  astVersion,
+			AstVersion:  uint32(artefact.ASTVersion),
 		})
 	}
 	return &pb.RuleSet{

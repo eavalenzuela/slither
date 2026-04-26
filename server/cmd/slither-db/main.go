@@ -100,16 +100,17 @@ func insertRule(ctx context.Context, dsn string, args []string) error {
 		return fmt.Errorf("insert-rule: read %s: %w", *file, err)
 	}
 
-	compiled, err := ruleast.CompileSigma(yamlBytes)
+	artefact, _, _, err := ruleast.Compile(yamlBytes)
 	if err != nil {
 		return fmt.Errorf("insert-rule: compile: %w", err)
 	}
-	if compiled.ID == "" {
+	rule := artefact.Rule
+	if rule.ID == "" {
 		return fmt.Errorf("insert-rule: rule has no id (Sigma `id:` field is required)")
 	}
-	name := compiled.Title
+	name := rule.Title
 	if name == "" {
-		name = compiled.ID
+		name = rule.ID
 	}
 
 	store, err := pg.Open(ctx, dsn)
@@ -129,7 +130,7 @@ func insertRule(ctx context.Context, dsn string, args []string) error {
 		updatedByID = user.ID
 	}
 
-	inserted, err := store.UpsertRule(ctx, compiled.ID, name, string(yamlBytes), updatedByID, *enabled)
+	inserted, err := store.UpsertRule(ctx, rule.ID, name, string(yamlBytes), updatedByID, *enabled)
 	if err != nil {
 		return err
 	}
@@ -137,7 +138,7 @@ func insertRule(ctx context.Context, dsn string, args []string) error {
 	if inserted {
 		verb = "inserted"
 	}
-	fmt.Fprintf(os.Stderr, "slither-db: %s rule %s (%s)\n", verb, compiled.ID, name)
+	fmt.Fprintf(os.Stderr, "slither-db: %s rule %s (%s)\n", verb, rule.ID, name)
 	return nil
 }
 

@@ -50,11 +50,11 @@ func loadRule(t *testing.T, repoRel string) *ruleast.Rule {
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	r, err := ruleast.CompileSigma(b)
+	art, _, _, err := ruleast.Compile(b)
 	if err != nil {
 		t.Fatalf("compile %s: %v", path, err)
 	}
-	return r
+	return art.Rule
 }
 
 // runOne feeds a single process-creation event into a one-rule engine and

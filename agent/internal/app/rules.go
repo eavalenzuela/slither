@@ -11,8 +11,9 @@ import (
 )
 
 // loadRules expands cfg.Rules.Paths (glob-supporting) and compiles every file
-// via ruleast.CompileSigma, then wraps the result in engine adapters. Returns
-// a nil slice when no paths are configured so the engine starts empty.
+// via ruleast.Compile, then wraps the edge artefacts in engine adapters.
+// Server-only rules in a local pack are skipped — the agent has no detection
+// engine of its own. Returns a nil slice when no paths are configured.
 func loadRules(cfg *config.Config) ([]ruleengine.CompiledRule, error) {
 	if cfg == nil || len(cfg.Rules.Paths) == 0 {
 		return nil, nil
@@ -40,11 +41,14 @@ func loadRules(cfg *config.Config) ([]ruleengine.CompiledRule, error) {
 		if err != nil {
 			return nil, fmt.Errorf("rules: read %q: %w", f, err)
 		}
-		r, err := ruleast.CompileSigma(body)
+		artefact, _, class, err := ruleast.Compile(body)
 		if err != nil {
 			return nil, fmt.Errorf("rules: compile %q: %w", f, err)
 		}
-		parsed = append(parsed, r)
+		if class == ruleast.ClassificationServerOnly {
+			continue
+		}
+		parsed = append(parsed, artefact.Rule)
 	}
 	return ruleengine.CompileRules(parsed)
 }

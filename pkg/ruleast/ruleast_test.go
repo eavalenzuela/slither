@@ -44,11 +44,11 @@ func TestCompileGolden(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read rule: %v", err)
 			}
-			rule, err := CompileSigma(src)
+			art, _, _, err := Compile(src)
 			if err != nil {
 				t.Fatalf("compile: %v", err)
 			}
-			got, err := json.MarshalIndent(ruleGolden(rule), "", "  ")
+			got, err := json.MarshalIndent(ruleGolden(art.Rule), "", "  ")
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
 			}
@@ -96,7 +96,7 @@ func TestCompileRejectsInvalid(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read: %v", err)
 			}
-			_, err = CompileSigma(src)
+			_, _, _, err = Compile(src)
 			if err == nil {
 				t.Fatalf("expected error, got nil")
 			}
@@ -124,10 +124,11 @@ func TestMatchSimpleAnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rule, err := CompileSigma(src)
+	art, _, _, err := Compile(src)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
+	rule := art.Rule
 
 	hit := mapEnv{
 		"Image":       {"/bin/bash"},
@@ -151,10 +152,11 @@ func TestMatchNotOperator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rule, err := CompileSigma(src)
+	art, _, _, err := Compile(src)
 	if err != nil {
 		t.Fatal(err)
 	}
+	rule := art.Rule
 
 	// sshd touching authorized_keys — benign branch, rule should NOT match.
 	benign := mapEnv{
@@ -180,10 +182,11 @@ func TestMatchRegex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rule, err := CompileSigma(src)
+	art, _, _, err := Compile(src)
 	if err != nil {
 		t.Fatal(err)
 	}
+	rule := art.Rule
 	if !rule.Match(mapEnv{"CommandLine": {"curl 1.2.3.4"}}) {
 		t.Errorf("regex should match IP literal")
 	}
@@ -197,10 +200,11 @@ func TestMatchNestedParens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rule, err := CompileSigma(src)
+	art, _, _, err := Compile(src)
 	if err != nil {
 		t.Fatal(err)
 	}
+	rule := art.Rule
 	// (a AND (b OR c)) AND NOT d
 	cases := []struct {
 		env  mapEnv
@@ -220,14 +224,16 @@ func TestMatchNestedParens(t *testing.T) {
 }
 
 func TestCostOrdering(t *testing.T) {
-	simple, err := CompileSigma(readRule(t, "testdata/rules/05-find-suid.yml"))
+	simpleArt, _, _, err := Compile(readRule(t, "testdata/rules/05-find-suid.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	complexRule, err := CompileSigma(readRule(t, "testdata/rules/21-proc-nested-parens.yml"))
+	complexArt, _, _, err := Compile(readRule(t, "testdata/rules/21-proc-nested-parens.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	simple := simpleArt.Rule
+	complexRule := complexArt.Rule
 	if simple.Cost() >= complexRule.Cost() {
 		t.Errorf("simple rule cost %d should be less than complex rule cost %d", simple.Cost(), complexRule.Cost())
 	}

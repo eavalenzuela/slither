@@ -8,35 +8,31 @@ import (
 	pb "github.com/t3rmit3/slither/proto/gen/slither/v1"
 )
 
-// astVersionV1 mirrors server/internal/control.astVersion. Phase 2 wire
-// format: EdgeRule.compiled_ast carries raw Sigma YAML bytes that the
-// agent feeds back into pkg/ruleast.CompileSigma. Future ast versions
-// may switch to a serialised AST.
-const astVersionV1 = 1
-
 // compileRuleSet turns a server-pushed RuleSet into the engine's
 // CompiledRule slice. EdgeRules whose ast_version isn't recognised are
-// skipped — Phase 2 only emits v1, so a mismatch means the wire freeze
-// has been broken or a future server is talking to an older agent;
-// either way silently dropping is safer than guessing the encoding.
-// Compile errors on individual rules are skipped too with a count
-// returned so callers can log without aborting the whole reload.
+// skipped — #54a only emits v1; v2 (stateful) lights up with #54d, at
+// which point the agent's deserialiser branches per ADR-0032's refusal
+// vocabulary. For now, anything outside v1 is silently dropped because
+// no server should be emitting it yet.
+//
+// Compile errors on individual rules are skipped with a count returned
+// so callers can log without aborting the whole reload.
 func compileRuleSet(rs *pb.RuleSet) (compiled []ruleengine.CompiledRule, skipped int, err error) {
 	if rs == nil {
 		return nil, 0, nil
 	}
 	parsed := make([]*ruleast.Rule, 0, len(rs.GetRules()))
 	for _, er := range rs.GetRules() {
-		if er.GetAstVersion() != astVersionV1 {
+		if ruleast.ASTVersion(er.GetAstVersion()) != ruleast.ASTVersionV1 {
 			skipped++
 			continue
 		}
-		r, cerr := ruleast.CompileSigma(er.GetCompiledAst())
-		if cerr != nil {
+		artefact, _, class, cerr := ruleast.Compile(er.GetCompiledAst())
+		if cerr != nil || class == ruleast.ClassificationServerOnly {
 			skipped++
 			continue
 		}
-		parsed = append(parsed, r)
+		parsed = append(parsed, artefact.Rule)
 	}
 	out, err := ruleengine.CompileRules(parsed)
 	if err != nil {

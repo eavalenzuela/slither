@@ -31,9 +31,11 @@ type logSourceYAML struct {
 	Service  string `yaml:"service"`
 }
 
-// CompileSigma parses one Sigma YAML document and returns the compiled rule.
-// Every returned error wraps ErrCompile.
-func CompileSigma(src []byte) (*Rule, error) {
+// compileSigma parses one Sigma YAML document and returns the compiled
+// boolean-tree rule. Internal as of §5.1 #54a — public callers use
+// Compile, which wraps this in the three-artefact return shape from
+// ADR-0032. Every returned error wraps ErrCompile.
+func compileSigma(src []byte) (*Rule, error) {
 	var doc sigmaYAML
 	dec := yaml.NewDecoder(strings.NewReader(string(src)))
 	dec.KnownFields(false)

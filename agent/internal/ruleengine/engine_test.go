@@ -16,11 +16,11 @@ import (
 // cover matches what a rule author would actually write.
 func compileFixture(t *testing.T, src string) *ruleast.Rule {
 	t.Helper()
-	r, err := ruleast.CompileSigma([]byte(src))
+	art, _, _, err := ruleast.Compile([]byte(src))
 	if err != nil {
 		t.Fatalf("compile fixture: %v", err)
 	}
-	return r
+	return art.Rule
 }
 
 func processActivity(image, cmdline string) *ocsf.ProcessActivity {
@@ -261,7 +261,7 @@ func TestEngineDetectionQueueFullExits(t *testing.T) {
 }
 
 func TestCompileRulesRejectsUnknownCategory(t *testing.T) {
-	// Forge a Rule with an unsupported category. ruleast.CompileSigma would
+	// Forge a Rule with an unsupported category. ruleast.Compile would
 	// reject it; we build the struct directly to prove the engine's own
 	// guard also catches it — defence in depth.
 	r := &ruleast.Rule{ID: "zz", Category: ruleast.Category("ddos_packet_flood")}
