@@ -26,6 +26,18 @@ func Compile(src []byte) (*EdgeArtefact, *ServerPlan, Classification, error) {
 	return classify(rule, doc.ForceEdge, doc.Lookback, doc.CrossHost)
 }
 
+// ParseRule is Compile minus the classification gate: it returns the
+// boolean-tree + aggregation Rule the compiler built from src,
+// regardless of whether the rule routes to the agent or the server.
+// The server detection engine (#58) calls this to recover the *Rule
+// for server-only rules (where Compile returns a nil EdgeArtefact and
+// the *Rule would otherwise be discarded). All compile-time errors
+// still wrap ErrCompile.
+func ParseRule(src []byte) (*Rule, error) {
+	rule, _, err := compileSigma(src)
+	return rule, err
+}
+
 // classify implements the subset of ADR-0018 predicates the compiler
 // can decide today:
 //

@@ -1,4 +1,4 @@
-package ruleengine
+package ruleeval
 
 import (
 	"strconv"
@@ -7,14 +7,15 @@ import (
 	"github.com/t3rmit3/slither/pkg/ruleast"
 )
 
-// fieldAccessor projects Sigma field names onto OCSF values for a single event
-// class. The lookup is nil for unknown fields so the Env can report (nil, false)
-// and the rule treats the predicate as a non-match, matching Sigma semantics.
-type fieldAccessor map[string]func(ocsf.Event) []string
+// Accessor projects Sigma field names onto OCSF values for a single
+// event class. Lookup of an unknown field returns nil so callers can
+// honour Sigma's missing-field-is-not-a-match contract without
+// special cases.
+type Accessor map[string]func(ocsf.Event) []string
 
-// categoryToClass maps the Sigma logsource categories the compiler accepts
-// onto the OCSF class whose events carry the same concept.
-func categoryToClass(c ruleast.Category) (ocsf.ClassID, bool) {
+// CategoryToClass maps the Sigma logsource categories the compiler
+// accepts onto the OCSF class whose events carry the same concept.
+func CategoryToClass(c ruleast.Category) (ocsf.ClassID, bool) {
 	switch c {
 	case ruleast.CategoryProcessCreation:
 		return ocsf.ClassProcessActivity, true
@@ -26,8 +27,8 @@ func categoryToClass(c ruleast.Category) (ocsf.ClassID, bool) {
 	return 0, false
 }
 
-// accessorFor returns the Sigma→OCSF projection table for a category.
-func accessorFor(c ruleast.Category) fieldAccessor {
+// AccessorFor returns the Sigma→OCSF projection table for a category.
+func AccessorFor(c ruleast.Category) Accessor {
 	switch c {
 	case ruleast.CategoryProcessCreation:
 		return processAccessor
@@ -42,7 +43,7 @@ func accessorFor(c ruleast.Category) fieldAccessor {
 // processAccessor maps the Sigma process_creation vocabulary onto fields of
 // ocsf.ProcessActivity. Field names match Sigma's canonical camel-case form;
 // aliases commonly used by public rule packs are included.
-var processAccessor = fieldAccessor{
+var processAccessor = Accessor{
 	"Image":             func(e ocsf.Event) []string { return procExePath(procOf(e)) },
 	"ProcessName":       func(e ocsf.Event) []string { return nonEmpty(procOf(e).Name) },
 	"CommandLine":       func(e ocsf.Event) []string { return nonEmpty(procOf(e).Cmdline) },
@@ -56,7 +57,7 @@ var processAccessor = fieldAccessor{
 }
 
 // fileAccessor maps Sigma file_event fields onto ocsf.FileSystemActivity.
-var fileAccessor = fieldAccessor{
+var fileAccessor = Accessor{
 	"TargetFilename": fileTargetPath,
 	"Filename":       fileTargetPath,
 	"Path":           fileTargetPath,
@@ -66,7 +67,7 @@ var fileAccessor = fieldAccessor{
 }
 
 // netAccessor maps Sigma network_connection fields onto ocsf.NetworkActivity.
-var netAccessor = fieldAccessor{
+var netAccessor = Accessor{
 	"DestinationIp":   netDstIP,
 	"DestinationPort": netDstPort,
 	"SourceIp":        netSrcIP,

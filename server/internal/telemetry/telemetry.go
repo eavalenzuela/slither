@@ -28,6 +28,15 @@ type Counters struct {
 	heartbeats       atomic.Uint64
 	authnFailures    atomic.Uint64
 
+	// detect — Phase 3 #58 server detection engine. Events seen by the
+	// engine, findings emitted, findings dropped because the alert
+	// sink wasn't draining, and per-rule LRU window evictions when a
+	// rule's group_key cardinality exceeds the configured cap.
+	detectEvents          atomic.Uint64
+	detectFindings        atomic.Uint64
+	detectFindingsDropped atomic.Uint64
+	detectStateEvicted    atomic.Uint64
+
 	// subscriberPublishes counts pushes per Session subscriber name
 	// (e.g. "session:host-1"). Populated by IncSubscriberPublish on
 	// every successful stream.Send of a RuleSet so operators can see
@@ -100,22 +109,43 @@ func (c *Counters) IncHeartbeat() { c.heartbeats.Add(1) }
 // host_id parse error, host_id not in DB, ...).
 func (c *Counters) IncAuthnFailure() { c.authnFailures.Add(1) }
 
+// IncDetectEvents — server detection engine processed one envelope.
+func (c *Counters) IncDetectEvents() { c.detectEvents.Add(1) }
+
+// IncDetectFindings — engine fired one Finding (any plan, any rule).
+func (c *Counters) IncDetectFindings() { c.detectFindings.Add(1) }
+
+// IncDetectFindingsDropped — findings channel was full at fire time;
+// the alert sink never saw this finding. Operator-visible signal that
+// downstream alert handling can't keep up.
+func (c *Counters) IncDetectFindingsDropped() { c.detectFindingsDropped.Add(1) }
+
+// IncDetectStateEvicted — engine dropped one group key from a rule's
+// bounded window because cardinality crossed the configured cap. Same
+// vocabulary as the agent's StateEvicted (#56) so dashboards group on
+// either side without a separate metric name.
+func (c *Counters) IncDetectStateEvicted() { c.detectStateEvicted.Add(1) }
+
 // Snapshot captures the current counter values.
 type Snapshot struct {
-	EventsReceived      uint64
-	EventsDropped       uint64
-	DropsIngest         uint64
-	DropsSubscriber     uint64
-	BatchesFlushed      uint64
-	RulesetRefreshes    uint64
-	RulesetsPushed      uint64
-	EnrollSuccess       uint64
-	EnrollRejected      uint64
-	SessionsActive      int64
-	SessionsClosed      uint64
-	Heartbeats          uint64
-	AuthnFailures       uint64
-	SubscriberPublishes map[string]uint64
+	EventsReceived        uint64
+	EventsDropped         uint64
+	DropsIngest           uint64
+	DropsSubscriber       uint64
+	BatchesFlushed        uint64
+	RulesetRefreshes      uint64
+	RulesetsPushed        uint64
+	EnrollSuccess         uint64
+	EnrollRejected        uint64
+	SessionsActive        int64
+	SessionsClosed        uint64
+	Heartbeats            uint64
+	AuthnFailures         uint64
+	DetectEvents          uint64
+	DetectFindings        uint64
+	DetectFindingsDropped uint64
+	DetectStateEvicted    uint64
+	SubscriberPublishes   map[string]uint64
 }
 
 // Snapshot returns a point-in-time view of the counters.
@@ -130,19 +160,23 @@ func (c *Counters) Snapshot() Snapshot {
 		return true
 	})
 	return Snapshot{
-		EventsReceived:      c.eventsReceived.Load(),
-		EventsDropped:       c.eventsDropped.Load(),
-		DropsIngest:         c.dropsIngest.Load(),
-		DropsSubscriber:     c.dropsSubscriber.Load(),
-		BatchesFlushed:      c.batchesFlushed.Load(),
-		RulesetRefreshes:    c.rulesetRefreshes.Load(),
-		RulesetsPushed:      c.rulesetsPushed.Load(),
-		EnrollSuccess:       c.enrollSuccess.Load(),
-		EnrollRejected:      c.enrollRejected.Load(),
-		SessionsActive:      c.sessionsActive.Load(),
-		SessionsClosed:      c.sessionsClosed.Load(),
-		Heartbeats:          c.heartbeats.Load(),
-		AuthnFailures:       c.authnFailures.Load(),
-		SubscriberPublishes: subs,
+		EventsReceived:        c.eventsReceived.Load(),
+		EventsDropped:         c.eventsDropped.Load(),
+		DropsIngest:           c.dropsIngest.Load(),
+		DropsSubscriber:       c.dropsSubscriber.Load(),
+		BatchesFlushed:        c.batchesFlushed.Load(),
+		RulesetRefreshes:      c.rulesetRefreshes.Load(),
+		RulesetsPushed:        c.rulesetsPushed.Load(),
+		EnrollSuccess:         c.enrollSuccess.Load(),
+		EnrollRejected:        c.enrollRejected.Load(),
+		SessionsActive:        c.sessionsActive.Load(),
+		SessionsClosed:        c.sessionsClosed.Load(),
+		Heartbeats:            c.heartbeats.Load(),
+		AuthnFailures:         c.authnFailures.Load(),
+		DetectEvents:          c.detectEvents.Load(),
+		DetectFindings:        c.detectFindings.Load(),
+		DetectFindingsDropped: c.detectFindingsDropped.Load(),
+		DetectStateEvicted:    c.detectStateEvicted.Load(),
+		SubscriberPublishes:   subs,
 	}
 }

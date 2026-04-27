@@ -32,6 +32,7 @@ import (
 	"github.com/t3rmit3/slither/server/internal/config"
 	"github.com/t3rmit3/slither/server/internal/console"
 	"github.com/t3rmit3/slither/server/internal/control"
+	"github.com/t3rmit3/slither/server/internal/detect"
 	"github.com/t3rmit3/slither/server/internal/grpcserv"
 	"github.com/t3rmit3/slither/server/internal/ingest"
 	"github.com/t3rmit3/slither/server/internal/mtls"
@@ -95,6 +96,9 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 
 	// --- Rule distribution hub ---
 	hub := control.NewHub(pgStore, telem)
+
+	// --- Server-side detection engine (Phase 3 #58) ---
+	detectEngine := detect.New(bus, pgStore, telem, detect.Options{})
 
 	// --- gRPC services ---
 	enrollSvc := grpcserv.NewEnrollService(pgStore, ca, telem)
@@ -171,6 +175,32 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		defer wg.Done()
 		if err := control.Run(ctx, hub, pgStore, control.RunnerOptions{}); err != nil {
 			errs <- fmt.Errorf("control runner: %w", err)
+		}
+	}()
+
+	// Detection engine + finding logger (placeholder until #60's
+	// alert sink lands — we surface fired findings at INFO so
+	// operators see them in the server log during Phase 3
+	// validation).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := detectEngine.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			errs <- fmt.Errorf("detect engine: %w", err)
+		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for f := range detectEngine.Findings() {
+			slog.Info("detect: finding",
+				"rule_uid", f.RuleID,
+				"rule_title", f.RuleTitle,
+				"severity", f.Severity,
+				"host_id", f.HostID,
+				"group_key", f.GroupKey,
+				"event_count", len(f.EventIDs),
+				"reason", f.Reason)
 		}
 	}()
 

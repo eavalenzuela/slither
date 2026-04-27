@@ -7,6 +7,7 @@ import (
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
 	"github.com/t3rmit3/slither/pkg/ocsf"
 	"github.com/t3rmit3/slither/pkg/ruleast"
+	"github.com/t3rmit3/slither/pkg/ruleeval"
 )
 
 // stateCapDefault mirrors ADR-0018's per-rule key-cardinality cap. The
@@ -35,11 +36,11 @@ func CompileRules(rules []*ruleast.Rule, telem *telemetry.Counters) ([]CompiledR
 		if r == nil {
 			continue
 		}
-		cls, ok := categoryToClass(r.Category)
+		cls, ok := ruleeval.CategoryToClass(r.Category)
 		if !ok {
 			return nil, fmt.Errorf("ruleengine: rule %q: unsupported category %q", r.ID, r.Category)
 		}
-		acc := accessorFor(r.Category)
+		acc := ruleeval.AccessorFor(r.Category)
 		if acc == nil {
 			return nil, fmt.Errorf("ruleengine: rule %q: no field taxonomy for %q", r.ID, r.Category)
 		}
@@ -59,7 +60,7 @@ func CompileRules(rules []*ruleast.Rule, telem *telemetry.Counters) ([]CompiledR
 type sigmaCompiledRule struct {
 	r      *ruleast.Rule
 	class  ocsf.ClassID
-	access fieldAccessor
+	access ruleeval.Accessor
 	state  *ruleState // nil for stateless rules
 	now    func() time.Time
 }
@@ -72,7 +73,7 @@ func (s *sigmaCompiledRule) Match(e ocsf.Event) bool {
 	if e.ClassID() != s.class {
 		return false
 	}
-	env := &ocsfEnv{event: e, access: s.access}
+	env := ruleeval.EnvFor(e, s.access)
 	if !s.r.Match(env) {
 		return false
 	}
