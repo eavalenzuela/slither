@@ -359,4 +359,3 @@ func makeProcessEnvelope(t *testing.T, hostID uuid.UUID, pid uint32) *pb.Envelop
 		Payload:     payload,
 	}
 }
-

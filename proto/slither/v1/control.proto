@@ -34,6 +34,15 @@ message EdgeRule {
   // and reports via DiagReport.
   bytes compiled_ast = 7;
   uint32 ast_version = 8;
+
+  // Bounded-stateful runtime metadata, populated by the compiler for
+  // ast_version >= 2 (Phase 3 #54d / ADR-0032). Both zero for stateless
+  // rules. Agents enforce ADR-0018 hard caps at runtime even if a
+  // misconfigured server pushes an over-cap rule:
+  //   state_window_secs > 300 → DiagReport.warnings: state_window_too_large
+  //   state_cap         > 1024 → DiagReport.warnings: state_cap_too_large
+  uint32 state_window_secs = 9;
+  uint32 state_cap = 10;
 }
 
 message IocFeed {

@@ -36,9 +36,17 @@ import (
 	"github.com/t3rmit3/slither/server/internal/telemetry"
 )
 
-// astVersion is the wire format identifier for EdgeRule.compiled_ast.
-// 1 == raw Sigma YAML bytes; the agent decodes via ruleast.Compile.
-const astVersion = uint32(1)
+// astVersionStateless is the wire-format tag for EdgeRule.compiled_ast
+// on stateless rules — raw Sigma YAML bytes the agent decodes via
+// ruleast.Compile (Phase 1 / Phase 2 wire shape, ADR-0032 V1).
+//
+// Stateful rules (Phase 3 #54d) ride V2 — same YAML pass-through, but
+// the agent allocates a state ring on rule load and the compiler-emitted
+// state_window_secs / state_cap fields communicate ADR-0018 bounds.
+const (
+	astVersionStateless = uint32(1)
+	astVersionStateful  = uint32(2)
+)
 
 // RuleSource lists enabled rules; pg.Store satisfies it. Factored as
 // an interface so tests can pass a stub without spinning up Postgres.
@@ -159,9 +167,14 @@ func (h *Hub) publishOne(ch chan *pb.RuleSet, rs *pb.RuleSet) {
 // buildRuleSet compiles each row's YAML, drops server-only rules from
 // the wire payload (per ADR-0032 server plans never reach agents), and
 // bundles the rest into a pb.RuleSet whose EdgeRule.compiled_ast still
-// carries the YAML bytes for v1 agents. #54d lights up the v2 path for
-// stateful rules. Returns the count of rows that failed compilation or
-// were classified server-only — both are skipped from the agent push.
+// carries the YAML bytes for v1/v2 agents. Stateful rules ride
+// ast_version=2 with state_window_secs / state_cap populated from the
+// compiler's verdict so the agent can enforce ADR-0018 hard caps at
+// load time. Returns the count of rows that failed compilation or were
+// classified server-only — both are skipped from the agent push.
+//
+// Per-rule classification is logged at INFO via the slog facade (#49)
+// so operators can audit what landed where without scraping pg.
 func buildRuleSet(rows []pg.Rule, version uint64) (rs *pb.RuleSet, skipped int) {
 	rules := make([]*pb.EdgeRule, 0, len(rows))
 	for _, r := range rows {
@@ -171,21 +184,36 @@ func buildRuleSet(rows []pg.Rule, version uint64) (rs *pb.RuleSet, skipped int) 
 			// payload but kept in the table — operators see the row
 			// in audit, agents see one fewer rule. Phase 4 console
 			// surfaces compile errors back to the editor (#42/#43).
+			slog.Warn("hub: skip rule (compile failed)",
+				"rule_uid", r.UID, "err", err)
 			skipped++
 			continue
 		}
 		if class == ruleast.ClassificationServerOnly {
+			slog.Info("hub: skip rule (server-only)",
+				"rule_uid", r.UID, "classification", string(class))
 			skipped++
 			continue
 		}
-		rules = append(rules, &pb.EdgeRule{
+		er := &pb.EdgeRule{
 			RuleId:      r.UID,
 			Name:        ruleDisplayName(r, artefact.Rule),
 			Severity:    levelToSeverity(artefact.Rule.Level),
 			MitreIds:    artefact.Rule.Tags,
 			CompiledAst: []byte(r.SourceYAML),
 			AstVersion:  uint32(artefact.ASTVersion),
-		})
+		}
+		if artefact.ASTVersion == ruleast.ASTVersionV2 {
+			er.StateWindowSecs = artefact.StateWindowSecs
+			er.StateCap = artefact.StateCap
+		}
+		slog.Info("hub: include rule",
+			"rule_uid", r.UID,
+			"classification", string(class),
+			"ast_version", er.AstVersion,
+			"state_window_secs", er.StateWindowSecs,
+			"state_cap", er.StateCap)
+		rules = append(rules, er)
 	}
 	return &pb.RuleSet{
 		ControlId:  fmt.Sprintf("ruleset-%d", version),

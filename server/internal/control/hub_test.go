@@ -52,8 +52,8 @@ func TestHub_RefreshAndSubscribe(t *testing.T) {
 	if rs.GetRules()[0].GetRuleId() != "rule-1" {
 		t.Errorf("rule_id = %q", rs.GetRules()[0].GetRuleId())
 	}
-	if rs.GetRules()[0].GetAstVersion() != astVersion {
-		t.Errorf("ast_version = %d, want %d", rs.GetRules()[0].GetAstVersion(), astVersion)
+	if rs.GetRules()[0].GetAstVersion() != astVersionStateless {
+		t.Errorf("ast_version = %d, want %d", rs.GetRules()[0].GetAstVersion(), astVersionStateless)
 	}
 
 	// Subscribe — initial RuleSet must arrive synchronously.
@@ -123,6 +123,81 @@ func TestHub_UnsubscribeClosesChannel(t *testing.T) {
 	hub.Unsubscribe("x")
 	if _, ok := <-ch; ok {
 		t.Errorf("channel should be closed after Unsubscribe")
+	}
+}
+
+const statefulYAML = `title: Stateful test rule
+id: 22222222-2222-4222-8222-222222222222
+description: Bounded-stateful rule that should ride ast_version=2.
+level: high
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: /usr/bin/sudo
+  condition: selection | count() > 5
+timeframe: 60s
+`
+
+const serverOnlyYAML = `title: Server-only test rule
+id: 33333333-3333-4333-8333-333333333333
+description: Cross-host aggregation — should be filtered out of the wire payload.
+level: medium
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: /usr/bin/sudo
+  condition: selection | count() by User > 5
+timeframe: 60s
+cross_host: true
+`
+
+func TestHub_EmitsStatefulV2Bounds(t *testing.T) {
+	src := &stubSource{rules: []pg.Rule{{
+		UID: "stateful-1", Name: "Stateful", SourceYAML: statefulYAML,
+	}}}
+	hub := NewHub(src, telemetry.NewCounters())
+	if _, err := hub.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	rs := hub.Current()
+	if len(rs.GetRules()) != 1 {
+		t.Fatalf("rule count = %d", len(rs.GetRules()))
+	}
+	er := rs.GetRules()[0]
+	if er.GetAstVersion() != astVersionStateful {
+		t.Errorf("ast_version = %d, want %d", er.GetAstVersion(), astVersionStateful)
+	}
+	if er.GetStateWindowSecs() != 60 {
+		t.Errorf("state_window_secs = %d, want 60", er.GetStateWindowSecs())
+	}
+	if er.GetStateCap() == 0 {
+		t.Errorf("state_cap = 0, want non-zero")
+	}
+}
+
+func TestHub_FiltersServerOnly(t *testing.T) {
+	src := &stubSource{rules: []pg.Rule{
+		{UID: "edge-rule", SourceYAML: sampleYAML},
+		{UID: "server-only", SourceYAML: serverOnlyYAML},
+	}}
+	hub := NewHub(src, telemetry.NewCounters())
+	skipped, err := hub.Refresh(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped != 1 {
+		t.Errorf("skipped = %d, want 1 (server-only)", skipped)
+	}
+	rs := hub.Current()
+	if len(rs.GetRules()) != 1 {
+		t.Fatalf("wire rule count = %d, want 1 (only edge-eligible)", len(rs.GetRules()))
+	}
+	if rs.GetRules()[0].GetRuleId() != "edge-rule" {
+		t.Errorf("wrong rule kept on the wire: %q", rs.GetRules()[0].GetRuleId())
 	}
 }
 

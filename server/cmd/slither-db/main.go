@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,10 +20,17 @@ import (
 	"os/signal"
 	"syscall"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/t3rmit3/slither/pkg/ruleast"
 	"github.com/t3rmit3/slither/pkg/version"
 	"github.com/t3rmit3/slither/server/internal/store/pg"
 )
+
+// yamlUnmarshal is a thin wrapper so callers don't import yaml.v3
+// directly; centralised so a future swap to a different decoder
+// touches one site.
+func yamlUnmarshal(src []byte, out any) error { return yaml.Unmarshal(src, out) }
 
 func main() {
 	if err := run(); err != nil {
@@ -100,17 +108,27 @@ func insertRule(ctx context.Context, dsn string, args []string) error {
 		return fmt.Errorf("insert-rule: read %s: %w", *file, err)
 	}
 
-	artefact, _, _, err := ruleast.Compile(yamlBytes)
+	_, plan, class, err := ruleast.Compile(yamlBytes)
 	if err != nil {
 		return fmt.Errorf("insert-rule: compile: %w", err)
 	}
-	rule := artefact.Rule
-	if rule.ID == "" {
+	header, err := readRuleHeader(yamlBytes)
+	if err != nil {
+		return fmt.Errorf("insert-rule: %w", err)
+	}
+	if header.ID == "" {
 		return fmt.Errorf("insert-rule: rule has no id (Sigma `id:` field is required)")
 	}
-	name := rule.Title
+	name := header.Title
 	if name == "" {
-		name = rule.ID
+		name = header.ID
+	}
+	var planJSON []byte
+	if plan != nil {
+		planJSON, err = json.Marshal(plan)
+		if err != nil {
+			return fmt.Errorf("insert-rule: marshal server plan: %w", err)
+		}
 	}
 
 	store, err := pg.Open(ctx, dsn)
@@ -130,7 +148,10 @@ func insertRule(ctx context.Context, dsn string, args []string) error {
 		updatedByID = user.ID
 	}
 
-	inserted, err := store.UpsertRule(ctx, rule.ID, name, string(yamlBytes), updatedByID, *enabled)
+	inserted, err := store.UpsertRuleWithClassification(
+		ctx, header.ID, name, string(yamlBytes), updatedByID, *enabled,
+		string(class), planJSON, header.ForceEdge,
+	)
 	if err != nil {
 		return err
 	}
@@ -138,8 +159,28 @@ func insertRule(ctx context.Context, dsn string, args []string) error {
 	if inserted {
 		verb = "inserted"
 	}
-	fmt.Fprintf(os.Stderr, "slither-db: %s rule %s (%s)\n", verb, rule.ID, name)
+	fmt.Fprintf(os.Stderr, "slither-db: %s rule %s (%s) classification=%s force_edge=%t\n",
+		verb, header.ID, name, class, header.ForceEdge)
 	return nil
+}
+
+// ruleHeader carries the YAML-level fields that are awkward to extract
+// from pkg/ruleast.Compile's structured return — title travels through
+// EdgeArtefact.Rule (nil for server-only rules), force_edge is a
+// compile-time gate that pkg/ruleast doesn't export. Re-parsing the
+// minimal frame keeps slither-db decoupled from compiler internals.
+type ruleHeader struct {
+	ID        string `yaml:"id"`
+	Title     string `yaml:"title"`
+	ForceEdge bool   `yaml:"force_edge"`
+}
+
+func readRuleHeader(src []byte) (ruleHeader, error) {
+	var h ruleHeader
+	if err := yamlUnmarshal(src, &h); err != nil {
+		return h, fmt.Errorf("re-parse rule header: %w", err)
+	}
+	return h, nil
 }
 
 // readRuleSource returns the bytes of path, or all of stdin when path

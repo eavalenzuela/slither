@@ -12,11 +12,23 @@ import (
 // Rule is one enabled rules-table row, projected to the columns the
 // control plane (#39) needs to compile a RuleSet. Disabled rows are
 // excluded by ListEnabledRules so callers don't have to filter.
+//
+// Classification, ServerPlanJSON, and ForceEdge land via Phase 3 #55 /
+// migration 00010 and reflect the compiler's last verdict on this row.
+// They aren't strictly required for the v1 hub — it still recompiles
+// the YAML on every Refresh to honour any operator edit that hasn't
+// been re-saved through slither-db yet — but the columns exist so the
+// future server detection engine (#58) can stream plan IR straight out
+// of pg without re-parsing YAML, and so the console can show
+// classification on the rule listing.
 type Rule struct {
-	UID        string
-	Name       string
-	SourceYAML string
-	UpdatedAt  time.Time
+	UID            string
+	Name           string
+	SourceYAML     string
+	UpdatedAt      time.Time
+	Classification string
+	ServerPlanJSON []byte
+	ForceEdge      bool
 }
 
 // ListEnabledRules returns every enabled rule, ordered by uid for a
@@ -24,7 +36,8 @@ type Rule struct {
 // trivial when only one rule has changed.
 func (s *Store) ListEnabledRules(ctx context.Context) ([]Rule, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT uid, name, source_yaml, updated_at
+		SELECT uid, name, source_yaml, updated_at,
+		       classification, server_plan, force_edge
 		FROM rules
 		WHERE enabled = true
 		ORDER BY uid
@@ -37,9 +50,12 @@ func (s *Store) ListEnabledRules(ctx context.Context) ([]Rule, error) {
 	var out []Rule
 	for rows.Next() {
 		var r Rule
-		if err := rows.Scan(&r.UID, &r.Name, &r.SourceYAML, &r.UpdatedAt); err != nil {
+		var planRaw []byte
+		if err := rows.Scan(&r.UID, &r.Name, &r.SourceYAML, &r.UpdatedAt,
+			&r.Classification, &planRaw, &r.ForceEdge); err != nil {
 			return nil, fmt.Errorf("pg.ListEnabledRules: scan: %w", err)
 		}
+		r.ServerPlanJSON = planRaw
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -95,6 +111,57 @@ func (s *Store) UpsertRule(ctx context.Context, uid, name, sourceYAML, updatedBy
 	`, uid, name, sourceYAML, enabled, updatedByArg).Scan(&xmaxIsZero)
 	if err != nil {
 		return false, fmt.Errorf("pg.UpsertRule: %w", err)
+	}
+	return xmaxIsZero, nil
+}
+
+// UpsertRuleWithClassification is the Phase 3 #55 variant of UpsertRule
+// that also persists the compiler's verdict on the YAML — classification
+// (edge_only / server_only / both), the JSON-serialised ServerPlan, and
+// whether the operator declared force_edge. slither-db insert-rule
+// computes these via pkg/ruleast.Compile before inserting so the columns
+// land in lock-step with the source_yaml change. classification must be
+// one of the values the rules_classification_chk constraint accepts;
+// serverPlanJSON may be nil (treated as SQL NULL).
+func (s *Store) UpsertRuleWithClassification(
+	ctx context.Context,
+	uid, name, sourceYAML, updatedBy string,
+	enabled bool,
+	classification string,
+	serverPlanJSON []byte,
+	forceEdge bool,
+) (inserted bool, err error) {
+	var updatedByArg any
+	if updatedBy != "" {
+		u, perr := parseUUID(updatedBy)
+		if perr != nil {
+			return false, fmt.Errorf("pg.UpsertRuleWithClassification: parse updated_by: %w", perr)
+		}
+		updatedByArg = u
+	}
+	var planArg any
+	if len(serverPlanJSON) > 0 {
+		planArg = serverPlanJSON
+	}
+	var xmaxIsZero bool
+	err = s.pool.QueryRow(ctx, `
+		INSERT INTO rules (uid, name, source_yaml, enabled, updated_by,
+		                   classification, server_plan, force_edge)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (uid) DO UPDATE SET
+			name = EXCLUDED.name,
+			source_yaml = EXCLUDED.source_yaml,
+			enabled = EXCLUDED.enabled,
+			updated_by = EXCLUDED.updated_by,
+			classification = EXCLUDED.classification,
+			server_plan = EXCLUDED.server_plan,
+			force_edge = EXCLUDED.force_edge,
+			updated_at = now()
+		RETURNING (xmax = 0) AS inserted
+	`, uid, name, sourceYAML, enabled, updatedByArg,
+		classification, planArg, forceEdge).Scan(&xmaxIsZero)
+	if err != nil {
+		return false, fmt.Errorf("pg.UpsertRuleWithClassification: %w", err)
 	}
 	return xmaxIsZero, nil
 }
