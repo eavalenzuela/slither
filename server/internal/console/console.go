@@ -142,6 +142,13 @@ func (s *Server) routes() {
 		r.With(s.RequireRole(pg.RoleAdmin)).
 			Post("/hosts/{host_id}/revoke", s.hostsRevoke)
 
+		// Alerts (Phase 3 #61). List + detail are viewer-readable;
+		// transitions require analyst or admin.
+		r.Get("/alerts", s.alertsList)
+		r.Get("/alerts/{id}", s.alertDetail)
+		r.With(s.RequireRole(pg.RoleAnalyst, pg.RoleAdmin)).
+			Post("/alerts/{id}/transition", s.alertTransition)
+
 		// Enrolment-token UX (#45) — admin-only across the board.
 		r.With(s.RequireRole(pg.RoleAdmin)).Group(func(r chi.Router) {
 			r.Get("/enrolment-tokens", s.enrolmentTokensList)

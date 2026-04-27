@@ -1,0 +1,204 @@
+package views
+
+import (
+	"fmt"
+	"net/url"
+	"strconv"
+
+	"github.com/t3rmit3/slither/server/internal/store/pg"
+)
+
+// AlertsList is the /alerts page — paginated, status-filtered.
+templ AlertsList(d AlertsListData) {
+	@Layout("Alerts") {
+		<div class="card">
+			<h2>Alerts</h2>
+			if d.Flash != "" {
+				<p class="flash">{ d.Flash }</p>
+			}
+			<form method="get" action="/alerts" class="filters">
+				<label>
+					Status
+					<select name="status">
+						<option value="" selected?={ d.StatusFilter == "" }>any</option>
+						<option value="new" selected?={ d.StatusFilter == pg.AlertNew }>new</option>
+						<option value="acknowledged" selected?={ d.StatusFilter == pg.AlertAcknowledged }>acknowledged</option>
+						<option value="in_progress" selected?={ d.StatusFilter == pg.AlertInProgress }>in_progress</option>
+						<option value="closed" selected?={ d.StatusFilter == pg.AlertClosed }>closed</option>
+					</select>
+				</label>
+				<label>
+					host_id
+					<input type="text" name="host_id" value={ d.HostIDFilter }/>
+				</label>
+				<button type="submit">Apply</button>
+			</form>
+
+			if len(d.Alerts) == 0 {
+				<p class="muted">No alerts match the current filter.</p>
+			} else {
+				<table class="events-table">
+					<thead>
+						<tr>
+							<th>severity</th>
+							<th>status</th>
+							<th>rule</th>
+							<th>host</th>
+							<th>created</th>
+							<th>events</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, a := range d.Alerts {
+							<tr>
+								<td><span class={ "severity", "severity-" + strconv.Itoa(int(a.Severity)) }>{ strconv.Itoa(int(a.Severity)) } { AlertSeverityLabel(a.Severity) }</span></td>
+								<td><span class={ "alert-status", "alert-status-" + string(a.Status) }>{ string(a.Status) }</span></td>
+								<td><a href={ alertDetailURL(a.ID) }>{ alertRuleLabel(a) }</a></td>
+								<td class="muted">{ alertHostLabel(a) }</td>
+								<td class="muted">{ a.CreatedAt.Format("2006-01-02 15:04:05") }</td>
+								<td class="muted">{ strconv.Itoa(len(a.EventIDs)) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+				if d.NextCursorURL != "" {
+					<p><a href={ templ.URL(d.NextCursorURL) }>Next page →</a></p>
+				}
+			}
+		</div>
+	}
+}
+
+// AlertDetail renders one alert with operator-action buttons. Buttons
+// are gated server-side: viewers see the row but no controls.
+templ AlertDetail(d AlertDetailData) {
+	@Layout("Alert " + d.Alert.ID) {
+		<div class="card">
+			<h2>Alert</h2>
+			if d.Flash != "" {
+				<p class="flash">{ d.Flash }</p>
+			}
+			<dl class="kv">
+				<dt>id</dt><dd class="muted">{ d.Alert.ID }</dd>
+				<dt>status</dt><dd><span class={ "alert-status", "alert-status-" + string(d.Alert.Status) }>{ string(d.Alert.Status) }</span></dd>
+				<dt>rule</dt><dd>{ alertRuleLabel(d.Alert) } <span class="muted">({ d.Alert.RuleUID })</span></dd>
+				<dt>host</dt><dd>{ alertHostLabel(d.Alert) }</dd>
+				<dt>severity</dt><dd>{ strconv.Itoa(int(d.Alert.Severity)) } { AlertSeverityLabel(d.Alert.Severity) }</dd>
+				<dt>reason</dt><dd>{ d.Alert.ReasonCode }</dd>
+				<dt>created</dt><dd class="muted">{ d.Alert.CreatedAt.Format("2006-01-02 15:04:05 MST") }</dd>
+				<dt>updated</dt><dd class="muted">{ d.Alert.UpdatedAt.Format("2006-01-02 15:04:05 MST") }</dd>
+				if d.Alert.ClosedAt != nil {
+					<dt>closed</dt><dd class="muted">{ d.Alert.ClosedAt.Format("2006-01-02 15:04:05 MST") }</dd>
+				}
+				if len(d.Alert.EventIDs) > 0 {
+					<dt>event_ids</dt>
+					<dd>
+						<ul class="event-id-list">
+							for _, eid := range d.Alert.EventIDs {
+								<li class="muted">{ eid }</li>
+							}
+						</ul>
+					</dd>
+				}
+			</dl>
+
+			if d.IsAnalyst && len(d.AllowedNext) > 0 {
+				<h3>Transition</h3>
+				<form method="post" action={ templ.URL("/alerts/" + d.Alert.ID + "/transition") } class="transition-form">
+					<label>
+						Reason
+						<input type="text" name="reason" placeholder="optional one-line note"/>
+					</label>
+					<div class="actions">
+						for _, next := range d.AllowedNext {
+							<button type="submit" name="to" value={ string(next) } class={ "btn", "btn-" + string(next) }>{ alertTransitionLabel(d.Alert.Status, next) }</button>
+						}
+					</div>
+				</form>
+			} else if !d.IsAnalyst {
+				<p class="muted">Sign in as analyst or admin to act on this alert.</p>
+			} else {
+				<p class="muted">No further transitions available — alert is closed.</p>
+			}
+		</div>
+	}
+}
+
+func alertDetailURL(id string) templ.SafeURL {
+	return templ.URL("/alerts/" + id)
+}
+
+func alertRuleLabel(a pg.AlertRow) string {
+	if a.RuleName != "" {
+		return a.RuleName
+	}
+	return a.RuleUID
+}
+
+func alertHostLabel(a pg.AlertRow) string {
+	if a.Hostname != "" {
+		return a.Hostname
+	}
+	if a.HostID != "" {
+		return a.HostID
+	}
+	return "—"
+}
+
+// alertTransitionLabel renders a button label that tells the operator
+// what they're about to do, e.g. "Acknowledge", "Close (skip ack)".
+func alertTransitionLabel(from, to pg.AlertStatus) string {
+	switch to {
+	case pg.AlertAcknowledged:
+		return "Acknowledge"
+	case pg.AlertInProgress:
+		if from == pg.AlertNew {
+			return "Start work (skip ack)"
+		}
+		return "Start work"
+	case pg.AlertClosed:
+		if from == pg.AlertNew {
+			return "Close (skip ack)"
+		}
+		return "Close"
+	}
+	return string(to)
+}
+
+// alertsURLWithCursor builds a /alerts URL preserving filters and
+// adding cursor params. Reused by the handler when deriving the
+// next-page link, kept here so the templ stays focused on rendering.
+func alertsURLWithCursor(status pg.AlertStatus, hostID string, cursor pg.AlertCursor) string {
+	v := url.Values{}
+	if status != "" {
+		v.Set("status", string(status))
+	}
+	if hostID != "" {
+		v.Set("host_id", hostID)
+	}
+	if cursor.AlertID != "" {
+		v.Set("after_at", cursor.CreatedAt.UTC().Format(timeRFC3339Nano))
+		v.Set("after_id", cursor.AlertID)
+	}
+	if q := v.Encode(); q != "" {
+		return "/alerts?" + q
+	}
+	return "/alerts"
+}
+
+// timeRFC3339Nano is the layout the cursor encodes in. Pulled into a
+// const so the URL builder + handler parser stay in sync.
+const timeRFC3339Nano = "2006-01-02T15:04:05.999999999Z07:00"
+
+// AlertsURLWithCursor is the exported wrapper handlers use; templ-side
+// pagination link consumes the same shape via NextCursorURL.
+func AlertsURLWithCursor(status pg.AlertStatus, hostID string, cursor pg.AlertCursor) string {
+	return alertsURLWithCursor(status, hostID, cursor)
+}
+
+// formatSeverity is a small helper for displays that want the integer
+// + label inline; kept here so the template doesn't repeat the
+// concat dance at every call site.
+func formatSeverity(s uint8) string {
+	return fmt.Sprintf("%d %s", s, AlertSeverityLabel(s))
+}
