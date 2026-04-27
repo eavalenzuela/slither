@@ -7,11 +7,11 @@ import "fmt"
 // plan for the detection engine, and a classification routing the rule
 // between them.
 //
-// #54a stubbed every rule as EdgeOnly. #54d (this commit) lights up the
-// classification gate against ADR-0018 predicate 2 (window ≤ 300s,
-// state cap ≤ 1024) for stateful rules carrying `| count() …`. Stateless
-// rules continue to round-trip as EdgeOnly v1 — the Phase 1/2 corpus
-// stays byte-stable.
+// #54a stubbed every rule as EdgeOnly. #54d lit up ADR-0018 predicate 2
+// (window ≤ 300s, state cap ≤ 1024) for stateful rules. #54e adds
+// predicate 1 (locally observable inputs) — `near` correlations and
+// `cross_host: true` aggregations always classify ServerOnly. Stateless
+// rules continue to round-trip as EdgeOnly v1.
 //
 // Rules that fail YAML/Sigma parse return (nil, nil, "", err) wrapping
 // ErrCompile, matching the previous CompileSigma contract. Rules that
@@ -23,20 +23,48 @@ func Compile(src []byte) (*EdgeArtefact, *ServerPlan, Classification, error) {
 	if err != nil {
 		return nil, nil, "", err
 	}
-	return classify(rule, doc.ForceEdge, doc.Lookback)
+	return classify(rule, doc.ForceEdge, doc.Lookback, doc.CrossHost)
 }
 
-// classify implements ADR-0018 predicate 2 — bounded-stateful caps. The
-// other three predicates land with later sub-tasks: predicate 1 (locally
-// observable inputs) is enforced by #54e once `near` arrives, predicate
-// 3 (IOC ≤ 100k) lights up with #66, predicate 4 (no baselines older
-// than agent uptime) needs a baseline subsystem that doesn't exist yet.
+// classify implements the subset of ADR-0018 predicates the compiler
+// can decide today:
 //
-// Stateless rules: EdgeOnly, ASTVersionV1, no state bounds.
-// Stateful + within caps: EdgeOnly, ASTVersionV2, state bounds populated.
-// Stateful + over caps + !force_edge: ServerOnly, ServerPlan populated.
-// Stateful + over caps + force_edge: ErrCompile citing the predicate.
-func classify(rule *Rule, forceEdge, lookback bool) (*EdgeArtefact, *ServerPlan, Classification, error) {
+//   - Predicate 1 (locally observable inputs): a rule is server-only when
+//     its condition contains `near` (cross-stream join) or its top-level
+//     YAML declares `cross_host: true`. Predicate 3 (IOC ≤ 100k) lights
+//     up with #66; predicate 4 (no baselines older than agent uptime)
+//     needs a baseline subsystem that doesn't exist yet.
+//   - Predicate 2 (bounded-stateful caps): window ≤ 300s, state cap ≤
+//     1024. Stateful rules within the caps run on the edge; over-cap
+//     rules go server-only.
+//
+// force_edge against a violating predicate fails compile with the
+// predicate name cited.
+func classify(rule *Rule, forceEdge, lookback, crossHost bool) (*EdgeArtefact, *ServerPlan, Classification, error) {
+	// Predicate 1: cross-stream / cross-host inputs aren't locally
+	// observable, so the rule cannot run on the agent.
+	join := temporalJoinFrom(rule)
+	if join != nil || crossHost {
+		if forceEdge {
+			return nil, nil, "", compileErr(rule.ID, "ruleast",
+				fmt.Errorf("force_edge violates ADR-0018 predicate \"inputs_not_locally_observable\": %s", predicate1Reason(join != nil, crossHost)))
+		}
+		plan := &ServerPlan{
+			RuleID:    rule.ID,
+			Lookback:  lookback,
+			CrossHost: crossHost,
+		}
+		if rule.Aggregation != nil {
+			plan.Aggregation = rule.Aggregation
+			plan.TimeframeSecs = rule.Aggregation.TimeframeSecs
+		}
+		if join != nil {
+			plan.TemporalJoin = join
+			plan.TimeframeSecs = join.WithinSecs
+		}
+		return nil, plan, ClassificationServerOnly, nil
+	}
+
 	if rule.Aggregation == nil {
 		// force_edge on a stateless rule is harmless — the rule is
 		// already edge-only — so accept it without comment. Authors can
@@ -95,4 +123,32 @@ func classify(rule *Rule, forceEdge, lookback bool) (*EdgeArtefact, *ServerPlan,
 		StateCap:        stateCap,
 		Lookback:        lookback,
 	}, nil, ClassificationEdgeOnly, nil
+}
+
+// temporalJoinFrom returns the wire-form join spec when the rule's
+// condition is a binary `near` expression. Returns nil for any other
+// shape — including nested compositions which are rejected at parse
+// time, so this branch only triggers for the parser's NodeNear output.
+func temporalJoinFrom(rule *Rule) *TemporalJoin {
+	near, ok := rule.Condition.(*NodeNear)
+	if !ok {
+		return nil
+	}
+	return &TemporalJoin{
+		Left:       near.L.Name,
+		Right:      near.R.Name,
+		WithinSecs: near.WithinSecs,
+	}
+}
+
+func predicate1Reason(hasNear, crossHost bool) string {
+	switch {
+	case hasNear && crossHost:
+		return "rule contains both `near` and `cross_host: true`; both forms require server-side correlation"
+	case hasNear:
+		return "`near` correlates two event streams which the agent cannot observe in isolation"
+	case crossHost:
+		return "`cross_host: true` requires visibility across hosts which the agent cannot supply"
+	}
+	return ""
 }

@@ -1,0 +1,13 @@
+title: force_edge with near (predicate 1)
+id: invalid-0014
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  fetch:
+    Image|endswith: /usr/bin/curl
+  exec:
+    Image|endswith: /usr/bin/chmod
+  condition: fetch near exec
+timeframe: 60s
+force_edge: true

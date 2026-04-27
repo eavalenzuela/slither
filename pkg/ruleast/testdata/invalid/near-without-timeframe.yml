@@ -1,0 +1,11 @@
+title: near without timeframe is unbounded
+id: invalid-0016
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  fetch:
+    Image|endswith: /usr/bin/curl
+  exec:
+    Image|endswith: /usr/bin/chmod
+  condition: fetch near exec

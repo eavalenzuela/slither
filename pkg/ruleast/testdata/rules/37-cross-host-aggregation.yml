@@ -1,0 +1,17 @@
+title: Fleet-wide failed sudo flood
+id: 8b7c4d00-0001-4000-8000-000000000025
+description: |
+  Same user failing sudo across the fleet — needs cross-host visibility
+  so the rule classifies server-only even though the timeframe sits
+  inside the bounded-stateful cap.
+level: medium
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: /usr/bin/sudo
+    CommandLine|contains: 'authentication failure'
+  condition: selection | count() by User > 10
+timeframe: 5m
+cross_host: true

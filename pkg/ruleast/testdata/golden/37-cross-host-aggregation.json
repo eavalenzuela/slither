@@ -1,0 +1,17 @@
+{
+  "classification": "server_only",
+  "server_plan": {
+    "aggregation": {
+      "by": [
+        "User"
+      ],
+      "function": "count",
+      "op": "\u003e",
+      "threshold": 10,
+      "timeframe_secs": 300
+    },
+    "cross_host": true,
+    "rule_id": "8b7c4d00-0001-4000-8000-000000000025",
+    "timeframe_secs": 300
+  }
+}

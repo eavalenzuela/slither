@@ -90,6 +90,10 @@ func TestCompileRejectsInvalid(t *testing.T) {
 		{"aggregation-no-timeframe.yml", "aggregation requires top-level timeframe"},
 		{"bad-timeframe.yml", "unknown unit"},
 		{"bad-aggregation-fn.yml", "unsupported aggregation function"},
+		{"force-edge-near.yml", "inputs_not_locally_observable"},
+		{"force-edge-cross-host.yml", "inputs_not_locally_observable"},
+		{"near-without-timeframe.yml", "near` requires top-level timeframe"},
+		{"bad-near-syntax.yml", "binary form"},
 	}
 	for _, c := range cases {
 		c := c
@@ -488,6 +492,64 @@ func TestForceEdgeRejectsOverCap(t *testing.T) {
 	}
 }
 
+func TestNearTemporalJoin(t *testing.T) {
+	art, plan, class, err := Compile(readRule(t, "testdata/rules/36-near-temporal-join.yml"))
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if class != ClassificationServerOnly {
+		t.Fatalf("class = %q, want server_only", class)
+	}
+	if art != nil {
+		t.Errorf("near rule should not produce an EdgeArtefact")
+	}
+	if plan == nil || plan.TemporalJoin == nil {
+		t.Fatalf("plan TemporalJoin missing")
+	}
+	if plan.TemporalJoin.Left != "fetch" || plan.TemporalJoin.Right != "chmod_exec" {
+		t.Errorf("join sides = (%q, %q)", plan.TemporalJoin.Left, plan.TemporalJoin.Right)
+	}
+	if plan.TemporalJoin.WithinSecs != 60 {
+		t.Errorf("within_secs = %d, want 60", plan.TemporalJoin.WithinSecs)
+	}
+	if plan.TimeframeSecs != 60 {
+		t.Errorf("plan TimeframeSecs = %d, want 60", plan.TimeframeSecs)
+	}
+}
+
+func TestCrossHostAggregation(t *testing.T) {
+	art, plan, class, err := Compile(readRule(t, "testdata/rules/37-cross-host-aggregation.yml"))
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if class != ClassificationServerOnly {
+		t.Fatalf("class = %q, want server_only (cross_host forces it)", class)
+	}
+	if art != nil {
+		t.Errorf("cross_host rule should not produce an EdgeArtefact")
+	}
+	if plan == nil || !plan.CrossHost {
+		t.Fatalf("plan CrossHost flag missing")
+	}
+	if plan.Aggregation == nil || plan.Aggregation.Threshold != 10 {
+		t.Errorf("plan aggregation = %+v", plan.Aggregation)
+	}
+}
+
+func TestForceEdgeRejectsCrossHost(t *testing.T) {
+	src := readRule(t, "testdata/invalid/force-edge-cross-host.yml")
+	_, _, _, err := Compile(src)
+	if err == nil {
+		t.Fatal("expected force_edge + cross_host to fail compile")
+	}
+	if !errors.Is(err, ErrCompile) {
+		t.Errorf("error %v does not wrap ErrCompile", err)
+	}
+	if !strings.Contains(err.Error(), "inputs_not_locally_observable") {
+		t.Errorf("error %q should cite inputs_not_locally_observable predicate", err.Error())
+	}
+}
+
 func TestStatelessRulesStayV1(t *testing.T) {
 	art, plan, class, err := Compile(readRule(t, "testdata/rules/01-reverse-shell-bash.yml"))
 	if err != nil {
@@ -577,6 +639,16 @@ func serverPlanGolden(p *ServerPlan) map[string]any {
 	}
 	if p.Aggregation != nil {
 		out["aggregation"] = aggregationGolden(p.Aggregation)
+	}
+	if p.TemporalJoin != nil {
+		out["temporal_join"] = map[string]any{
+			"left":        p.TemporalJoin.Left,
+			"right":       p.TemporalJoin.Right,
+			"within_secs": p.TemporalJoin.WithinSecs,
+		}
+	}
+	if p.CrossHost {
+		out["cross_host"] = true
 	}
 	return out
 }

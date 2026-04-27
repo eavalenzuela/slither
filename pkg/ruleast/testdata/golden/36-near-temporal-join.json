@@ -1,0 +1,12 @@
+{
+  "classification": "server_only",
+  "server_plan": {
+    "rule_id": "8b7c4d00-0001-4000-8000-000000000024",
+    "temporal_join": {
+      "left": "fetch",
+      "right": "chmod_exec",
+      "within_secs": 60
+    },
+    "timeframe_secs": 60
+  }
+}

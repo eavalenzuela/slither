@@ -10,9 +10,10 @@ import (
 
 // parseCondition turns a Sigma condition string into an Expr plus an
 // optional Aggregation when the condition carries a pipe. Grammar
-// accepted as of §5.1 #54d:
+// accepted as of §5.1 #54e:
 //
-//	condition := or [ "|" aggregation ]
+//	condition := near | or [ "|" aggregation ]
+//	near      := IDENT "near" IDENT
 //	or        := and ("or" and)*
 //	and       := not ("and" not)*
 //	not       := "not" not | primary
@@ -31,15 +32,42 @@ import (
 // The pipe-aggregation tail makes the rule stateful — Compile turns it
 // into a Rule.Aggregation and bumps ASTVersion. Stateless rules return
 // (expr, nil, nil) and behave exactly as before #54d.
+//
+// `near` is a temporal-join keyword (#54e). The accepted form is binary
+// `IDENT near IDENT`; richer compositions (e.g. `(sel_a or sel_b) near
+// sel_c and not sel_d`) are rejected loud rather than silently allowed
+// — Sigma 2.0 deprecated `near` and our compatibility scope is
+// explicitly the binary form. Rules carrying `near` always classify
+// ServerOnly per ADR-0018 predicate 1 (cross-stream correlation is not
+// locally observable).
 func parseCondition(src string, selections map[string]*Selection) (Expr, *Aggregation, error) {
 	toks, err := tokenizeCondition(src)
 	if err != nil {
 		return nil, nil, err
 	}
 	p := &condParser{toks: toks, sels: selections}
+
+	// Look ahead for binary near at the top level. Only `IDENT near
+	// IDENT` is supported; anything more elaborate trips parseOr below
+	// and falls through to the standard error path.
+	if len(p.toks) == 3 && p.toks[0].kind == tokIdent && p.toks[1].kind == tokNear && p.toks[2].kind == tokIdent {
+		left, lok := selections[p.toks[0].value]
+		right, rok := selections[p.toks[2].value]
+		if !lok {
+			return nil, nil, fmt.Errorf("unknown selection %q", p.toks[0].value)
+		}
+		if !rok {
+			return nil, nil, fmt.Errorf("unknown selection %q", p.toks[2].value)
+		}
+		return &NodeNear{L: left, R: right}, nil, nil
+	}
+
 	expr, err := p.parseOr()
 	if err != nil {
 		return nil, nil, err
+	}
+	if t, ok := p.peek(); ok && t.kind == tokNear {
+		return nil, nil, fmt.Errorf("`near` is supported only in the binary form `selection_a near selection_b`; richer compositions are rejected per Phase 3 #54e")
 	}
 	var agg *Aggregation
 	if t, ok := p.peek(); ok && t.kind == tokPipe {
@@ -69,7 +97,8 @@ const (
 	tokThem
 	tokPipe
 	tokComma
-	tokCmp // >, >=, <, <=, ==, !=
+	tokCmp  // >, >=, <, <=, ==, !=
+	tokNear // temporal-join keyword (#54e)
 )
 
 type condToken struct {
@@ -150,6 +179,8 @@ func tokenizeCondition(src string) ([]condToken, error) {
 				out = append(out, condToken{kind: tokOf, value: word})
 			case "them":
 				out = append(out, condToken{kind: tokThem, value: word})
+			case "near":
+				out = append(out, condToken{kind: tokNear, value: word})
 			default:
 				out = append(out, condToken{kind: tokIdent, value: word})
 			}

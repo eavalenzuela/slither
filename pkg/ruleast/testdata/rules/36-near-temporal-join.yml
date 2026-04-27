@@ -1,0 +1,21 @@
+title: Suspicious wget then chmod
+id: 8b7c4d00-0001-4000-8000-000000000024
+description: |
+  Detect a fetch (wget/curl) followed within a minute by a chmod making
+  the just-fetched file executable. The two events are surfaced by
+  different syscall paths so the correlation is server-side via a near
+  join.
+level: high
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  fetch:
+    Image|endswith:
+      - /usr/bin/wget
+      - /usr/bin/curl
+  chmod_exec:
+    Image|endswith: /usr/bin/chmod
+    CommandLine|contains: '+x'
+  condition: fetch near chmod_exec
+timeframe: 60s

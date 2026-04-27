@@ -1,0 +1,14 @@
+title: near in a richer composition is rejected
+id: invalid-0017
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  fetch:
+    Image|endswith: /usr/bin/curl
+  exec:
+    Image|endswith: /usr/bin/chmod
+  cleanup:
+    Image|endswith: /usr/bin/rm
+  condition: fetch near exec and not cleanup
+timeframe: 60s

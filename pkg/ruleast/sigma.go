@@ -36,6 +36,14 @@ type sigmaYAML struct {
 	Timeframe string `yaml:"timeframe"`
 	ForceEdge bool   `yaml:"force_edge"`
 	Lookback  bool   `yaml:"lookback"`
+
+	// Phase 3 #54e: CrossHost is operator-declared. The compiler can't
+	// infer cross-host semantics from field names alone (the same
+	// Field|user could mean "users on this box" or "users across the
+	// fleet"), so authors flip this flag when the rule needs visibility
+	// the agent cannot supply. Implies ServerOnly classification (ADR-
+	// 0018 predicate 1). force_edge with cross_host fails compile.
+	CrossHost bool `yaml:"cross_host"`
 }
 
 type logSourceYAML struct {
@@ -90,19 +98,29 @@ func compileSigma(src []byte) (*Rule, *sigmaYAML, error) {
 	if err != nil {
 		return nil, nil, compileErr(doc.ID, "ruleast", fmt.Errorf("timeframe: %w", err))
 	}
-	if agg != nil {
+	near, hasNear := cond.(*NodeNear)
+	switch {
+	case agg != nil:
 		if timeframeSecs == 0 {
 			return nil, nil, compileErr(doc.ID, "ruleast",
 				fmt.Errorf("aggregation requires top-level timeframe (e.g. \"timeframe: 60s\")"))
 		}
 		agg.TimeframeSecs = timeframeSecs
-	} else if timeframeSecs > 0 {
-		return nil, nil, compileErr(doc.ID, "ruleast",
-			fmt.Errorf("timeframe is only meaningful with a pipe-aggregation condition (e.g. \"selection | count() > 5\")"))
+	case hasNear:
+		if timeframeSecs == 0 {
+			return nil, nil, compileErr(doc.ID, "ruleast",
+				fmt.Errorf("`near` requires top-level timeframe to bound the join window"))
+		}
+		near.WithinSecs = timeframeSecs
+	default:
+		if timeframeSecs > 0 {
+			return nil, nil, compileErr(doc.ID, "ruleast",
+				fmt.Errorf("timeframe is only meaningful with a pipe-aggregation or `near` condition"))
+		}
 	}
-	if doc.Lookback && agg == nil {
+	if doc.Lookback && agg == nil && !hasNear {
 		return nil, nil, compileErr(doc.ID, "ruleast",
-			fmt.Errorf("lookback only applies to stateful (aggregating) rules"))
+			fmt.Errorf("lookback only applies to stateful (aggregating or `near`) rules"))
 	}
 
 	r := &Rule{

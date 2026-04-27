@@ -405,6 +405,25 @@ func (n *NodeNot) Eval(env Env) bool { return !n.X.Eval(env) }
 func (n *NodeNot) Cost() int         { return n.X.Cost() }
 func (n *NodeNot) String() string    { return fmt.Sprintf("(not %s)", n.X) }
 
+// NodeNear is the compiled form of "<sel_a> near <sel_b>". Sigma's
+// `near` is a temporal join: both selections must each match an event
+// inside the rule's timeframe. Detection requires correlating two event
+// streams, which an agent cannot do for events it never sees, so any
+// rule containing NodeNear classifies ServerOnly and is consumed by
+// the server detection engine (#58) — never by Rule.Match. Eval returns
+// false defensively so a misuse panics loud rather than silently hits.
+type NodeNear struct {
+	L, R       *Selection
+	WithinSecs uint32 // populated by compileSigma from the rule's top-level timeframe
+}
+
+// Eval is intentionally false — near requires temporal context the
+// stateless evaluator can't supply. The detection engine recompiles the
+// rule and walks ServerPlan.TemporalJoin instead.
+func (n *NodeNear) Eval(env Env) bool { return false }
+func (n *NodeNear) Cost() int         { return n.L.Cost() + n.R.Cost() }
+func (n *NodeNear) String() string    { return fmt.Sprintf("(%s near %s)", n.L.Name, n.R.Name) }
+
 // NodeQuantifier is the compiled form of "<count> of <target>".
 // Targets are pre-resolved at compile time so runtime evaluation never
 // touches the selection map. Threshold reflects the effective count

@@ -1,0 +1,12 @@
+title: force_edge with cross_host (predicate 1)
+id: invalid-0015
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: /usr/bin/sudo
+  condition: selection | count() by User > 5
+timeframe: 60s
+cross_host: true
+force_edge: true

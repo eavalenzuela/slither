@@ -121,4 +121,23 @@ type ServerPlan struct {
 	// Lookback opts the server-side stateful evaluator into the same
 	// CH-replay cold-start path as the agent (#59).
 	Lookback bool `json:"lookback,omitempty"`
+
+	// TemporalJoin describes a Sigma `near` correlation between two
+	// selections. Populated by #54e for rules whose condition is the
+	// binary form `IDENT near IDENT`. The detection engine joins the
+	// two streams on a per-WithinSecs window.
+	TemporalJoin *TemporalJoin `json:"temporal_join,omitempty"`
+
+	// CrossHost is true when the operator declared `cross_host: true`.
+	// Forces ServerOnly classification regardless of timeframe; signals
+	// the detection engine to keep the rule's window keyed across hosts
+	// rather than per host.
+	CrossHost bool `json:"cross_host,omitempty"`
+}
+
+// TemporalJoin is the wire form of a Sigma `near` join.
+type TemporalJoin struct {
+	Left       string `json:"left"`
+	Right      string `json:"right"`
+	WithinSecs uint32 `json:"within_secs"`
 }
