@@ -24,6 +24,7 @@ type Counters struct {
 	heartbeatsSent   atomic.Uint64
 	detectionsFired  atomic.Uint64
 	ringbufOverflows atomic.Uint64
+	stateEvicted     atomic.Uint64
 }
 
 // NewCounters returns a zero-valued Counters.
@@ -85,6 +86,14 @@ func (c *Counters) IncDetections() { c.detectionsFired.Add(1) }
 // IncRingOverflows bumps the ringbuffer-overflow counter.
 func (c *Counters) IncRingOverflows() { c.ringbufOverflows.Add(1) }
 
+// IncStateEvicted bumps the per-rule bounded-state eviction counter.
+// Phase 3 #56 — fires once per by-key dropped from a stateful rule's
+// ring when a new key would push over ADR-0018's 1024-keys-per-rule
+// cap. Operators reading the DiagReport line see this stay near zero
+// for healthy rules; sustained growth signals either a too-tight cap
+// or a misbehaving by-tuple choice.
+func (c *Counters) IncStateEvicted() { c.stateEvicted.Add(1) }
+
 // Snapshot captures the current counter values.
 type Snapshot struct {
 	EventsProduced   uint64
@@ -98,6 +107,7 @@ type Snapshot struct {
 	HeartbeatsSent   uint64
 	DetectionsFired  uint64
 	RingbufOverflows uint64
+	StateEvicted     uint64
 }
 
 // Snapshot returns a point-in-time view of the counters.
@@ -114,5 +124,6 @@ func (c *Counters) Snapshot() Snapshot {
 		HeartbeatsSent:   c.heartbeatsSent.Load(),
 		DetectionsFired:  c.detectionsFired.Load(),
 		RingbufOverflows: c.ringbufOverflows.Load(),
+		StateEvicted:     c.stateEvicted.Load(),
 	}
 }

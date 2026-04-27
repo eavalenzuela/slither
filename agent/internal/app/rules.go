@@ -7,6 +7,7 @@ import (
 
 	"github.com/t3rmit3/slither/agent/internal/config"
 	"github.com/t3rmit3/slither/agent/internal/ruleengine"
+	"github.com/t3rmit3/slither/agent/internal/telemetry"
 	"github.com/t3rmit3/slither/pkg/ruleast"
 )
 
@@ -14,7 +15,11 @@ import (
 // via ruleast.Compile, then wraps the edge artefacts in engine adapters.
 // Server-only rules in a local pack are skipped — the agent has no detection
 // engine of its own. Returns a nil slice when no paths are configured.
-func loadRules(cfg *config.Config) ([]ruleengine.CompiledRule, error) {
+//
+// telem may be nil; when provided it gets the per-rule state-eviction
+// counter Phase 3 #56 added (no-op for the all-stateless rule packs
+// shipped through Phase 2).
+func loadRules(cfg *config.Config, telem *telemetry.Counters) ([]ruleengine.CompiledRule, error) {
 	if cfg == nil || len(cfg.Rules.Paths) == 0 {
 		return nil, nil
 	}
@@ -50,5 +55,5 @@ func loadRules(cfg *config.Config) ([]ruleengine.CompiledRule, error) {
 		}
 		parsed = append(parsed, artefact.Rule)
 	}
-	return ruleengine.CompileRules(parsed)
+	return ruleengine.CompileRules(parsed, telem)
 }

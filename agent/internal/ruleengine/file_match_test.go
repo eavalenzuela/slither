@@ -45,7 +45,7 @@ func fileActivityFixture(path, exe string) *ocsf.FileSystemActivity {
 }
 
 func TestFileEventRuleFiresDetection(t *testing.T) {
-	compiled, err := CompileRules([]*ruleast.Rule{compileFixture(t, shadowWriteSigma)})
+	compiled, err := CompileRules([]*ruleast.Rule{compileFixture(t, shadowWriteSigma)}, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestFileEventRuleFiresDetection(t *testing.T) {
 }
 
 func TestFileEventRuleNoMatch(t *testing.T) {
-	compiled, err := CompileRules([]*ruleast.Rule{compileFixture(t, shadowWriteSigma)})
+	compiled, err := CompileRules([]*ruleast.Rule{compileFixture(t, shadowWriteSigma)}, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}

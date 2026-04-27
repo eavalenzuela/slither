@@ -61,7 +61,7 @@ func loadRule(t *testing.T, repoRel string) *ruleast.Rule {
 // returns the number of DetectionFinding events emitted.
 func runOne(t *testing.T, rule *ruleast.Rule, ev *ocsf.ProcessActivity) int {
 	t.Helper()
-	rules, err := CompileRules([]*ruleast.Rule{rule})
+	rules, err := CompileRules([]*ruleast.Rule{rule}, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}
@@ -620,7 +620,7 @@ func TestEyeexamPack_LinuxCore(t *testing.T) {
 // that rule.
 func runOneFile(t *testing.T, rule *ruleast.Rule, ev *ocsf.FileSystemActivity) int {
 	t.Helper()
-	rules, err := CompileRules([]*ruleast.Rule{rule})
+	rules, err := CompileRules([]*ruleast.Rule{rule}, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}
@@ -808,7 +808,7 @@ func TestEyeexamPack_FileEvents(t *testing.T) {
 // and returns the number of matching DetectionFinding events emitted.
 func runOneNet(t *testing.T, rule *ruleast.Rule, ev *ocsf.NetworkActivity) int {
 	t.Helper()
-	rules, err := CompileRules([]*ruleast.Rule{rule})
+	rules, err := CompileRules([]*ruleast.Rule{rule}, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}
@@ -844,33 +844,33 @@ func TestEyeexamPack_NetworkEvents(t *testing.T) {
 	}{
 		// eye-604: connection attempt to Tor SOCKS port.
 		{
-			name:      "eye-604_tor_socks_9050",
-			ruleFile:  "rules/linux/net-tor-port-egress.yml",
-			proto:     "tcp", dstIP: "127.0.0.1", dstPort: 9050,
+			name:     "eye-604_tor_socks_9050",
+			ruleFile: "rules/linux/net-tor-port-egress.yml",
+			proto:    "tcp", dstIP: "127.0.0.1", dstPort: 9050,
 			exe:       "/usr/bin/nc",
 			wantFires: true,
 		},
 		// eye-604: control port.
 		{
-			name:      "eye-604_tor_control_9051",
-			ruleFile:  "rules/linux/net-tor-port-egress.yml",
-			proto:     "tcp", dstIP: "127.0.0.1", dstPort: 9051,
+			name:     "eye-604_tor_control_9051",
+			ruleFile: "rules/linux/net-tor-port-egress.yml",
+			proto:    "tcp", dstIP: "127.0.0.1", dstPort: 9051,
 			exe:       "/usr/bin/nc",
 			wantFires: true,
 		},
 		// eye-604: relay/OR port.
 		{
-			name:      "eye-604_tor_or_9001",
-			ruleFile:  "rules/linux/net-tor-port-egress.yml",
-			proto:     "tcp", dstIP: "127.0.0.1", dstPort: 9001,
+			name:     "eye-604_tor_or_9001",
+			ruleFile: "rules/linux/net-tor-port-egress.yml",
+			proto:    "tcp", dstIP: "127.0.0.1", dstPort: 9001,
 			exe:       "/usr/bin/nc",
 			wantFires: true,
 		},
 		// Negative: a normal HTTP port should not fire.
 		{
-			name:      "neg_tor_normal_http",
-			ruleFile:  "rules/linux/net-tor-port-egress.yml",
-			proto:     "tcp", dstIP: "203.0.113.9", dstPort: 80,
+			name:     "neg_tor_normal_http",
+			ruleFile: "rules/linux/net-tor-port-egress.yml",
+			proto:    "tcp", dstIP: "203.0.113.9", dstPort: 80,
 			exe:       "/usr/bin/curl",
 			wantFires: false,
 		},

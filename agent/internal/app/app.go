@@ -50,7 +50,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		FileFilter:          cfg.Collectors.File,
 	})
 
-	rules, err := loadRules(cfg)
+	rules, err := loadRules(cfg, telem)
 	if err != nil {
 		return fmt.Errorf("app: %w", err)
 	}
@@ -64,7 +64,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	go watchReload(ctx, configPath, enr, eng)
+	go watchReload(ctx, configPath, enr, eng, telem)
 
 	errs := make(chan error, 4)
 	go func() { errs <- cg.Run(ctx) }()
@@ -109,7 +109,7 @@ report:
 // YAML config — rule paths and file-collector globs — to the running
 // enricher and rule engine. Errors are logged to stderr and the current
 // runtime config is kept: a bad edit shouldn't silently wipe rules.
-func watchReload(ctx context.Context, configPath string, enr enricher.Enricher, eng ruleengine.Engine) {
+func watchReload(ctx context.Context, configPath string, enr enricher.Enricher, eng ruleengine.Engine, telem *telemetry.Counters) {
 	if configPath == "" {
 		return
 	}
@@ -122,18 +122,18 @@ func watchReload(ctx context.Context, configPath string, enr enricher.Enricher, 
 		case <-ctx.Done():
 			return
 		case <-sighup:
-			applyReload(configPath, enr, eng)
+			applyReload(configPath, enr, eng, telem)
 		}
 	}
 }
 
-func applyReload(configPath string, enr enricher.Enricher, eng ruleengine.Engine) {
+func applyReload(configPath string, enr enricher.Enricher, eng ruleengine.Engine, telem *telemetry.Counters) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		slog.Error("reload: read config", "err", err)
 		return
 	}
-	rules, err := loadRules(cfg)
+	rules, err := loadRules(cfg, telem)
 	if err != nil {
 		slog.Error("reload: compile rules", "err", err)
 		return
@@ -168,7 +168,7 @@ func newSink(cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engin
 			HeartbeatInterval: g.HeartbeatInterval,
 			BufferSize:        g.BufferSize,
 			AgentVersion:      version.Version,
-			OnRuleSet:         applyRuleSetTo(eng),
+			OnRuleSet:         applyRuleSetTo(eng, telem),
 		}, telem)
 	}
 	return nil, fmt.Errorf("unknown output.kind %q", cfg.Output.Kind)
@@ -184,10 +184,10 @@ func newSink(cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engin
 // running --log-level=info see only changes. The transition log is
 // enough to diagnose the empty-RuleSet failure mode (e.g. server-side
 // compile rejected every row) caught during #46 validation.
-func applyRuleSetTo(eng ruleengine.Engine) func(*pb.RuleSet) {
+func applyRuleSetTo(eng ruleengine.Engine, telem *telemetry.Counters) func(*pb.RuleSet) {
 	lastCount := -1
 	return func(rs *pb.RuleSet) {
-		compiled, skipped, err := compileRuleSet(rs)
+		compiled, skipped, err := compileRuleSet(rs, telem)
 		if err != nil {
 			slog.Error("ruleset apply",
 				"err", err,

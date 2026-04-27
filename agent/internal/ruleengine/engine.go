@@ -53,6 +53,15 @@ type CompiledRule interface {
 // mistake a stalled agent for a quiet one.
 const detectionBlockWait = 200 * time.Millisecond
 
+// janitorInterval is the cadence at which Run sweeps every stateful
+// rule's expired keys. Coarse on purpose: the hot Match path already
+// trims the one key it just touched, so the janitor only needs to
+// reclaim memory from keys that have stopped being referenced. Per
+// ADR-0018 the per-rule cap is 1024 keys, so even a missed sweep
+// caps the worst-case footprint trivially. 30 s matches the agent's
+// heartbeat cadence so operators see one rhythm.
+const janitorInterval = 30 * time.Second
+
 // New returns an Engine loaded with the given compiled rules.
 func New(rules []CompiledRule, telem *telemetry.Counters) Engine {
 	return &engine{
@@ -95,8 +104,17 @@ func (e *engine) Output() <-chan ocsf.Event { return e.out }
 
 // Run pumps events through the rule index. Every event is forwarded to the
 // sink; each match also produces a DetectionFinding on the same channel.
+//
+// A janitor ticker sweeps stateful rules every janitorInterval so expired
+// by-keys get reaped without any per-rule goroutines — this keeps rule
+// lifecycle simple (ReplaceRules just swaps the index, no goroutine
+// teardown) while still satisfying ADR-0018's "lock-light hot path"
+// requirement: Match's tick only trims the key it just touched.
 func (e *engine) Run(ctx context.Context, in <-chan ocsf.Event) error {
 	defer close(e.out)
+
+	jt := time.NewTicker(janitorInterval)
+	defer jt.Stop()
 
 	for {
 		// Pending replace always wins over the next event so reloads apply
@@ -112,12 +130,36 @@ func (e *engine) Run(ctx context.Context, in <-chan ocsf.Event) error {
 			return ctx.Err()
 		case idx := <-e.replace:
 			e.index = idx
+		case <-jt.C:
+			e.sweepStateful()
 		case ev, ok := <-in:
 			if !ok {
 				return nil
 			}
 			if err := e.processEvent(ctx, ev); err != nil {
 				return err
+			}
+		}
+	}
+}
+
+// sweepStateful walks every rule in the index and asks any stateful
+// adapter to prune its expired keys. Rules without state (the common
+// case in Phase 2) skip the type assertion's allocation by definition.
+// Iteration over the index map is fine here — the engine's index is
+// only mutated on ReplaceRules which goes through the same select
+// arm, never concurrently with the ticker.
+func (e *engine) sweepStateful() {
+	now := e.now()
+	seen := make(map[CompiledRule]struct{}, len(e.index))
+	for _, bucket := range e.index {
+		for _, r := range bucket {
+			if _, dup := seen[r]; dup {
+				continue
+			}
+			seen[r] = struct{}{}
+			if sr, ok := r.(statefulRule); ok {
+				sr.sweep(now)
 			}
 		}
 	}
