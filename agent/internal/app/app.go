@@ -159,7 +159,8 @@ func newSink(cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engin
 		return output.NewStdoutJSONL(os.Stdout), nil
 	case "grpc":
 		g := cfg.Output.GRPC
-		return grpcsink.New(grpcsink.Options{
+		var emit func([]string)
+		sink, err := grpcsink.New(grpcsink.Options{
 			ServerAddr:        g.ServerAddr,
 			CAPath:            g.CAPath,
 			CertPath:          g.CertPath,
@@ -168,26 +169,43 @@ func newSink(cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engin
 			HeartbeatInterval: g.HeartbeatInterval,
 			BufferSize:        g.BufferSize,
 			AgentVersion:      version.Version,
-			OnRuleSet:         applyRuleSetTo(eng, telem),
+			// emit is filled in below — applyRuleSetTo holds the
+			// indirection so the callback closes over the variable
+			// rather than the (still-nil) value at this point.
+			OnRuleSet: applyRuleSetTo(eng, telem, func(ws []string) {
+				if emit != nil {
+					emit(ws)
+				}
+			}),
 		}, telem)
+		if err != nil {
+			return nil, err
+		}
+		emit = sink.EmitDiag
+		return sink, nil
 	}
 	return nil, fmt.Errorf("unknown output.kind %q", cfg.Output.Kind)
 }
 
 // applyRuleSetTo returns a callback that compiles a server-pushed
-// RuleSet and swaps it into the running engine. Compile errors on
-// individual rules are silently skipped so a single bad rule from the
-// server can't take all rules offline; the surviving rules ship.
+// RuleSet and swaps it into the running engine. Compile errors and
+// ADR-0018 cap refusals on individual rules are skipped so one bad
+// rule can't take the whole pack offline; refusals are emitted to
+// the server via DiagReport (#57) so operators see what was rejected
+// and why without scraping agent stderr.
 //
 // The rule-count transition is logged at info; steady-state pushes
 // (debounced Refresh + 30s fallback poll) log at debug so operators
 // running --log-level=info see only changes. The transition log is
 // enough to diagnose the empty-RuleSet failure mode (e.g. server-side
 // compile rejected every row) caught during #46 validation.
-func applyRuleSetTo(eng ruleengine.Engine, telem *telemetry.Counters) func(*pb.RuleSet) {
+//
+// emitDiag may be nil — in that case refusals still log locally but
+// don't reach the server; production wires the gRPC sink's emitter.
+func applyRuleSetTo(eng ruleengine.Engine, telem *telemetry.Counters, emitDiag func([]string)) func(*pb.RuleSet) {
 	lastCount := -1
 	return func(rs *pb.RuleSet) {
-		compiled, skipped, err := compileRuleSet(rs, telem)
+		compiled, warnings, err := compileRuleSet(rs, telem)
 		if err != nil {
 			slog.Error("ruleset apply",
 				"err", err,
@@ -196,7 +214,7 @@ func applyRuleSetTo(eng ruleengine.Engine, telem *telemetry.Counters) func(*pb.R
 		}
 		fields := []any{
 			"rule_count", len(compiled),
-			"skipped_count", skipped,
+			"skipped_count", len(warnings),
 			"ruleset_version", rs.GetVersion(),
 			"source", "server-push",
 		}
@@ -207,7 +225,14 @@ func applyRuleSetTo(eng ruleengine.Engine, telem *telemetry.Counters) func(*pb.R
 		} else {
 			slog.Debug("ruleset apply: steady state", fields...)
 		}
+		for _, w := range warnings {
+			slog.Warn("ruleset apply: rule refused", "warning", w,
+				"ruleset_version", rs.GetVersion())
+		}
 		eng.ReplaceRules(compiled)
+		if emitDiag != nil && len(warnings) > 0 {
+			emitDiag(warnings)
+		}
 	}
 }
 

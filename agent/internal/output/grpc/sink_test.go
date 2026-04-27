@@ -35,6 +35,7 @@ type stubServer struct {
 	mu         sync.Mutex
 	events     []*pb.Envelope
 	heartbeats int
+	diags      []*pb.DiagReport
 
 	killNext atomic.Bool
 	killed   chan struct{}
@@ -67,8 +68,27 @@ func (s *stubServer) Session(stream pb.AgentService_SessionServer) error {
 			s.mu.Lock()
 			s.heartbeats++
 			s.mu.Unlock()
+		case *pb.ClientMessage_Diag:
+			s.mu.Lock()
+			s.diags = append(s.diags, k.Diag)
+			s.mu.Unlock()
 		}
 	}
+}
+
+func (s *stubServer) diagCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.diags)
+}
+
+func (s *stubServer) firstDiag() *pb.DiagReport {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.diags) == 0 {
+		return nil
+	}
+	return s.diags[0]
 }
 
 func (s *stubServer) eventCount() int {
@@ -297,6 +317,76 @@ func TestSink_DropOldestOnFull(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("sink did not stop")
+	}
+}
+
+func TestSink_EmitDiagSendsDiagReport(t *testing.T) {
+	stub, dialOpts, stop := spawnStubServer(t)
+	defer stop()
+
+	sink, err := New(Options{
+		ServerAddr:        "passthrough:bufnet",
+		HostIDPath:        writeHostID(t, "host-diag-01"),
+		HeartbeatInterval: time.Hour, // suppress heartbeats so the test only sees diags
+		BufferSize:        16,
+		AgentVersion:      "test",
+		DialOptions:       dialOpts,
+	}, telemetry.NewCounters())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	in := make(chan ocsf.Event, 1)
+	done := make(chan error, 1)
+	go func() { done <- sink.Run(ctx, in) }()
+
+	// Give the session a moment to connect, then emit a diag.
+	waitFor(t, func() bool { return sink.diags != nil }, time.Second, "sink ready")
+	sink.EmitDiag([]string{
+		"rule:abc:state_window_too_large",
+		"rule:def:ast_version_unsupported",
+	})
+
+	waitFor(t, func() bool { return stub.diagCount() >= 1 }, 3*time.Second, "diag received")
+
+	d := stub.firstDiag()
+	if d == nil {
+		t.Fatal("diag report missing")
+	}
+	if d.GetHostId() != "host-diag-01" {
+		t.Errorf("diag host_id = %q", d.GetHostId())
+	}
+	if got := len(d.GetWarnings()); got != 2 {
+		t.Errorf("warnings count = %d, want 2", got)
+	}
+	if d.GetWarnings()[0] != "rule:abc:state_window_too_large" {
+		t.Errorf("first warning = %q", d.GetWarnings()[0])
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sink did not stop after cancel")
+	}
+}
+
+func TestSink_EmitDiagDropsEmpty(t *testing.T) {
+	sink, err := New(Options{
+		ServerAddr: "nope",
+		HostIDPath: writeHostID(t, "h"),
+	}, telemetry.NewCounters())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink.EmitDiag(nil) // should not enqueue
+	sink.EmitDiag([]string{})
+	select {
+	case <-sink.diags:
+		t.Errorf("empty EmitDiag should not enqueue")
+	default:
 	}
 }
 

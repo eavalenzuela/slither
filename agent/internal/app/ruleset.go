@@ -9,36 +9,79 @@ import (
 	pb "github.com/t3rmit3/slither/proto/gen/slither/v1"
 )
 
+// ADR-0018 hard caps the agent enforces at runtime per ADR-0032. The
+// server's compiler already rejects rules that exceed these, but a
+// misconfigured server (e.g. one that drops the cap check) would
+// otherwise push agent-side state corruption. Better to refuse loud.
+const (
+	maxStateWindowSecs uint32 = 300
+	maxStateCap        uint32 = 1024
+)
+
+// Refusal reasons emitted into DiagReport.warnings as
+// `rule:<rule_id>:<reason>`. Vocabulary fixed by ADR-0032 — keep these
+// in sync with the server's parser before changing strings.
+const (
+	reasonASTVersionUnsupported = "ast_version_unsupported"
+	reasonStateWindowTooLarge   = "state_window_too_large"
+	reasonStateCapTooLarge      = "state_cap_too_large"
+	reasonCompileFailed         = "compile_failed"
+)
+
 // compileRuleSet turns a server-pushed RuleSet into the engine's
 // CompiledRule slice. v1 (stateless) and v2 (bounded-stateful, Phase 3
 // #54d/#56) are both honoured; rules carrying any other ast_version are
-// skipped so an older agent silently degrades rather than crashing on
-// an unknown wire shape. ADR-0032 codifies this as the agent-side
-// refusal vocabulary; #57 will surface the skips via DiagReport.
+// skipped. Rules whose wire-stamped state bounds exceed ADR-0018's hard
+// caps are skipped with the failed predicate cited. ADR-0032 codifies
+// this as the agent-side refusal vocabulary; the returned warnings are
+// emitted to the server via DiagReport so operators can see refusals
+// without scraping agent stderr.
 //
-// Compile errors on individual rules are skipped with a count returned
-// so callers can log without aborting the whole reload.
-func compileRuleSet(rs *pb.RuleSet, telem *telemetry.Counters) (compiled []ruleengine.CompiledRule, skipped int, err error) {
+// Compile errors on individual rules are skipped with their UID added
+// to warnings so callers can attribute without re-walking the slice.
+func compileRuleSet(rs *pb.RuleSet, telem *telemetry.Counters) (compiled []ruleengine.CompiledRule, warnings []string, err error) {
 	if rs == nil {
-		return nil, 0, nil
+		return nil, nil, nil
 	}
 	parsed := make([]*ruleast.Rule, 0, len(rs.GetRules()))
 	for _, er := range rs.GetRules() {
 		v := ruleast.ASTVersion(er.GetAstVersion())
 		if v != ruleast.ASTVersionV1 && v != ruleast.ASTVersionV2 {
-			skipped++
+			warnings = append(warnings, formatWarning(er.GetRuleId(), reasonASTVersionUnsupported))
+			continue
+		}
+		if er.GetStateWindowSecs() > maxStateWindowSecs {
+			warnings = append(warnings, formatWarning(er.GetRuleId(), reasonStateWindowTooLarge))
+			continue
+		}
+		if er.GetStateCap() > maxStateCap {
+			warnings = append(warnings, formatWarning(er.GetRuleId(), reasonStateCapTooLarge))
 			continue
 		}
 		artefact, _, class, cerr := ruleast.Compile(er.GetCompiledAst())
-		if cerr != nil || class == ruleast.ClassificationServerOnly {
-			skipped++
+		if cerr != nil {
+			warnings = append(warnings, formatWarning(er.GetRuleId(), reasonCompileFailed))
+			continue
+		}
+		if class == ruleast.ClassificationServerOnly {
+			// Server-only rules slipping onto the wire is an upstream bug,
+			// not a runtime-cap violation. Skip silently — the next
+			// Refresh() on the server will repair the wire payload.
 			continue
 		}
 		parsed = append(parsed, artefact.Rule)
 	}
 	out, err := ruleengine.CompileRules(parsed, telem)
 	if err != nil {
-		return nil, skipped, fmt.Errorf("compileRuleSet: wrap: %w", err)
+		return nil, warnings, fmt.Errorf("compileRuleSet: wrap: %w", err)
 	}
-	return out, skipped, nil
+	return out, warnings, nil
+}
+
+// formatWarning renders a refusal as the wire-level
+// `rule:<id>:<reason>` shape. The empty rule_id is preserved so the
+// server log shows `rule::reason` rather than dropping the warning —
+// makes operator sees-something-wrong easier than sees-nothing.
+func formatWarning(ruleID, reason string) string {
+	return fmt.Sprintf("rule:%s:%s", ruleID, reason)
 }

@@ -174,9 +174,14 @@ func (s *SessionService) handle(ctx context.Context, hostID string, msg *pb.Clie
 		if hb := k.Heartbeat; hb != nil {
 			s.applyHeartbeat(ctx, hostID)
 		}
-	case *pb.ClientMessage_Ack, *pb.ClientMessage_Diag:
-		// Ack and Diag are observational today. #39 wires RuleSet
-		// acks; #44 (revocation/diag dashboard) consumes Diag.
+	case *pb.ClientMessage_Ack:
+		// RuleSet acks consumed by future hub work; observational today.
+	case *pb.ClientMessage_Diag:
+		// Phase 3 #57: DiagReport.warnings carry agent-side rule
+		// refusals (`rule:<id>:<reason>`) per ADR-0032. Log each at
+		// WARN so operators reading `journalctl -u slither-server`
+		// see the failed predicates without scraping agent stderr.
+		s.logDiagReport(hostID, k.Diag)
 	case nil:
 		// Empty oneof — protocol violation, but tolerate it.
 	default:
@@ -195,6 +200,47 @@ func (s *SessionService) publishEvent(hostID string, env *pb.Envelope) {
 	env.HostId = hostID
 	s.Telem.IncEventsReceived()
 	s.Bus.Publish(env)
+}
+
+// logDiagReport surfaces an agent's per-warning refusal vocabulary.
+// Each warning is the wire-level `rule:<rule_id>:<reason>` shape from
+// ADR-0032; we parse it back into structured slog fields so log
+// shippers can group on rule_id or reason without regex on the
+// message. Malformed warnings (anything not matching the expected
+// shape) log raw — better noisy than silent.
+func (s *SessionService) logDiagReport(hostID string, diag *pb.DiagReport) {
+	if diag == nil {
+		return
+	}
+	for _, w := range diag.GetWarnings() {
+		ruleID, reason, ok := parseRuleWarning(w)
+		if !ok {
+			slog.Warn("agent diag warning",
+				"host_id", hostID, "warning", w)
+			continue
+		}
+		slog.Warn("agent rule refusal",
+			"host_id", hostID,
+			"rule_id", ruleID,
+			"reason", reason)
+	}
+}
+
+// parseRuleWarning splits "rule:<id>:<reason>" into its parts. The id
+// itself is opaque (Sigma uids contain colons-not-but-letters-and-
+// dashes today, but a lenient parser future-proofs that). We anchor on
+// the leading "rule:" prefix and split off the trailing reason on the
+// last ":" so a UID containing colons would still parse cleanly.
+func parseRuleWarning(w string) (ruleID, reason string, ok bool) {
+	if !strings.HasPrefix(w, "rule:") {
+		return "", "", false
+	}
+	body := strings.TrimPrefix(w, "rule:")
+	idx := strings.LastIndex(body, ":")
+	if idx < 0 {
+		return "", "", false
+	}
+	return body[:idx], body[idx+1:], true
 }
 
 // applyHeartbeat bumps hosts.last_seen. A missing row here is logged

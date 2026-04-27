@@ -62,6 +62,13 @@ type Sink struct {
 
 	hostID string
 	buf    chan *pb.Envelope
+
+	// diags carries DiagReport messages queued by EmitDiag. Capacity
+	// stays small (Phase 3 #57): a single ruleset apply emits one
+	// report at most, and rule pushes are debounced server-side. Drop
+	// when full rather than blocking — diagnostics losing one report
+	// is preferable to the rule-apply path stalling.
+	diags chan *pb.DiagReport
 }
 
 // New constructs a Sink. Reads host_id from disk up-front — a sink
@@ -89,7 +96,30 @@ func New(opts Options, telem *telemetry.Counters) (*Sink, error) {
 		telem:  telem,
 		hostID: hostID,
 		buf:    make(chan *pb.Envelope, opts.BufferSize),
+		diags:  make(chan *pb.DiagReport, 8),
 	}, nil
+}
+
+// EmitDiag queues a DiagReport with the given warnings to be sent on
+// the next Session iteration. Phase 3 #57: applyRuleSetTo calls this
+// when rule refusals (state_window_too_large, ast_version_unsupported,
+// …) occur so the server's session log can show what got rejected
+// without operators scraping agent stderr. Drops on full — operational
+// tradeoff documented on the diags channel.
+func (s *Sink) EmitDiag(warnings []string) {
+	if len(warnings) == 0 {
+		return
+	}
+	report := &pb.DiagReport{
+		HostId:   s.hostID,
+		Warnings: append([]string(nil), warnings...),
+	}
+	select {
+	case s.diags <- report:
+	default:
+		// Diag channel saturated. The next ruleset push will surface
+		// any persistent refusal anyway, so dropping is fine.
+	}
 }
 
 // Run is the Sink contract: block draining in until ctx is cancelled.
@@ -234,6 +264,12 @@ func (s *Sink) runSession(ctx context.Context, client pb.AgentServiceClient) err
 		case env := <-s.buf:
 			if err := stream.Send(&pb.ClientMessage{
 				Kind: &pb.ClientMessage_Event{Event: env},
+			}); err != nil {
+				return err
+			}
+		case diag := <-s.diags:
+			if err := stream.Send(&pb.ClientMessage{
+				Kind: &pb.ClientMessage_Diag{Diag: diag},
 			}); err != nil {
 				return err
 			}
