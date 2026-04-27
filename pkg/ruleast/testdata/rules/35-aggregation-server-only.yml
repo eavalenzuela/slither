@@ -1,0 +1,14 @@
+title: Sustained outbound connection volume
+id: 8b7c4d00-0001-4000-8000-000000000023
+description: |
+  Window exceeds the agent's bounded-stateful cap (>300 s), so the rule
+  classifies server-only and lands in ServerPlan instead of EdgeArtefact.
+level: medium
+logsource:
+  product: linux
+  category: network_connection
+detection:
+  selection:
+    DstPort: 443
+  condition: selection | count() by DstAddr > 100
+timeframe: 1h

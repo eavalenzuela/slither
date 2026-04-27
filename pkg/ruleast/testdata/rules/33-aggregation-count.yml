@@ -1,0 +1,13 @@
+title: Brute-force ssh login attempts
+id: 8b7c4d00-0001-4000-8000-000000000021
+description: Five or more failed sshd auth events from one host inside a minute.
+level: high
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: /usr/sbin/sshd
+    CommandLine|contains: 'auth failure'
+  condition: selection | count() > 5
+timeframe: 60s

@@ -1,24 +1,27 @@
 {
-  "category": "process_creation",
-  "condition": "selection",
-  "cost": 1,
-  "description": "Exercises the |base64 modifier — value transforms at compile time.",
-  "id": "8b7c4d00-0001-4000-8000-00000000001a",
-  "level": "medium",
-  "selections": [
-    {
-      "fields": [
-        {
-          "field": "CommandLine",
-          "mods": "base64",
-          "op": "contains",
-          "values": [
-            "L2Jpbi9iYXNoIC1p"
-          ]
-        }
-      ],
-      "name": "selection"
-    }
-  ],
-  "title": "Base64-encoded reverse-shell marker"
+  "classification": "edge_only",
+  "rule": {
+    "category": "process_creation",
+    "condition": "selection",
+    "cost": 1,
+    "description": "Exercises the |base64 modifier — value transforms at compile time.",
+    "id": "8b7c4d00-0001-4000-8000-00000000001a",
+    "level": "medium",
+    "selections": [
+      {
+        "fields": [
+          {
+            "field": "CommandLine",
+            "mods": "base64",
+            "op": "contains",
+            "values": [
+              "L2Jpbi9iYXNoIC1p"
+            ]
+          }
+        ],
+        "name": "selection"
+      }
+    ],
+    "title": "Base64-encoded reverse-shell marker"
+  }
 }

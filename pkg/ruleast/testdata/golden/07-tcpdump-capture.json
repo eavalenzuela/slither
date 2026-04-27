@@ -1,32 +1,35 @@
 {
-  "category": "process_creation",
-  "condition": "selection",
-  "cost": 2,
-  "description": "tcpdump/tshark with -w suggests on-host traffic capture — often legitimate, sometimes attacker recon.",
-  "id": "8b7c4d00-0001-4000-8000-000000000007",
-  "level": "low",
-  "selections": [
-    {
-      "fields": [
-        {
-          "field": "CommandLine",
-          "op": "contains",
-          "values": [
-            " -w ",
-            " --write-file="
-          ]
-        },
-        {
-          "field": "Image",
-          "op": "endswith",
-          "values": [
-            "/tcpdump",
-            "/tshark"
-          ]
-        }
-      ],
-      "name": "selection"
-    }
-  ],
-  "title": "tcpdump writing capture file"
+  "classification": "edge_only",
+  "rule": {
+    "category": "process_creation",
+    "condition": "selection",
+    "cost": 2,
+    "description": "tcpdump/tshark with -w suggests on-host traffic capture — often legitimate, sometimes attacker recon.",
+    "id": "8b7c4d00-0001-4000-8000-000000000007",
+    "level": "low",
+    "selections": [
+      {
+        "fields": [
+          {
+            "field": "CommandLine",
+            "op": "contains",
+            "values": [
+              " -w ",
+              " --write-file="
+            ]
+          },
+          {
+            "field": "Image",
+            "op": "endswith",
+            "values": [
+              "/tcpdump",
+              "/tshark"
+            ]
+          }
+        ],
+        "name": "selection"
+      }
+    ],
+    "title": "tcpdump writing capture file"
+  }
 }

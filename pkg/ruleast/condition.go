@@ -8,35 +8,51 @@ import (
 	"unicode"
 )
 
-// parseCondition turns a Sigma condition string into an Expr. Grammar
-// accepted as of §5.1 #54c:
+// parseCondition turns a Sigma condition string into an Expr plus an
+// optional Aggregation when the condition carries a pipe. Grammar
+// accepted as of §5.1 #54d:
 //
-//	expr      := or
+//	condition := or [ "|" aggregation ]
 //	or        := and ("or" and)*
 //	and       := not ("and" not)*
 //	not       := "not" not | primary
-//	primary   := quantifier | IDENT | "(" expr ")"
+//	primary   := quantifier | IDENT | "(" or ")"
 //	quantifier := count "of" target
 //	count     := NUMBER | "all" | "any"
 //	target    := "them" | IDENT [ "*" trailing... ]
+//	aggregation := "count" "(" ")" [ "by" idlist ] cmpop NUMBER
+//	cmpop       := ">" | ">=" | "<" | "<=" | "==" | "!="
+//	idlist      := IDENT ("," IDENT)*
 //
 // "1 of selection*" expands to OR over all selection-name matches;
 // "all of them" expands to AND over every defined selection. Numeric
 // thresholds (N of selection*) require at least N branches to match.
-func parseCondition(src string, selections map[string]*Selection) (Expr, error) {
+//
+// The pipe-aggregation tail makes the rule stateful — Compile turns it
+// into a Rule.Aggregation and bumps ASTVersion. Stateless rules return
+// (expr, nil, nil) and behave exactly as before #54d.
+func parseCondition(src string, selections map[string]*Selection) (Expr, *Aggregation, error) {
 	toks, err := tokenizeCondition(src)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	p := &condParser{toks: toks, sels: selections}
 	expr, err := p.parseOr()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	var agg *Aggregation
+	if t, ok := p.peek(); ok && t.kind == tokPipe {
+		p.pos++
+		agg, err = p.parseAggregation()
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	if p.pos != len(p.toks) {
-		return nil, fmt.Errorf("unexpected token %q after expression", p.toks[p.pos].value)
+		return nil, nil, fmt.Errorf("unexpected token %q after expression", p.toks[p.pos].value)
 	}
-	return expr, nil
+	return expr, agg, nil
 }
 
 type tokKind int
@@ -51,6 +67,9 @@ const (
 	tokNumber
 	tokOf
 	tokThem
+	tokPipe
+	tokComma
+	tokCmp // >, >=, <, <=, ==, !=
 )
 
 type condToken struct {
@@ -78,9 +97,32 @@ func tokenizeCondition(src string) ([]condToken, error) {
 			continue
 		}
 		if r == '|' {
-			// Pipe operators introduce aggregations (`| count() > N`)
-			// which are scoped to #54d's stateful work.
-			return nil, fmt.Errorf("pipe-aggregation forms not supported until #54d (e.g. \"| count\")")
+			out = append(out, condToken{kind: tokPipe, value: "|"})
+			i++
+			continue
+		}
+		if r == ',' {
+			out = append(out, condToken{kind: tokComma, value: ","})
+			i++
+			continue
+		}
+		if r == '>' || r == '<' {
+			if i+1 < len(src) && src[i+1] == '=' {
+				out = append(out, condToken{kind: tokCmp, value: src[i : i+2]})
+				i += 2
+				continue
+			}
+			out = append(out, condToken{kind: tokCmp, value: string(r)})
+			i++
+			continue
+		}
+		if r == '=' || r == '!' {
+			if i+1 < len(src) && src[i+1] == '=' {
+				out = append(out, condToken{kind: tokCmp, value: src[i : i+2]})
+				i += 2
+				continue
+			}
+			return nil, fmt.Errorf("unexpected character %q in condition (did you mean \"==\" / \"!=\"?)", r)
 		}
 		if unicode.IsDigit(r) {
 			j := i
@@ -299,6 +341,93 @@ func quantifierCountString(count int) string {
 		return "all"
 	}
 	return strconv.Itoa(count)
+}
+
+// parseAggregation consumes the tail of the pipe expression. The pipe
+// itself was already consumed by the caller. Grammar:
+//
+//	"count" "(" ")" [ "by" IDENT ("," IDENT)* ] cmp NUMBER
+//
+// The function set is single-entry today (count). near() / sum() etc.
+// arrive with #54e and are intentionally not handled here so an unknown
+// function fails compile loud rather than being silently accepted.
+func (p *condParser) parseAggregation() (*Aggregation, error) {
+	t, ok := p.consume()
+	if !ok {
+		return nil, fmt.Errorf("expected aggregation function after \"|\"")
+	}
+	if t.kind != tokIdent {
+		return nil, fmt.Errorf("expected aggregation function after \"|\", got %q", t.value)
+	}
+	var fn AggFunc
+	switch strings.ToLower(t.value) {
+	case "count":
+		fn = AggCount
+	default:
+		return nil, fmt.Errorf("unsupported aggregation function %q (only \"count\" is recognised in Phase 3 #54d)", t.value)
+	}
+	if open, openOk := p.consume(); !openOk || open.kind != tokLparen {
+		return nil, fmt.Errorf("expected \"(\" after aggregation function")
+	}
+	if closeTok, closeOk := p.consume(); !closeOk || closeTok.kind != tokRparen {
+		return nil, fmt.Errorf("expected \")\" after aggregation arguments (count() takes no field arg in this version)")
+	}
+	var by []string
+	if next, nextOk := p.peek(); nextOk && next.kind == tokIdent && strings.EqualFold(next.value, "by") {
+		p.pos++
+		for {
+			id, idOk := p.consume()
+			if !idOk || id.kind != tokIdent {
+				return nil, fmt.Errorf("expected field identifier after \"by\"")
+			}
+			by = append(by, id.value)
+			peek, peekOk := p.peek()
+			if !peekOk || peek.kind != tokComma {
+				break
+			}
+			p.pos++
+		}
+	}
+	cmp, cmpOk := p.consume()
+	if !cmpOk || cmp.kind != tokCmp {
+		return nil, fmt.Errorf("expected comparison operator after aggregation")
+	}
+	op, err := parseAggOp(cmp.value)
+	if err != nil {
+		return nil, err
+	}
+	num, numOk := p.consume()
+	if !numOk || num.kind != tokNumber {
+		return nil, fmt.Errorf("expected numeric threshold after %q", cmp.value)
+	}
+	threshold, err := strconv.ParseInt(num.value, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid threshold %q: %w", num.value, err)
+	}
+	return &Aggregation{
+		Function:  fn,
+		By:        by,
+		Op:        op,
+		Threshold: threshold,
+	}, nil
+}
+
+func parseAggOp(s string) (AggOp, error) {
+	switch s {
+	case ">":
+		return AggGT, nil
+	case ">=":
+		return AggGTE, nil
+	case "<":
+		return AggLT, nil
+	case "<=":
+		return AggLTE, nil
+	case "==":
+		return AggEQ, nil
+	case "!=":
+		return AggNE, nil
+	}
+	return 0, fmt.Errorf("unknown comparison operator %q", s)
 }
 
 // matchSelections expands a wildcard or bare-identifier target. A

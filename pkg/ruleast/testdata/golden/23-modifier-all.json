@@ -1,25 +1,28 @@
 {
-  "category": "process_creation",
-  "condition": "selection",
-  "cost": 1,
-  "description": "Exercises the |all modifier — every value must be present.",
-  "id": "8b7c4d00-0001-4000-8000-000000000017",
-  "level": "low",
-  "selections": [
-    {
-      "fields": [
-        {
-          "field": "CommandLine",
-          "mods": "all",
-          "op": "contains",
-          "values": [
-            "--upload",
-            "--secret"
-          ]
-        }
-      ],
-      "name": "selection"
-    }
-  ],
-  "title": "Cmdline contains every flag"
+  "classification": "edge_only",
+  "rule": {
+    "category": "process_creation",
+    "condition": "selection",
+    "cost": 1,
+    "description": "Exercises the |all modifier — every value must be present.",
+    "id": "8b7c4d00-0001-4000-8000-000000000017",
+    "level": "low",
+    "selections": [
+      {
+        "fields": [
+          {
+            "field": "CommandLine",
+            "mods": "all",
+            "op": "contains",
+            "values": [
+              "--upload",
+              "--secret"
+            ]
+          }
+        ],
+        "name": "selection"
+      }
+    ],
+    "title": "Cmdline contains every flag"
+  }
 }

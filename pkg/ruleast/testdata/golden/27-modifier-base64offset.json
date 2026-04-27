@@ -1,26 +1,29 @@
 {
-  "category": "process_creation",
-  "condition": "selection",
-  "cost": 1,
-  "description": "Exercises the |base64offset modifier — three offset encodings.",
-  "id": "8b7c4d00-0001-4000-8000-00000000001b",
-  "level": "medium",
-  "selections": [
-    {
-      "fields": [
-        {
-          "field": "CommandLine",
-          "mods": "base64offset",
-          "op": "contains",
-          "values": [
-            "QUtJQQ",
-            "EFLSUE",
-            "BBS0lB"
-          ]
-        }
-      ],
-      "name": "selection"
-    }
-  ],
-  "title": "Base64-embedded credential string"
+  "classification": "edge_only",
+  "rule": {
+    "category": "process_creation",
+    "condition": "selection",
+    "cost": 1,
+    "description": "Exercises the |base64offset modifier — three offset encodings.",
+    "id": "8b7c4d00-0001-4000-8000-00000000001b",
+    "level": "medium",
+    "selections": [
+      {
+        "fields": [
+          {
+            "field": "CommandLine",
+            "mods": "base64offset",
+            "op": "contains",
+            "values": [
+              "QUtJQQ",
+              "EFLSUE",
+              "BBS0lB"
+            ]
+          }
+        ],
+        "name": "selection"
+      }
+    ],
+    "title": "Base64-embedded credential string"
+  }
 }

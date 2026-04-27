@@ -1,0 +1,11 @@
+title: force_edge with over-cap window
+id: invalid-0010
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: /usr/bin/sudo
+  condition: selection | count() > 5
+timeframe: 10m
+force_edge: true

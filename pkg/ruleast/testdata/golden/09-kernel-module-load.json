@@ -1,25 +1,28 @@
 {
-  "category": "process_creation",
-  "condition": "selection",
-  "cost": 1,
-  "description": "insmod / modprobe usage.",
-  "id": "8b7c4d00-0001-4000-8000-000000000009",
-  "level": "medium",
-  "selections": [
-    {
-      "fields": [
-        {
-          "field": "Image",
-          "op": "endswith",
-          "values": [
-            "/insmod",
-            "/modprobe",
-            "/kmod"
-          ]
-        }
-      ],
-      "name": "selection"
-    }
-  ],
-  "title": "Kernel module loaded"
+  "classification": "edge_only",
+  "rule": {
+    "category": "process_creation",
+    "condition": "selection",
+    "cost": 1,
+    "description": "insmod / modprobe usage.",
+    "id": "8b7c4d00-0001-4000-8000-000000000009",
+    "level": "medium",
+    "selections": [
+      {
+        "fields": [
+          {
+            "field": "Image",
+            "op": "endswith",
+            "values": [
+              "/insmod",
+              "/modprobe",
+              "/kmod"
+            ]
+          }
+        ],
+        "name": "selection"
+      }
+    ],
+    "title": "Kernel module loaded"
+  }
 }

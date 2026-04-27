@@ -1,47 +1,50 @@
 {
-  "category": "process_creation",
-  "condition": "all of them",
-  "cost": 3,
-  "description": "Exercises \"all of them\" — every selection must match.",
-  "id": "8b7c4d00-0001-4000-8000-00000000001f",
-  "level": "medium",
-  "selections": [
-    {
-      "fields": [
-        {
-          "field": "Image",
-          "op": "endswith",
-          "values": [
-            "/usr/bin/curl"
-          ]
-        }
-      ],
-      "name": "exec_tool"
-    },
-    {
-      "fields": [
-        {
-          "field": "CommandLine",
-          "op": "contains",
-          "values": [
-            "http"
-          ]
-        }
-      ],
-      "name": "remote_target"
-    },
-    {
-      "fields": [
-        {
-          "field": "CommandLine",
-          "op": "contains",
-          "values": [
-            "--upload-file"
-          ]
-        }
-      ],
-      "name": "upload_flag"
-    }
-  ],
-  "title": "All of them"
+  "classification": "edge_only",
+  "rule": {
+    "category": "process_creation",
+    "condition": "all of them",
+    "cost": 3,
+    "description": "Exercises \"all of them\" — every selection must match.",
+    "id": "8b7c4d00-0001-4000-8000-00000000001f",
+    "level": "medium",
+    "selections": [
+      {
+        "fields": [
+          {
+            "field": "Image",
+            "op": "endswith",
+            "values": [
+              "/usr/bin/curl"
+            ]
+          }
+        ],
+        "name": "exec_tool"
+      },
+      {
+        "fields": [
+          {
+            "field": "CommandLine",
+            "op": "contains",
+            "values": [
+              "http"
+            ]
+          }
+        ],
+        "name": "remote_target"
+      },
+      {
+        "fields": [
+          {
+            "field": "CommandLine",
+            "op": "contains",
+            "values": [
+              "--upload-file"
+            ]
+          }
+        ],
+        "name": "upload_flag"
+      }
+    ],
+    "title": "All of them"
+  }
 }

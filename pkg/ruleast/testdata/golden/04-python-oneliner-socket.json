@@ -1,44 +1,47 @@
 {
-  "category": "process_creation",
-  "condition": "(selection and payload)",
-  "cost": 3,
-  "description": "python/python3 -c with socket import, a common reverse-shell payload.",
-  "id": "8b7c4d00-0001-4000-8000-000000000004",
-  "level": "high",
-  "selections": [
-    {
-      "fields": [
-        {
-          "field": "CommandLine",
-          "op": "contains",
-          "values": [
-            "import socket",
-            "socket.socket"
-          ]
-        }
-      ],
-      "name": "payload"
-    },
-    {
-      "fields": [
-        {
-          "field": "CommandLine",
-          "op": "contains",
-          "values": [
-            " -c "
-          ]
-        },
-        {
-          "field": "Image",
-          "op": "endswith",
-          "values": [
-            "/python",
-            "/python3"
-          ]
-        }
-      ],
-      "name": "selection"
-    }
-  ],
-  "title": "Python one-liner opening a socket"
+  "classification": "edge_only",
+  "rule": {
+    "category": "process_creation",
+    "condition": "(selection and payload)",
+    "cost": 3,
+    "description": "python/python3 -c with socket import, a common reverse-shell payload.",
+    "id": "8b7c4d00-0001-4000-8000-000000000004",
+    "level": "high",
+    "selections": [
+      {
+        "fields": [
+          {
+            "field": "CommandLine",
+            "op": "contains",
+            "values": [
+              "import socket",
+              "socket.socket"
+            ]
+          }
+        ],
+        "name": "payload"
+      },
+      {
+        "fields": [
+          {
+            "field": "CommandLine",
+            "op": "contains",
+            "values": [
+              " -c "
+            ]
+          },
+          {
+            "field": "Image",
+            "op": "endswith",
+            "values": [
+              "/python",
+              "/python3"
+            ]
+          }
+        ],
+        "name": "selection"
+      }
+    ],
+    "title": "Python one-liner opening a socket"
+  }
 }

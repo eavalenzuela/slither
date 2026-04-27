@@ -1,4 +1,4 @@
-title: Uses timeframe (stateful, Phase 3+)
+title: Timeframe under detection (must be top-level)
 id: invalid-0007
 logsource:
   product: linux
@@ -6,5 +6,5 @@ logsource:
 detection:
   selection:
     Image: x
-  condition: selection
+  condition: selection | count() > 1
   timeframe: 5m

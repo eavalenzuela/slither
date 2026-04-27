@@ -1,0 +1,13 @@
+title: Per-user sudo flood
+id: 8b7c4d00-0001-4000-8000-000000000022
+description: Same user firing sudo more than three times in five minutes.
+level: medium
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: /usr/bin/sudo
+  condition: selection | count() by User >= 3
+timeframe: 5m
+lookback: true

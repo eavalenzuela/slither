@@ -1,0 +1,16 @@
+{
+  "classification": "server_only",
+  "server_plan": {
+    "aggregation": {
+      "by": [
+        "DstAddr"
+      ],
+      "function": "count",
+      "op": "\u003e",
+      "threshold": 100,
+      "timeframe_secs": 3600
+    },
+    "rule_id": "8b7c4d00-0001-4000-8000-000000000023",
+    "timeframe_secs": 3600
+  }
+}

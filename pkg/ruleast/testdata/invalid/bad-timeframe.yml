@@ -1,0 +1,10 @@
+title: Malformed timeframe scalar
+id: invalid-0012
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: /usr/bin/sudo
+  condition: selection | count() > 5
+timeframe: 5x

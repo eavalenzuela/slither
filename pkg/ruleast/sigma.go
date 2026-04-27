@@ -26,6 +26,16 @@ type sigmaYAML struct {
 	LogSource   logSourceYAML  `yaml:"logsource"`
 	Detection   map[string]any `yaml:"detection"`
 	Level       string         `yaml:"level"`
+
+	// Phase 3 #54d adds three top-level keys. ForceEdge gates classification
+	// per ADR-0018 — when true, an edge-ineligible rule fails compile with
+	// the failed predicate cited rather than silently routing to the server
+	// detection engine. Timeframe (e.g. "60s", "5m", "1h") bounds the
+	// stateful runtime's window. Lookback opts the rule into #59's CH-replay
+	// cold start.
+	Timeframe string `yaml:"timeframe"`
+	ForceEdge bool   `yaml:"force_edge"`
+	Lookback  bool   `yaml:"lookback"`
 }
 
 type logSourceYAML struct {
@@ -35,45 +45,64 @@ type logSourceYAML struct {
 }
 
 // compileSigma parses one Sigma YAML document and returns the compiled
-// boolean-tree rule. Internal as of §5.1 #54a — public callers use
-// Compile, which wraps this in the three-artefact return shape from
-// ADR-0032. Every returned error wraps ErrCompile.
-func compileSigma(src []byte) (*Rule, error) {
+// boolean-tree rule along with the raw top-level metadata classify needs
+// to evaluate ADR-0018 predicates. Internal as of §5.1 #54a — public
+// callers use Compile. Every returned error wraps ErrCompile.
+func compileSigma(src []byte) (*Rule, *sigmaYAML, error) {
 	var doc sigmaYAML
 	dec := yaml.NewDecoder(strings.NewReader(string(src)))
 	dec.KnownFields(false)
 	if err := dec.Decode(&doc); err != nil {
-		return nil, compileErr("", "ruleast/yaml", err)
+		return nil, nil, compileErr("", "ruleast/yaml", err)
 	}
 
 	if doc.Title == "" {
-		return nil, compileErr(doc.ID, "ruleast", fmt.Errorf("title required"))
+		return nil, nil, compileErr(doc.ID, "ruleast", fmt.Errorf("title required"))
 	}
 	if doc.ID == "" {
-		return nil, compileErr("", "ruleast", fmt.Errorf("id required"))
+		return nil, nil, compileErr("", "ruleast", fmt.Errorf("id required"))
 	}
 	cat, err := checkLogSource(doc.LogSource)
 	if err != nil {
-		return nil, compileErr(doc.ID, "ruleast", err)
+		return nil, nil, compileErr(doc.ID, "ruleast", err)
 	}
 
 	selections, conditionStr, err := splitDetection(doc.Detection)
 	if err != nil {
-		return nil, compileErr(doc.ID, "ruleast", err)
+		return nil, nil, compileErr(doc.ID, "ruleast", err)
 	}
 
 	sels := make(map[string]*Selection, len(selections))
 	for name, body := range selections {
 		sel, selErr := compileSelection(name, body)
 		if selErr != nil {
-			return nil, compileErr(doc.ID, "ruleast", fmt.Errorf("selection %q: %w", name, selErr))
+			return nil, nil, compileErr(doc.ID, "ruleast", fmt.Errorf("selection %q: %w", name, selErr))
 		}
 		sels[name] = sel
 	}
 
-	cond, err := parseCondition(conditionStr, sels)
+	cond, agg, err := parseCondition(conditionStr, sels)
 	if err != nil {
-		return nil, compileErr(doc.ID, "ruleast", fmt.Errorf("condition: %w", err))
+		return nil, nil, compileErr(doc.ID, "ruleast", fmt.Errorf("condition: %w", err))
+	}
+
+	timeframeSecs, err := parseTimeframe(doc.Timeframe)
+	if err != nil {
+		return nil, nil, compileErr(doc.ID, "ruleast", fmt.Errorf("timeframe: %w", err))
+	}
+	if agg != nil {
+		if timeframeSecs == 0 {
+			return nil, nil, compileErr(doc.ID, "ruleast",
+				fmt.Errorf("aggregation requires top-level timeframe (e.g. \"timeframe: 60s\")"))
+		}
+		agg.TimeframeSecs = timeframeSecs
+	} else if timeframeSecs > 0 {
+		return nil, nil, compileErr(doc.ID, "ruleast",
+			fmt.Errorf("timeframe is only meaningful with a pipe-aggregation condition (e.g. \"selection | count() > 5\")"))
+	}
+	if doc.Lookback && agg == nil {
+		return nil, nil, compileErr(doc.ID, "ruleast",
+			fmt.Errorf("lookback only applies to stateful (aggregating) rules"))
 	}
 
 	r := &Rule{
@@ -85,9 +114,64 @@ func compileSigma(src []byte) (*Rule, error) {
 		Tags:        doc.Tags,
 		Selections:  sels,
 		Condition:   cond,
+		Aggregation: agg,
 		cost:        cond.Cost(),
 	}
-	return r, nil
+	return r, &doc, nil
+}
+
+// parseTimeframe converts Sigma's timeframe scalar into seconds. The
+// accepted suffixes mirror Sigma's spec: "s", "m", "h", "d". An empty
+// string is "no timeframe" and returns 0; a malformed value returns an
+// error so authors don't accidentally ship an unbounded stateful rule.
+func parseTimeframe(s string) (uint32, error) {
+	if s == "" {
+		return 0, nil
+	}
+	if len(s) < 2 {
+		return 0, fmt.Errorf("timeframe %q too short; expected NNs/NNm/NNh/NNd", s)
+	}
+	unit := s[len(s)-1]
+	digits := s[:len(s)-1]
+	var multSecs uint64
+	switch unit {
+	case 's':
+		multSecs = 1
+	case 'm':
+		multSecs = 60
+	case 'h':
+		multSecs = 60 * 60
+	case 'd':
+		multSecs = 60 * 60 * 24
+	default:
+		return 0, fmt.Errorf("timeframe %q has unknown unit %q (expected s, m, h, or d)", s, string(unit))
+	}
+	n, err := parseUintStrict(digits)
+	if err != nil {
+		return 0, fmt.Errorf("timeframe %q: %w", s, err)
+	}
+	if n == 0 {
+		return 0, fmt.Errorf("timeframe %q must be positive", s)
+	}
+	total := n * multSecs
+	if total > 0xFFFFFFFF {
+		return 0, fmt.Errorf("timeframe %q overflows uint32 seconds", s)
+	}
+	return uint32(total), nil
+}
+
+func parseUintStrict(s string) (uint64, error) {
+	if s == "" {
+		return 0, fmt.Errorf("missing digits")
+	}
+	var n uint64
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0, fmt.Errorf("non-digit %q", r)
+		}
+		n = n*10 + uint64(r-'0')
+	}
+	return n, nil
 }
 
 func checkLogSource(ls logSourceYAML) (Category, error) {
@@ -139,11 +223,11 @@ func splitDetection(det map[string]any) (selections map[string]any, condition st
 	}
 	sels := make(map[string]any, len(det)-1)
 	for k, v := range det {
-		if k == "condition" || k == "timeframe" {
-			if k == "timeframe" {
-				return nil, "", fmt.Errorf("detection.timeframe not supported in Phase 1 (ADR-0019)")
-			}
+		if k == "condition" {
 			continue
+		}
+		if k == "timeframe" {
+			return nil, "", fmt.Errorf("timeframe must be a top-level rule key, not under detection (Slither §5.1 #54d)")
 		}
 		sels[k] = v
 	}

@@ -139,7 +139,76 @@ type Rule struct {
 	Selections map[string]*Selection
 	Condition  Expr
 
+	// Aggregation is non-nil for stateful rules carrying a `| count() …`
+	// pipe. The boolean tree in Condition still evaluates per-event; the
+	// aggregation is applied by the stateful runtime (#56) on the matching
+	// stream. Stateless rules leave this nil and the runtime evaluates
+	// Condition directly.
+	Aggregation *Aggregation
+
 	cost int
+}
+
+// AggFunc enumerates the pipe-aggregation functions the compiler accepts.
+// #54d ships only count(); near() and avg()/sum() arrive with #54e and
+// later phases.
+type AggFunc uint8
+
+const (
+	AggCount AggFunc = iota + 1
+)
+
+func (a AggFunc) String() string {
+	if a == AggCount {
+		return "count"
+	}
+	return "?"
+}
+
+// AggOp is the comparison operator on the aggregation's threshold.
+type AggOp uint8
+
+const (
+	AggGT AggOp = iota + 1
+	AggGTE
+	AggLT
+	AggLTE
+	AggEQ
+	AggNE
+)
+
+func (o AggOp) String() string {
+	switch o {
+	case AggGT:
+		return ">"
+	case AggGTE:
+		return ">="
+	case AggLT:
+		return "<"
+	case AggLTE:
+		return "<="
+	case AggEQ:
+		return "=="
+	case AggNE:
+		return "!="
+	}
+	return "?"
+}
+
+// Aggregation is the parsed form of a Sigma pipe expression
+// (`| count() [by Field[, Field...]] OP N`). The compiler attaches it to
+// Rule when the condition string contains a pipe; the agent's stateful
+// runtime (Phase 3 #56) consumes it.
+type Aggregation struct {
+	Function  AggFunc
+	By        []string
+	Op        AggOp
+	Threshold int64
+
+	// TimeframeSecs is the rule's top-level `timeframe` rendered in
+	// seconds. Zero means no timeframe, which is rejected at compile time
+	// for stateful rules — every aggregation must be bounded.
+	TimeframeSecs uint32
 }
 
 // Cost returns the sum of predicates across the rule. The ruleengine uses

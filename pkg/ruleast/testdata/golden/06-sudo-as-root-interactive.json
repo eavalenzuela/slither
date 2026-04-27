@@ -1,45 +1,48 @@
 {
-  "category": "process_creation",
-  "condition": "(sudo and (not not_root))",
-  "cost": 3,
-  "description": "Interactive shell spawned via sudo. Noisy on workstations; useful on server fleets where admins use distinct tooling.",
-  "id": "8b7c4d00-0001-4000-8000-000000000006",
-  "level": "low",
-  "selections": [
-    {
-      "fields": [
-        {
-          "field": "User",
-          "op": "contains",
-          "values": [
-            ""
-          ]
-        }
-      ],
-      "name": "not_root"
-    },
-    {
-      "fields": [
-        {
-          "field": "CommandLine",
-          "op": "contains",
-          "values": [
-            " -i",
-            " su -",
-            " bash",
-            " sh"
-          ]
-        },
-        {
-          "field": "Image",
-          "op": "endswith",
-          "values": [
-            "/sudo"
-          ]
-        }
-      ],
-      "name": "sudo"
-    }
-  ],
-  "title": "Non-root user invoking sudo to a shell"
+  "classification": "edge_only",
+  "rule": {
+    "category": "process_creation",
+    "condition": "(sudo and (not not_root))",
+    "cost": 3,
+    "description": "Interactive shell spawned via sudo. Noisy on workstations; useful on server fleets where admins use distinct tooling.",
+    "id": "8b7c4d00-0001-4000-8000-000000000006",
+    "level": "low",
+    "selections": [
+      {
+        "fields": [
+          {
+            "field": "User",
+            "op": "contains",
+            "values": [
+              ""
+            ]
+          }
+        ],
+        "name": "not_root"
+      },
+      {
+        "fields": [
+          {
+            "field": "CommandLine",
+            "op": "contains",
+            "values": [
+              " -i",
+              " su -",
+              " bash",
+              " sh"
+            ]
+          },
+          {
+            "field": "Image",
+            "op": "endswith",
+            "values": [
+              "/sudo"
+            ]
+          }
+        ],
+        "name": "sudo"
+      }
+    ],
+    "title": "Non-root user invoking sudo to a shell"
+  }
 }

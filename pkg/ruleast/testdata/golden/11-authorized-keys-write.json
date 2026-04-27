@@ -1,36 +1,39 @@
 {
-  "category": "file_event",
-  "condition": "(selection and (not benign))",
-  "cost": 2,
-  "description": "Any process writing .ssh/authorized_keys (outside sshd / systemd).",
-  "id": "8b7c4d00-0001-4000-8000-00000000000b",
-  "level": "high",
-  "selections": [
-    {
-      "fields": [
-        {
-          "field": "Image",
-          "op": "endswith",
-          "values": [
-            "/sshd",
-            "/systemd"
-          ]
-        }
-      ],
-      "name": "benign"
-    },
-    {
-      "fields": [
-        {
-          "field": "TargetFilename",
-          "op": "contains",
-          "values": [
-            "/.ssh/authorized_keys"
-          ]
-        }
-      ],
-      "name": "selection"
-    }
-  ],
-  "title": "Write to SSH authorized_keys"
+  "classification": "edge_only",
+  "rule": {
+    "category": "file_event",
+    "condition": "(selection and (not benign))",
+    "cost": 2,
+    "description": "Any process writing .ssh/authorized_keys (outside sshd / systemd).",
+    "id": "8b7c4d00-0001-4000-8000-00000000000b",
+    "level": "high",
+    "selections": [
+      {
+        "fields": [
+          {
+            "field": "Image",
+            "op": "endswith",
+            "values": [
+              "/sshd",
+              "/systemd"
+            ]
+          }
+        ],
+        "name": "benign"
+      },
+      {
+        "fields": [
+          {
+            "field": "TargetFilename",
+            "op": "contains",
+            "values": [
+              "/.ssh/authorized_keys"
+            ]
+          }
+        ],
+        "name": "selection"
+      }
+    ],
+    "title": "Write to SSH authorized_keys"
+  }
 }

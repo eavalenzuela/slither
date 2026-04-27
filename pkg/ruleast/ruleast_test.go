@@ -44,11 +44,11 @@ func TestCompileGolden(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read rule: %v", err)
 			}
-			art, _, _, err := Compile(src)
+			art, plan, class, err := Compile(src)
 			if err != nil {
 				t.Fatalf("compile: %v", err)
 			}
-			got, err := json.MarshalIndent(ruleGolden(art.Rule), "", "  ")
+			got, err := json.MarshalIndent(compileGolden(art, plan, class), "", "  ")
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
 			}
@@ -82,10 +82,14 @@ func TestCompileRejectsInvalid(t *testing.T) {
 		{"bad-modifier.yml", "modifier"},
 		{"missing-condition.yml", "condition"},
 		{"unknown-selection.yml", "unknown selection"},
-		{"timeframe.yml", "timeframe"},
+		{"timeframe.yml", "timeframe must be a top-level"},
 		{"bad-regex.yml", "regex"},
 		{"missing-id.yml", "id required"},
 		{"empty-condition.yml", "end of condition"},
+		{"force-edge-window-too-large.yml", "state_window_too_large"},
+		{"aggregation-no-timeframe.yml", "aggregation requires top-level timeframe"},
+		{"bad-timeframe.yml", "unknown unit"},
+		{"bad-aggregation-fn.yml", "unsupported aggregation function"},
 	}
 	for _, c := range cases {
 		c := c
@@ -390,6 +394,119 @@ func TestQuantifierNumeric(t *testing.T) {
 	}
 }
 
+func TestAggregationEdgeEligible(t *testing.T) {
+	art, plan, class, err := Compile(readRule(t, "testdata/rules/33-aggregation-count.yml"))
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if class != ClassificationEdgeOnly {
+		t.Fatalf("class = %q, want edge_only", class)
+	}
+	if plan != nil {
+		t.Errorf("server plan should be nil for edge-eligible rule")
+	}
+	if art == nil || art.Rule == nil {
+		t.Fatalf("artefact missing")
+	}
+	if art.ASTVersion != ASTVersionV2 {
+		t.Errorf("ast_version = %d, want v2", art.ASTVersion)
+	}
+	if art.StateWindowSecs != 60 || art.StateCap == 0 {
+		t.Errorf("state bounds not populated: window=%d cap=%d", art.StateWindowSecs, art.StateCap)
+	}
+	agg := art.Rule.Aggregation
+	if agg == nil {
+		t.Fatalf("rule.Aggregation nil")
+	}
+	if agg.Function != AggCount || agg.Op != AggGT || agg.Threshold != 5 {
+		t.Errorf("agg = %+v", agg)
+	}
+	if len(agg.By) != 0 {
+		t.Errorf("agg.By = %v, want empty", agg.By)
+	}
+	if agg.TimeframeSecs != 60 {
+		t.Errorf("agg.TimeframeSecs = %d, want 60", agg.TimeframeSecs)
+	}
+}
+
+func TestAggregationByAndLookback(t *testing.T) {
+	art, _, class, err := Compile(readRule(t, "testdata/rules/34-aggregation-by.yml"))
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if class != ClassificationEdgeOnly {
+		t.Fatalf("class = %q, want edge_only", class)
+	}
+	if !art.Lookback {
+		t.Errorf("lookback should propagate to artefact")
+	}
+	agg := art.Rule.Aggregation
+	if agg == nil || agg.Op != AggGTE || agg.Threshold != 3 {
+		t.Errorf("agg = %+v", agg)
+	}
+	if len(agg.By) != 1 || agg.By[0] != "User" {
+		t.Errorf("agg.By = %v, want [User]", agg.By)
+	}
+	if art.StateWindowSecs != 300 {
+		t.Errorf("state_window_secs = %d, want 300", art.StateWindowSecs)
+	}
+}
+
+func TestAggregationServerOnly(t *testing.T) {
+	art, plan, class, err := Compile(readRule(t, "testdata/rules/35-aggregation-server-only.yml"))
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if class != ClassificationServerOnly {
+		t.Fatalf("class = %q, want server_only", class)
+	}
+	if art != nil {
+		t.Errorf("server-only rule should not produce an EdgeArtefact")
+	}
+	if plan == nil {
+		t.Fatalf("server plan missing")
+	}
+	if plan.TimeframeSecs != 3600 {
+		t.Errorf("plan timeframe = %d, want 3600", plan.TimeframeSecs)
+	}
+	if plan.Aggregation == nil || plan.Aggregation.Threshold != 100 {
+		t.Errorf("plan aggregation = %+v", plan.Aggregation)
+	}
+}
+
+func TestForceEdgeRejectsOverCap(t *testing.T) {
+	src := readRule(t, "testdata/invalid/force-edge-window-too-large.yml")
+	_, _, _, err := Compile(src)
+	if err == nil {
+		t.Fatal("expected force_edge over-cap to fail compile")
+	}
+	if !errors.Is(err, ErrCompile) {
+		t.Errorf("error %v does not wrap ErrCompile", err)
+	}
+	if !strings.Contains(err.Error(), "state_window_too_large") {
+		t.Errorf("error %q should cite state_window_too_large predicate", err.Error())
+	}
+}
+
+func TestStatelessRulesStayV1(t *testing.T) {
+	art, plan, class, err := Compile(readRule(t, "testdata/rules/01-reverse-shell-bash.yml"))
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if class != ClassificationEdgeOnly {
+		t.Errorf("class = %q, want edge_only", class)
+	}
+	if art.ASTVersion != ASTVersionV1 {
+		t.Errorf("stateless rule should ride v1, got %d", art.ASTVersion)
+	}
+	if art.StateWindowSecs != 0 || art.StateCap != 0 || art.Lookback {
+		t.Errorf("stateless rule should have no state metadata: %+v", art)
+	}
+	if plan != nil {
+		t.Errorf("stateless rule should not produce a server plan")
+	}
+}
+
 func TestCostOrdering(t *testing.T) {
 	simpleArt, _, _, err := Compile(readRule(t, "testdata/rules/05-find-suid.yml"))
 	if err != nil {
@@ -413,6 +530,70 @@ func readRule(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// compileGolden projects the (EdgeArtefact, ServerPlan, Classification)
+// triple into a stable map. Stateless edge-only rules render under a
+// top-level "rule" key so the 22-rule pre-#54d corpus stays byte-stable;
+// stateful rules pick up "ast_version" / "state_window_secs" /
+// "state_cap" / "lookback"; server-only rules render with a "server_plan"
+// block instead of "rule".
+func compileGolden(art *EdgeArtefact, plan *ServerPlan, class Classification) map[string]any {
+	out := map[string]any{
+		"classification": string(class),
+	}
+	if art != nil {
+		out["rule"] = ruleGolden(art.Rule)
+		// Only surface the v2 metadata when it's actually populated so
+		// stateless rules' goldens don't gain noise fields.
+		if art.ASTVersion != ASTVersionV1 {
+			out["ast_version"] = uint32(art.ASTVersion)
+		}
+		if art.StateWindowSecs > 0 {
+			out["state_window_secs"] = art.StateWindowSecs
+		}
+		if art.StateCap > 0 {
+			out["state_cap"] = art.StateCap
+		}
+		if art.Lookback {
+			out["lookback"] = true
+		}
+	}
+	if plan != nil {
+		out["server_plan"] = serverPlanGolden(plan)
+	}
+	return out
+}
+
+func serverPlanGolden(p *ServerPlan) map[string]any {
+	out := map[string]any{
+		"rule_id": p.RuleID,
+	}
+	if p.TimeframeSecs > 0 {
+		out["timeframe_secs"] = p.TimeframeSecs
+	}
+	if p.Lookback {
+		out["lookback"] = true
+	}
+	if p.Aggregation != nil {
+		out["aggregation"] = aggregationGolden(p.Aggregation)
+	}
+	return out
+}
+
+func aggregationGolden(a *Aggregation) map[string]any {
+	row := map[string]any{
+		"function":  a.Function.String(),
+		"op":        a.Op.String(),
+		"threshold": a.Threshold,
+	}
+	if len(a.By) > 0 {
+		row["by"] = a.By
+	}
+	if a.TimeframeSecs > 0 {
+		row["timeframe_secs"] = a.TimeframeSecs
+	}
+	return row
 }
 
 // ruleGolden projects a *Rule into a stable map for golden comparison.
@@ -481,5 +662,8 @@ func ruleGolden(r *Rule) map[string]any {
 		sels = append(sels, entry)
 	}
 	out["selections"] = sels
+	if r.Aggregation != nil {
+		out["aggregation"] = aggregationGolden(r.Aggregation)
+	}
 	return out
 }

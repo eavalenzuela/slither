@@ -1,0 +1,9 @@
+title: Aggregation without timeframe
+id: invalid-0011
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: /usr/bin/sudo
+  condition: selection | count() > 5

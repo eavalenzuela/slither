@@ -1,0 +1,39 @@
+{
+  "ast_version": 2,
+  "classification": "edge_only",
+  "lookback": true,
+  "rule": {
+    "aggregation": {
+      "by": [
+        "User"
+      ],
+      "function": "count",
+      "op": "\u003e=",
+      "threshold": 3,
+      "timeframe_secs": 300
+    },
+    "category": "process_creation",
+    "condition": "selection",
+    "cost": 1,
+    "description": "Same user firing sudo more than three times in five minutes.",
+    "id": "8b7c4d00-0001-4000-8000-000000000022",
+    "level": "medium",
+    "selections": [
+      {
+        "fields": [
+          {
+            "field": "Image",
+            "op": "endswith",
+            "values": [
+              "/usr/bin/sudo"
+            ]
+          }
+        ],
+        "name": "selection"
+      }
+    ],
+    "title": "Per-user sudo flood"
+  },
+  "state_cap": 1024,
+  "state_window_secs": 300
+}

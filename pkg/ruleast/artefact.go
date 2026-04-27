@@ -77,6 +77,12 @@ type EdgeArtefact struct {
 	// per-host state ring, or 0 for stateless rules. Capped at 1024
 	// (ADR-0018 predicate 2).
 	StateCap uint32
+
+	// Lookback signals the agent should request a CH replay of the
+	// rule's timeframe window at rule push (#59 stateful cold-start,
+	// opt-in per rule via top-level `lookback: true`). Stateless rules
+	// always carry false.
+	Lookback bool
 }
 
 // IsStateful reports whether the artefact carries non-zero state
@@ -90,16 +96,29 @@ func (a *EdgeArtefact) IsStateful() bool {
 }
 
 // ServerPlan is the in-process form of a rule destined for the server
-// detection engine. #54a defines the shell; #54d/#54e fill it in with
-// aggregation IR and temporal-join specs. The struct is JSON-serialised
-// into the rules.server_plan jsonb column; do not change field tags
-// without a migration.
+// detection engine. #54a defined the shell; #54d fills in aggregation
+// IR + windowing; #54e adds temporal-join specs. The struct is
+// JSON-serialised into the rules.server_plan jsonb column; do not
+// change field tags without a migration.
 type ServerPlan struct {
 	// RuleID echoes Rule.ID so server-side queries against
 	// rules.server_plan can join back without a second lookup.
 	RuleID string `json:"rule_id"`
 
-	// Aggregations, TemporalJoins, and the rest of the plan IR land in
-	// later #54 sub-tasks. The empty struct round-trips through pg as
-	// `{"rule_id": "..."}` until then.
+	// Aggregation, when non-nil, describes the stateful pipe expression
+	// the server detection engine should evaluate against the ingest bus.
+	// The detection engine recompiles SourceYAML through ruleast.Compile
+	// at load to rebuild the boolean tree; this struct only carries the
+	// fields that don't survive YAML round-trip without ambiguity.
+	Aggregation *Aggregation `json:"aggregation,omitempty"`
+
+	// TimeframeSecs mirrors Aggregation.TimeframeSecs but stays populated
+	// even on rules whose stateful shape lights up via #54e (`near`,
+	// cross-host) where the aggregation field may instead carry a join
+	// spec.
+	TimeframeSecs uint32 `json:"timeframe_secs,omitempty"`
+
+	// Lookback opts the server-side stateful evaluator into the same
+	// CH-replay cold-start path as the agent (#59).
+	Lookback bool `json:"lookback,omitempty"`
 }

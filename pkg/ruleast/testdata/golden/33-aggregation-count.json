@@ -1,11 +1,18 @@
 {
+  "ast_version": 2,
   "classification": "edge_only",
   "rule": {
+    "aggregation": {
+      "function": "count",
+      "op": "\u003e",
+      "threshold": 5,
+      "timeframe_secs": 60
+    },
     "category": "process_creation",
     "condition": "selection",
     "cost": 2,
-    "description": "Detects bash invoked with a /dev/tcp redirection, the classic reverse-shell primitive.",
-    "id": "8b7c4d00-0001-4000-8000-000000000001",
+    "description": "Five or more failed sshd auth events from one host inside a minute.",
+    "id": "8b7c4d00-0001-4000-8000-000000000021",
     "level": "high",
     "selections": [
       {
@@ -14,26 +21,22 @@
             "field": "CommandLine",
             "op": "contains",
             "values": [
-              "/dev/tcp/",
-              "/dev/udp/"
+              "auth failure"
             ]
           },
           {
             "field": "Image",
             "op": "endswith",
             "values": [
-              "/bash",
-              "/sh"
+              "/usr/sbin/sshd"
             ]
           }
         ],
         "name": "selection"
       }
     ],
-    "tags": [
-      "attack.execution",
-      "attack.t1059.004"
-    ],
-    "title": "Bash reverse shell via /dev/tcp"
-  }
+    "title": "Brute-force ssh login attempts"
+  },
+  "state_cap": 1024,
+  "state_window_secs": 60
 }

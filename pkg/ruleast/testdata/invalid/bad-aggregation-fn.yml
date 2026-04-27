@@ -1,0 +1,10 @@
+title: Unknown aggregation function
+id: invalid-0013
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: /usr/bin/sudo
+  condition: selection | sum() > 5
+timeframe: 60s

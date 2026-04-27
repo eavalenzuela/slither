@@ -1,59 +1,62 @@
 {
-  "category": "process_creation",
-  "condition": "((a and (b or c)) and (not d))",
-  "cost": 4,
-  "description": "Exists to cover the parser's parenthesised-or-inside-and path — and/or/not mixed.",
-  "id": "8b7c4d00-0001-4000-8000-000000000015",
-  "level": "informational",
-  "selections": [
-    {
-      "fields": [
-        {
-          "field": "Image",
-          "op": "endswith",
-          "values": [
-            "/sh"
-          ]
-        }
-      ],
-      "name": "a"
-    },
-    {
-      "fields": [
-        {
-          "field": "CommandLine",
-          "op": "contains",
-          "values": [
-            "curl "
-          ]
-        }
-      ],
-      "name": "b"
-    },
-    {
-      "fields": [
-        {
-          "field": "CommandLine",
-          "op": "contains",
-          "values": [
-            "wget "
-          ]
-        }
-      ],
-      "name": "c"
-    },
-    {
-      "fields": [
-        {
-          "field": "User",
-          "op": "equals",
-          "values": [
-            "root"
-          ]
-        }
-      ],
-      "name": "d"
-    }
-  ],
-  "title": "Nested boolean condition exercise"
+  "classification": "edge_only",
+  "rule": {
+    "category": "process_creation",
+    "condition": "((a and (b or c)) and (not d))",
+    "cost": 4,
+    "description": "Exists to cover the parser's parenthesised-or-inside-and path — and/or/not mixed.",
+    "id": "8b7c4d00-0001-4000-8000-000000000015",
+    "level": "informational",
+    "selections": [
+      {
+        "fields": [
+          {
+            "field": "Image",
+            "op": "endswith",
+            "values": [
+              "/sh"
+            ]
+          }
+        ],
+        "name": "a"
+      },
+      {
+        "fields": [
+          {
+            "field": "CommandLine",
+            "op": "contains",
+            "values": [
+              "curl "
+            ]
+          }
+        ],
+        "name": "b"
+      },
+      {
+        "fields": [
+          {
+            "field": "CommandLine",
+            "op": "contains",
+            "values": [
+              "wget "
+            ]
+          }
+        ],
+        "name": "c"
+      },
+      {
+        "fields": [
+          {
+            "field": "User",
+            "op": "equals",
+            "values": [
+              "root"
+            ]
+          }
+        ],
+        "name": "d"
+      }
+    ],
+    "title": "Nested boolean condition exercise"
+  }
 }
