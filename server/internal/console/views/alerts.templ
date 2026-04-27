@@ -28,10 +28,37 @@ templ AlertsList(d AlertsListData) {
 					</select>
 				</label>
 				<label>
+					Severity
+					<select name="severity">
+						<option value="" selected?={ d.SeverityFilter == 0 }>any</option>
+						<option value="2" selected?={ d.SeverityFilter == 2 }>2 Low</option>
+						<option value="3" selected?={ d.SeverityFilter == 3 }>3 Medium</option>
+						<option value="4" selected?={ d.SeverityFilter == 4 }>4 High</option>
+						<option value="5" selected?={ d.SeverityFilter == 5 }>5 Critical</option>
+					</select>
+				</label>
+				<label>
 					host_id
-					<input type="text" name="host_id" value={ d.HostIDFilter }/>
+					<input type="text" name="host_id" value={ d.HostIDFilter } placeholder="UUID"/>
+				</label>
+				<label>
+					rule_uid
+					<input type="text" name="rule_uid" value={ d.RuleUIDFilter } placeholder="Sigma id"/>
+				</label>
+				<label>
+					Assignee
+					<input type="text" name="assigned_to" value={ d.AssigneeFilter } placeholder="user UUID, or 'unassigned'"/>
+				</label>
+				<label>
+					Since
+					<input type="datetime-local" name="since" value={ d.SinceFilter }/>
+				</label>
+				<label>
+					Until
+					<input type="datetime-local" name="until" value={ d.UntilFilter }/>
 				</label>
 				<button type="submit">Apply</button>
+				<a class="muted" href="/alerts">Reset</a>
 			</form>
 
 			if len(d.Alerts) == 0 {
@@ -165,16 +192,46 @@ func alertTransitionLabel(from, to pg.AlertStatus) string {
 	return string(to)
 }
 
-// alertsURLWithCursor builds a /alerts URL preserving filters and
-// adding cursor params. Reused by the handler when deriving the
-// next-page link, kept here so the templ stays focused on rendering.
-func alertsURLWithCursor(status pg.AlertStatus, hostID string, cursor pg.AlertCursor) string {
+// AlertsListFilters is the bundle the URL builder consumes. Mirrors
+// the form fields rendered by AlertsList — kept in one place so the
+// pagination "Next page →" link carries every active filter forward
+// without each handler having to reconstruct the query string.
+type AlertsListFilters struct {
+	Status     pg.AlertStatus
+	HostID     string
+	RuleUID    string
+	SeverityID uint8
+	AssignedTo string
+	Since      string // pre-formatted RFC3339Nano; empty = none
+	Until      string
+}
+
+// AlertsURLWithCursor builds a /alerts URL preserving filters and
+// (optionally) adding cursor params. Pagination passes a non-zero
+// cursor; the form-submit path passes the zero cursor and gets back
+// a clean filtered URL.
+func AlertsURLWithCursor(f AlertsListFilters, cursor pg.AlertCursor) string {
 	v := url.Values{}
-	if status != "" {
-		v.Set("status", string(status))
+	if f.Status != "" {
+		v.Set("status", string(f.Status))
 	}
-	if hostID != "" {
-		v.Set("host_id", hostID)
+	if f.HostID != "" {
+		v.Set("host_id", f.HostID)
+	}
+	if f.RuleUID != "" {
+		v.Set("rule_uid", f.RuleUID)
+	}
+	if f.SeverityID > 0 {
+		v.Set("severity", strconv.Itoa(int(f.SeverityID)))
+	}
+	if f.AssignedTo != "" {
+		v.Set("assigned_to", f.AssignedTo)
+	}
+	if f.Since != "" {
+		v.Set("since", f.Since)
+	}
+	if f.Until != "" {
+		v.Set("until", f.Until)
 	}
 	if cursor.AlertID != "" {
 		v.Set("after_at", cursor.CreatedAt.UTC().Format(timeRFC3339Nano))
@@ -189,12 +246,6 @@ func alertsURLWithCursor(status pg.AlertStatus, hostID string, cursor pg.AlertCu
 // timeRFC3339Nano is the layout the cursor encodes in. Pulled into a
 // const so the URL builder + handler parser stay in sync.
 const timeRFC3339Nano = "2006-01-02T15:04:05.999999999Z07:00"
-
-// AlertsURLWithCursor is the exported wrapper handlers use; templ-side
-// pagination link consumes the same shape via NextCursorURL.
-func AlertsURLWithCursor(status pg.AlertStatus, hostID string, cursor pg.AlertCursor) string {
-	return alertsURLWithCursor(status, hostID, cursor)
-}
 
 // formatSeverity is a small helper for displays that want the integer
 // + label inline; kept here so the template doesn't repeat the

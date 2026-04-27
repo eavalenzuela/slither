@@ -3,6 +3,7 @@ package console
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,22 +15,59 @@ import (
 
 const alertsPageSize = 50
 
-// alertsList renders /alerts. Filters: status, host_id. Cursor
-// pagination via after_at + after_id query params (same shape as the
-// /events page from #43).
+// inputDatetimeLocal is the layout HTML's <input type=datetime-local>
+// hands back on form submit. We render via this same layout when
+// echoing values into the form so the browser doesn't reset to "now"
+// on a refresh.
+const inputDatetimeLocal = "2006-01-02T15:04"
+
+// alertsList renders /alerts. Filters: status, severity, host_id,
+// rule_uid, assigned_to (or "unassigned"), since/until time range.
+// Cursor pagination via after_at + after_id.
 func (s *Server) alertsList(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+
 	statusFilter := pg.AlertStatus(strings.TrimSpace(q.Get("status")))
 	hostIDFilter := strings.TrimSpace(q.Get("host_id"))
+	ruleUIDFilter := strings.TrimSpace(q.Get("rule_uid"))
+	assigneeFilter := strings.TrimSpace(q.Get("assigned_to"))
 
-	filter := pg.AlertFilter{HostID: hostIDFilter}
+	var severityFilter uint8
+	if s := strings.TrimSpace(q.Get("severity")); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 1 || n > 6 {
+			http.Error(w, "bad severity", http.StatusBadRequest)
+			return
+		}
+		severityFilter = uint8(n)
+	}
+
+	since, sinceStr, err := parseDatetimeLocal(q.Get("since"))
+	if err != nil {
+		http.Error(w, "bad since", http.StatusBadRequest)
+		return
+	}
+	until, untilStr, err := parseDatetimeLocal(q.Get("until"))
+	if err != nil {
+		http.Error(w, "bad until", http.StatusBadRequest)
+		return
+	}
+
+	filter := pg.AlertFilter{
+		HostID:     hostIDFilter,
+		RuleUID:    ruleUIDFilter,
+		SeverityID: severityFilter,
+		AssignedTo: assigneeFilter,
+		Since:      since,
+		Until:      until,
+	}
 	if statusFilter != "" {
 		filter.Statuses = []pg.AlertStatus{statusFilter}
 	}
 
 	cursor := pg.AlertCursor{}
 	if id := q.Get("after_id"); id != "" {
-		if t, err := time.Parse(views.AlertsCursorLayout(), q.Get("after_at")); err == nil {
+		if t, parseErr := time.Parse(views.AlertsCursorLayout(), q.Get("after_at")); parseErr == nil {
 			cursor.CreatedAt = t
 			cursor.AlertID = id
 		}
@@ -43,14 +81,28 @@ func (s *Server) alertsList(w http.ResponseWriter, r *http.Request) {
 
 	flash, _ := s.sm.Pop(r.Context(), "flash").(string)
 	role := s.role(r)
+	viewFilters := views.AlertsListFilters{
+		Status:     statusFilter,
+		HostID:     hostIDFilter,
+		RuleUID:    ruleUIDFilter,
+		SeverityID: severityFilter,
+		AssignedTo: assigneeFilter,
+		Since:      sinceStr,
+		Until:      untilStr,
+	}
 	render(w, r, views.AlertsList(views.AlertsListData{
-		Alerts:        alerts,
-		Now:           time.Now().UTC(),
-		StatusFilter:  statusFilter,
-		HostIDFilter:  hostIDFilter,
-		NextCursorURL: nextCursorURL(statusFilter, hostIDFilter, next),
-		Flash:         flash,
-		IsAnalyst:     role == pg.RoleAnalyst || role == pg.RoleAdmin,
+		Alerts:         alerts,
+		Now:            time.Now().UTC(),
+		StatusFilter:   statusFilter,
+		HostIDFilter:   hostIDFilter,
+		RuleUIDFilter:  ruleUIDFilter,
+		SeverityFilter: severityFilter,
+		AssigneeFilter: assigneeFilter,
+		SinceFilter:    sinceStr,
+		UntilFilter:    untilStr,
+		NextCursorURL:  nextCursorURL(viewFilters, next),
+		Flash:          flash,
+		IsAnalyst:      role == pg.RoleAnalyst || role == pg.RoleAdmin,
 	}))
 }
 
@@ -134,9 +186,26 @@ func allowedNextStatuses(from pg.AlertStatus) []pg.AlertStatus {
 
 // nextCursorURL builds the next-page URL string the list view links
 // to. Empty when no cursor — the template treats that as "last page".
-func nextCursorURL(status pg.AlertStatus, hostID string, cursor pg.AlertCursor) string {
+func nextCursorURL(filters views.AlertsListFilters, cursor pg.AlertCursor) string {
 	if cursor.AlertID == "" {
 		return ""
 	}
-	return views.AlertsURLWithCursor(status, hostID, cursor)
+	return views.AlertsURLWithCursor(filters, cursor)
+}
+
+// parseDatetimeLocal accepts an HTML datetime-local field value
+// (yyyy-mm-ddThh:mm) and returns the parsed UTC time + the original
+// raw string for echo-back. An empty field is the no-op zero-value
+// path; a malformed field is a 400 — the caller maps it to a user
+// error rather than silently drop the filter.
+func parseDatetimeLocal(raw string) (time.Time, string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, "", nil
+	}
+	t, err := time.Parse(inputDatetimeLocal, raw)
+	if err != nil {
+		return time.Time{}, "", err
+	}
+	return t.UTC(), raw, nil
 }

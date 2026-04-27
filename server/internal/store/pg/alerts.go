@@ -162,11 +162,17 @@ type AlertRow struct {
 
 // AlertFilter narrows ListAlerts. Empty fields mean "no constraint";
 // Statuses == nil means every status (open + closed both surface).
+// AssignedTo accepts a user UUID, "me" — translated to the current
+// session user one layer up — or "unassigned" (matches NULL). Since
+// and Until bound created_at; either may be zero independently.
 type AlertFilter struct {
 	Statuses   []AlertStatus
 	HostID     string
 	RuleUID    string
-	SeverityID uint8 // 0 = no constraint
+	SeverityID uint8  // 0 = no constraint
+	AssignedTo string // user UUID, or the literal "unassigned" for NULL
+	Since      time.Time
+	Until      time.Time
 }
 
 // AlertCursor is the opaque pagination key for ListAlerts. Zero value
@@ -212,6 +218,22 @@ func (s *Store) ListAlerts(ctx context.Context, filter AlertFilter, cursor Alert
 	}
 	if filter.SeverityID != 0 {
 		clauses = append(clauses, fmt.Sprintf("a.severity = %s", add(int16(filter.SeverityID))))
+	}
+	switch {
+	case filter.AssignedTo == "unassigned":
+		clauses = append(clauses, "a.assigned_to IS NULL")
+	case filter.AssignedTo != "":
+		assigneeUUID, perr := uuid.Parse(filter.AssignedTo)
+		if perr != nil {
+			return nil, AlertCursor{}, fmt.Errorf("pg.ListAlerts: parse assigned_to: %w", perr)
+		}
+		clauses = append(clauses, fmt.Sprintf("a.assigned_to = %s", add(assigneeUUID)))
+	}
+	if !filter.Since.IsZero() {
+		clauses = append(clauses, fmt.Sprintf("a.created_at >= %s", add(filter.Since)))
+	}
+	if !filter.Until.IsZero() {
+		clauses = append(clauses, fmt.Sprintf("a.created_at <= %s", add(filter.Until)))
 	}
 	if cursor.AlertID != "" {
 		alertUUID, perr := uuid.Parse(cursor.AlertID)

@@ -6,15 +6,23 @@ import (
 	"github.com/t3rmit3/slither/server/internal/store/pg"
 )
 
-// AlertsListData drives the /alerts list page.
+// AlertsListData drives the /alerts list page. Filter values are
+// rendered back into the form so an operator can refine without
+// retyping. The handler is responsible for validating each filter
+// against pg.AlertFilter shape; the view trusts what it gets.
 type AlertsListData struct {
-	Alerts        []pg.AlertRow
-	Now           time.Time
-	StatusFilter  pg.AlertStatus // "" = all
-	HostIDFilter  string
-	NextCursorURL string
-	Flash         string
-	IsAnalyst     bool
+	Alerts         []pg.AlertRow
+	Now            time.Time
+	StatusFilter   pg.AlertStatus // "" = all
+	HostIDFilter   string
+	RuleUIDFilter  string
+	SeverityFilter uint8 // 0 = all
+	AssigneeFilter string
+	SinceFilter    string // RFC3339-truncated, blank = none
+	UntilFilter    string
+	NextCursorURL  string
+	Flash          string
+	IsAnalyst      bool
 }
 
 // AlertDetailData drives the /alerts/{id} detail page. Allowed
