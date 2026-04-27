@@ -64,6 +64,12 @@ type Options struct {
 	JanitorTick    time.Duration
 	FindingsBuffer int
 	SubscriberName string
+
+	// MaxLookback caps the per-plan timeframe a Phase 3 #59 cold
+	// start is allowed to scan from CH. Plans whose timeframe
+	// exceeds skip lookback (the rule still loads — it just starts
+	// cold). Default: 1h. Set to 0 to disable lookback entirely.
+	MaxLookback time.Duration
 }
 
 func (o Options) withDefaults() Options {
@@ -82,6 +88,9 @@ func (o Options) withDefaults() Options {
 	if o.SubscriberName == "" {
 		o.SubscriberName = defaultSubscriberName
 	}
+	if o.MaxLookback == 0 {
+		o.MaxLookback = time.Hour
+	}
 	return o
 }
 
@@ -98,16 +107,23 @@ type RuleSource interface {
 // threshold; near rules fire when both selections have a hit inside
 // the join window.
 type Engine struct {
-	bus     *ingest.Bus
-	src     RuleSource
-	telem   *telemetry.Counters
-	opts    Options
-	now     func() time.Time
-	plans   atomicPlans
-	subName string
+	bus      *ingest.Bus
+	src      RuleSource
+	replayer EventReplayer // optional; Phase 3 #59 cold-start
+	telem    *telemetry.Counters
+	opts     Options
+	now      func() time.Time
+	plans    atomicPlans
+	subName  string
 
 	findings chan Finding
 }
+
+// SetReplayer attaches an EventReplayer used by Phase 3 #59 cold
+// start. Must be called before Run; Refresh consults the replayer on
+// every refresh, but the engine still functions when nil (lookback
+// becomes a no-op).
+func (e *Engine) SetReplayer(r EventReplayer) { e.replayer = r }
 
 // New constructs an Engine. src and bus are required; telem may be nil
 // (no counters). Opts may be the zero value.
@@ -166,6 +182,18 @@ func (e *Engine) Refresh(ctx context.Context) (skipped int, err error) {
 		"plan_count", len(plans),
 		"skipped", skipped,
 		"max_keys_per_rule", e.opts.MaxKeysPerRule)
+
+	// Phase 3 #59: warm any plans declared `lookback: true` from CH.
+	// Failures are non-fatal — a plan that can't replay just starts
+	// cold; live events will warm it up.
+	for _, p := range plans {
+		if !p.lookback {
+			continue
+		}
+		if _, _, lerr := e.runLookback(ctx, p); lerr != nil {
+			slog.Warn("detect: lookback errored", "rule_uid", p.rule.ID, "err", lerr)
+		}
+	}
 	return skipped, nil
 }
 

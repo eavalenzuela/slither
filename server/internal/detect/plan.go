@@ -32,6 +32,13 @@ type plan struct {
 
 	// near-only fields
 	join *ruleast.TemporalJoin
+
+	// lookback opts the plan into Phase 3 #59 cold-start. When true,
+	// Engine.Refresh replays the rule's timeframe window from CH so
+	// the plan fires immediately on past events rather than waiting
+	// for the live stream to re-accumulate the count. Sourced from
+	// ServerPlan.Lookback (top-level YAML `lookback: true`).
+	lookback bool
 }
 
 type planKind uint8
@@ -130,6 +137,7 @@ func compileOne(row rulePlanRow, defaultMaxKeys int, onEvict func(ruleID string)
 			severity: severity,
 			kind:     planAggregation,
 			agg:      rule.Aggregation,
+			lookback: srvPlan.Lookback,
 		}, nil
 	case srvPlan.TemporalJoin != nil:
 		return &plan{
@@ -140,6 +148,7 @@ func compileOne(row rulePlanRow, defaultMaxKeys int, onEvict func(ruleID string)
 			severity: severity,
 			kind:     planNear,
 			join:     srvPlan.TemporalJoin,
+			lookback: srvPlan.Lookback,
 		}, nil
 	}
 	// Server-only rules that aren't aggregations and aren't joins shouldn't

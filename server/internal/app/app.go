@@ -97,8 +97,9 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	// --- Rule distribution hub ---
 	hub := control.NewHub(pgStore, telem)
 
-	// --- Server-side detection engine (Phase 3 #58) ---
+	// --- Server-side detection engine (Phase 3 #58 + #59) ---
 	detectEngine := detect.New(bus, pgStore, telem, detect.Options{})
+	detectEngine.SetReplayer(chStore)
 
 	// --- gRPC services ---
 	enrollSvc := grpcserv.NewEnrollService(pgStore, ca, telem)
