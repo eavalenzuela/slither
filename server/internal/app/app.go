@@ -190,18 +190,23 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 			errs <- fmt.Errorf("detect engine: %w", err)
 		}
 	}()
+	// Phase 3 #60 alert sink: detect.Findings → alerts table.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for f := range detectEngine.Findings() {
-			slog.Info("detect: finding",
-				"rule_uid", f.RuleID,
-				"rule_title", f.RuleTitle,
-				"severity", f.Severity,
-				"host_id", f.HostID,
-				"group_key", f.GroupKey,
-				"event_count", len(f.EventIDs),
-				"reason", f.Reason)
+		if err := detect.RunFindingsSink(ctx, detectEngine.Findings(), pgStore, telem); err != nil && !errors.Is(err, context.Canceled) {
+			errs <- fmt.Errorf("detect sink: %w", err)
+		}
+	}()
+
+	// Phase 3 #60 edge-finding router: subscribe to the bus, route
+	// any DetectionFinding (class 2004) emitted by an agent into the
+	// alerts table. Edge + server alerts share schema and dedupe path.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := ingest.RouteAlerts(ctx, bus, "alerts-router", pgStore, telem); err != nil && !errors.Is(err, context.Canceled) {
+			errs <- fmt.Errorf("alerts router: %w", err)
 		}
 	}()
 

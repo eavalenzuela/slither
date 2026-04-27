@@ -37,6 +37,15 @@ type Counters struct {
 	detectFindingsDropped atomic.Uint64
 	detectStateEvicted    atomic.Uint64
 
+	// alerts — Phase 3 #60 alert sink. Inserted is the count of
+	// rows landed in alerts; deduped fires when a finding hit the
+	// rules.dedupe_window_secs path; errored fires on a pg insert
+	// failure (transient or hard-fail). Both detect.Findings and
+	// the bus router (edge DetectionFindings) share these counters.
+	alertsInserted atomic.Uint64
+	alertsDeduped  atomic.Uint64
+	alertsErrored  atomic.Uint64
+
 	// subscriberPublishes counts pushes per Session subscriber name
 	// (e.g. "session:host-1"). Populated by IncSubscriberPublish on
 	// every successful stream.Send of a RuleSet so operators can see
@@ -126,6 +135,19 @@ func (c *Counters) IncDetectFindingsDropped() { c.detectFindingsDropped.Add(1) }
 // either side without a separate metric name.
 func (c *Counters) IncDetectStateEvicted() { c.detectStateEvicted.Add(1) }
 
+// IncAlertsInserted — alert sink (#60) landed one row in alerts.
+// Both detect.Findings and the bus router (edge DetectionFindings)
+// bump this counter so /alerts traffic is split-attributed.
+func (c *Counters) IncAlertsInserted() { c.alertsInserted.Add(1) }
+
+// IncAlertsDeduped — finding suppressed by rules.dedupe_window_secs.
+// Operators reading the snapshot see how often dedupe is active.
+func (c *Counters) IncAlertsDeduped() { c.alertsDeduped.Add(1) }
+
+// IncAlertsErrored — pg insert failed. Sustained growth signals a pg
+// outage or a malformed payload (rule_uid empty, host_id unparseable).
+func (c *Counters) IncAlertsErrored() { c.alertsErrored.Add(1) }
+
 // Snapshot captures the current counter values.
 type Snapshot struct {
 	EventsReceived        uint64
@@ -145,6 +167,9 @@ type Snapshot struct {
 	DetectFindings        uint64
 	DetectFindingsDropped uint64
 	DetectStateEvicted    uint64
+	AlertsInserted        uint64
+	AlertsDeduped         uint64
+	AlertsErrored         uint64
 	SubscriberPublishes   map[string]uint64
 }
 
@@ -177,6 +202,9 @@ func (c *Counters) Snapshot() Snapshot {
 		DetectFindings:        c.detectFindings.Load(),
 		DetectFindingsDropped: c.detectFindingsDropped.Load(),
 		DetectStateEvicted:    c.detectStateEvicted.Load(),
+		AlertsInserted:        c.alertsInserted.Load(),
+		AlertsDeduped:         c.alertsDeduped.Load(),
+		AlertsErrored:         c.alertsErrored.Load(),
 		SubscriberPublishes:   subs,
 	}
 }
