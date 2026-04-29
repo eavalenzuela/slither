@@ -4,7 +4,67 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 )
+
+// AuditRow is the read-side projection of audit_log used by the
+// forensics view. id stays a stringified int64 since the table uses
+// bigserial; the console templ never does arithmetic on it.
+type AuditRow struct {
+	ID         string
+	ActorType  ActorType
+	ActorID    string
+	Action     string
+	TargetKind string
+	TargetID   string
+	Detail     map[string]any
+	CreatedAt  time.Time
+}
+
+// ListAuditByTarget returns every audit_log row for (kind, id),
+// newest first. Used by the alert detail's response-history audit
+// drill-down (Phase 4 #76). limit caps the result set; values <= 0 or
+// > 500 fall back to 100.
+func (s *Store) ListAuditByTarget(ctx context.Context, kind, id string, limit int) ([]AuditRow, error) {
+	if kind == "" || id == "" {
+		return nil, fmt.Errorf("pg.ListAuditByTarget: kind + id required")
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, actor_type, COALESCE(actor_id, ''),
+		       action, COALESCE(target_kind, ''), COALESCE(target_id, ''),
+		       detail, created_at
+		FROM audit_log
+		WHERE target_kind = $1 AND target_id = $2
+		ORDER BY id DESC
+		LIMIT $3
+	`, kind, id, limit)
+	if err != nil {
+		return nil, fmt.Errorf("pg.ListAuditByTarget: %w", err)
+	}
+	defer rows.Close()
+	var out []AuditRow
+	for rows.Next() {
+		var (
+			r       AuditRow
+			rawJSON []byte
+		)
+		if err := rows.Scan(
+			&r.ID, &r.ActorType, &r.ActorID,
+			&r.Action, &r.TargetKind, &r.TargetID,
+			&rawJSON, &r.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("pg.ListAuditByTarget: scan: %w", err)
+		}
+		if len(rawJSON) > 0 {
+			_ = json.Unmarshal(rawJSON, &r.Detail)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
 
 // ActorType matches the Postgres actor_type enum.
 type ActorType string

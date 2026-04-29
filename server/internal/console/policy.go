@@ -79,6 +79,56 @@ func (s *Server) hostsPolicyUpdate(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/hosts/"+hostID+"/policy", http.StatusSeeOther)
 }
 
+// responseActionAudit renders the per-action audit chain for
+// forensics. Phase 4 #76. Reads response_actions for the row + the
+// reverse chain via parent_action, plus audit_log entries for
+// target_kind=response_action target_id=<action_id>. One page tells
+// you who issued an action, when it transitioned through each state,
+// who reverted it, and the chain forward + backward.
+func (s *Server) responseActionAudit(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "action_id")
+	if id == "" {
+		http.Error(w, "missing action_id", http.StatusBadRequest)
+		return
+	}
+	row, err := s.store.GetResponseAction(r.Context(), id)
+	switch {
+	case errors.Is(err, pg.ErrResponseActionNotFound):
+		http.NotFound(w, r)
+		return
+	case err != nil:
+		http.Error(w, "load action failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Audit_log entries for this action — newest first per
+	// ListAuditByTarget's ORDER BY id DESC.
+	auditRows, err := s.store.ListAuditByTarget(r.Context(),
+		"response_action", row.ID, 100)
+	if err != nil {
+		// Best-effort — render the page with the row even if audit
+		// lookup blipped, rather than 500-ing the operator out.
+		auditRows = nil
+	}
+
+	// Reverse chain: any row with parent_action = row.ID. ListResponseActions
+	// scopes by host_id; we filter client-side since per-host is small in
+	// practice and avoids a new pg helper for one call site.
+	hostHistory, _ := s.store.ListResponseActions(r.Context(), row.HostID, 200)
+	related := make([]pg.ResponseActionRow, 0, 4)
+	for _, h := range hostHistory {
+		if h.ParentAction == row.ID || h.ID == row.ParentAction {
+			related = append(related, h)
+		}
+	}
+
+	render(w, r, views.ResponseActionAudit(views.ResponseActionAuditData{
+		Action:  row,
+		Audit:   auditRows,
+		Related: related,
+	}))
+}
+
 // alertRespond accepts a POST from the alert detail's response
 // action buttons, validates the action against the host policy, and
 // hands it off to respond.Hub.Dispatch. Phase 4 #75. Form fields:

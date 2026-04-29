@@ -237,7 +237,8 @@ templ responseActionButton(a pg.AlertRow, action pg.ResponseAction) {
 
 // responseHistoryTable lists every response action against the host
 // the alert fired on, newest first. Reverse links (#85) are noted by
-// indenting child rows and adding a "↩ reverts <id>" tag.
+// indenting child rows and adding a "↩ reverts <id>" tag. Each row
+// links to its forensics audit-trail page (#76).
 templ responseHistoryTable(rows []pg.ResponseActionRow) {
 	<h3>Response history (this host)</h3>
 	<table class="events-table">
@@ -249,6 +250,7 @@ templ responseHistoryTable(rows []pg.ResponseActionRow) {
 				<th>status</th>
 				<th>by</th>
 				<th>reason</th>
+				<th></th>
 			</tr>
 		</thead>
 		<tbody>
@@ -265,6 +267,7 @@ templ responseHistoryTable(rows []pg.ResponseActionRow) {
 					<td><span class={ "alert-status", "alert-status-" + string(r.Status) }>{ ResponseStatusLabel(r.Status) }</span></td>
 					<td class="muted">{ responseActorLabel(r) }</td>
 					<td class="muted">{ r.ReasonCode }</td>
+					<td class="muted"><a href={ templ.URL("/responses/" + r.ID + "/audit") }>audit</a></td>
 				</tr>
 			}
 		</tbody>

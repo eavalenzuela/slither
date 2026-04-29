@@ -1,0 +1,129 @@
+package views
+
+import (
+	"encoding/json"
+
+	"github.com/t3rmit3/slither/server/internal/store/pg"
+)
+
+// ResponseActionAuditData drives /responses/{action_id}/audit. The
+// view assumes Action is non-zero (handler 404s on a missing row);
+// Audit + Related may be empty for actions whose chain is just-
+// inserted or had a transient pg blip during ListAuditByTarget.
+type ResponseActionAuditData struct {
+	Action  pg.ResponseActionRow
+	Audit   []pg.AuditRow
+	Related []pg.ResponseActionRow
+}
+
+// ResponseActionAudit renders the forensics chain for one action.
+// Three blocks: the action row's current state, the audit_log
+// transition trail (newest first), and the related-actions list
+// (parent + reverse children) so an operator pulling on one rope
+// sees the whole knot.
+templ ResponseActionAudit(d ResponseActionAuditData) {
+	@Layout("Action audit — " + d.Action.ID[:8]) {
+		<div class="card">
+			<h2>Response action: { d.Action.ID }</h2>
+			<dl class="kv">
+				<dt>action</dt><dd>{ ResponseActionLabel(d.Action.Action) }</dd>
+				<dt>target</dt><dd class="muted">{ d.Action.Target }</dd>
+				<dt>host</dt><dd class="muted">{ d.Action.HostID }</dd>
+				<dt>status</dt><dd><span class={ "alert-status", "alert-status-" + string(d.Action.Status) }>{ ResponseStatusLabel(d.Action.Status) }</span></dd>
+				if d.Action.OperatorID != "" {
+					<dt>operator</dt><dd class="muted">{ d.Action.OperatorID }</dd>
+				}
+				if d.Action.RuleUID != "" {
+					<dt>rule</dt><dd class="muted">{ d.Action.RuleUID }</dd>
+				}
+				<dt>created</dt><dd class="muted">{ d.Action.CreatedAt.Format("2006-01-02 15:04:05 MST") }</dd>
+				if d.Action.StartedAt != nil {
+					<dt>started</dt><dd class="muted">{ d.Action.StartedAt.Format("2006-01-02 15:04:05 MST") }</dd>
+				}
+				if d.Action.CompletedAt != nil {
+					<dt>completed</dt><dd class="muted">{ d.Action.CompletedAt.Format("2006-01-02 15:04:05 MST") }</dd>
+				}
+				if d.Action.ReasonCode != "" {
+					<dt>reason</dt><dd>{ d.Action.ReasonCode }</dd>
+				}
+				if d.Action.ParentAction != "" {
+					<dt>reverts</dt><dd><a href={ templ.URL("/responses/" + d.Action.ParentAction + "/audit") }>{ d.Action.ParentAction }</a></dd>
+				}
+			</dl>
+			<p><a class="muted" href={ templ.URL("/alerts/" + d.Action.AlertID) }>← back to alert detail</a></p>
+		</div>
+
+		if len(d.Related) > 0 {
+			<div class="card">
+				<h2>Related actions</h2>
+				<table class="events-table">
+					<thead>
+						<tr><th>id</th><th>action</th><th>status</th><th>relationship</th><th>created</th></tr>
+					</thead>
+					<tbody>
+						for _, r := range d.Related {
+							<tr>
+								<td><a href={ templ.URL("/responses/" + r.ID + "/audit") }>{ r.ID[:8] }</a></td>
+								<td>{ ResponseActionLabel(r.Action) }</td>
+								<td><span class={ "alert-status", "alert-status-" + string(r.Status) }>{ ResponseStatusLabel(r.Status) }</span></td>
+								<td class="muted">{ relatedLabel(d.Action, r) }</td>
+								<td class="muted">{ r.CreatedAt.Format("2006-01-02 15:04:05") }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+
+		<div class="card">
+			<h2>Audit trail</h2>
+			if len(d.Audit) == 0 {
+				<p class="muted">No audit_log entries for this action yet — chain forms after the first state transition.</p>
+			} else {
+				<p class="muted">Newest first. Detail captures the prev/next status + the optional message + result-blob size; the blob itself is in the response_actions row, not duplicated here.</p>
+				<table class="events-table">
+					<thead>
+						<tr><th>when</th><th>actor</th><th>action</th><th>detail</th></tr>
+					</thead>
+					<tbody>
+						for _, a := range d.Audit {
+							<tr>
+								<td class="muted">{ a.CreatedAt.Format("2006-01-02 15:04:05.000 MST") }</td>
+								<td class="muted">{ string(a.ActorType) } { a.ActorID }</td>
+								<td>{ a.Action }</td>
+								<td><pre class="event-summary">{ formatAuditDetail(a.Detail) }</pre></td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	}
+}
+
+// relatedLabel describes how `r` relates to the focal action `a`.
+// Renders one of "reverts current", "reverted by current", or
+// "parent" so the operator sees the chain shape at a glance.
+func relatedLabel(a, r pg.ResponseActionRow) string {
+	switch {
+	case r.ParentAction == a.ID:
+		return "reverts this action"
+	case a.ParentAction == r.ID:
+		return "this action reverts"
+	}
+	return "—"
+}
+
+// formatAuditDetail pretty-prints the audit_log detail map. Empty
+// detail renders as "{}" rather than collapsing to an empty cell so
+// the operator sees the row exists but had no payload.
+func formatAuditDetail(d map[string]any) string {
+	if len(d) == 0 {
+		return "{}"
+	}
+	b, err := json.MarshalIndent(d, "", "  ")
+	if err != nil {
+		return "(unrenderable)"
+	}
+	return string(b)
+}

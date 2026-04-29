@@ -190,6 +190,12 @@ func (s *Server) routes() {
 		if s.graphBuilder != nil {
 			r.Get("/alerts/{id}/graph.svg", s.alertGraph)
 		}
+		// Phase 4 #76: forensics drill-down for the response chain
+		// against an action. Reads audit_log filtered to
+		// target_kind=response_action; the chain (pending → running
+		// → done/failed, plus reverted-by linkage) lands as one
+		// page per action_id.
+		r.Get("/responses/{action_id}/audit", s.responseActionAudit)
 
 		// Enrolment-token UX (#45) — admin-only across the board.
 		r.With(s.RequireRole(pg.RoleAdmin)).Group(func(r chi.Router) {
