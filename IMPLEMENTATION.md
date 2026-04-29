@@ -655,15 +655,258 @@ Dependency graph:
 
 **Phase 5 follow-up parked here for visibility:** once #68's CH retention is in place and #59's lookback path has shipped, re-examine whether the hybrid cold-start (always-on with a `max_cold_start_lookback` cap) is worth the complexity. Decision needs real query telemetry from a production-shaped CH — premature in Phase 3.
 
-## 6. Phase 4 — Response (bullet)
+## 6. Phase 4 — Response
 
-**Goal:** manual response primitives; opt-in immediate response from edge.
+**Goal:** manual response primitives + opt-in edge auto-respond.
 
-- Response executor in agent: kill pid / pid tree, quarantine file (move to encrypted local staging), isolate host (netfilter rules allowing only mgmt traffic), collect artifact bundle (pid memory dump via `/proc/[pid]/mem` where permitted, /proc snapshot, recent journal, process tree).
-- Operator UI: response buttons on alert detail, confirmation modal for destructive actions, pending/running/done status.
-- Audit log: every response recorded with operator identity, time, target, result.
-- `immediate: true` + `auto_respond: true` edge firing path: edge evaluates, executes, streams both action record and triggering event to server.
-- Response reversal where possible (un-isolate, un-quarantine).
+Phase 3 ended at task #70 (cloud-VM exit validation). Phase 4 picks up
+at #71, mirroring the §3.x / §4.1 / §5.1 numbered-task pattern.
+
+Architectural contract for Phase 4 lives in **ADR-0034**
+(`docs/adr/0034-response-model.md`): two-layer auth (per-rule +
+per-host policy), `response_actions` table as audit + state-machine
+row, six-action surface freeze, additive `ClientMessage.response_result`
+wire bump.
+
+### 6.1 Tasks
+
+**Dependency graph at a glance:**
+- **A. Foundation:** #71 → #72 → #73 (sequential)
+- **B. Server side:** #74 → #75 → #76 (after #72 + #73)
+- **C. Agent executor:** #77 → {#78, #79, #80, #81} (parallel after #77)
+- **D. Edge auto-respond:** #82 → #83 → #84 (after #71)
+- **E. Reversal:** #85 (after #80 + #79)
+- **Exit gate:** #86 (subsumes everything; user-execution like #29/#46/#70)
+
+1. **#71 — ADR-0034 + scoping spike.** Adopted: per-host policy as the
+   single auth surface for both console-driven and edge auto-respond
+   paths; `response_actions` as the durable on-host record;
+   `ClientMessage.response_result` additive wire bump; six-action
+   surface freeze. Touches: `docs/adr/0034-response-model.md`. **Exit:**
+   ADR accepted; PROJECT.md §3.6 cross-reference; concrete table
+   shapes for `response_actions` + `host_response_policies` recorded
+   in the ADR for #72 to implement.
+
+2. **#72 — Postgres schema for response_actions + host_response_policies.**
+   New goose migration adding both tables per ADR-0034. CHECK on
+   `response_actions.status` enumerates `pending/running/done/
+   failed/denied_by_policy/reverted`; CHECK on
+   `(operator_id IS NOT NULL OR rule_uid IS NOT NULL)` enforces "who
+   asked" invariant. NOTIFY trigger on `host_response_policies` updates
+   (mirrors `rules_changed` from #39). pg helpers:
+   `InsertResponseAction`, `TransitionResponseAction`, `GetHostPolicy`,
+   `UpsertHostPolicy`, `WatchHostPolicies`. Touches: new
+   `server/migrations/00014_response_actions.sql`,
+   `server/migrations/00015_host_response_policies.sql`,
+   `server/internal/store/pg/response.go`. **Exit:**
+   testcontainers integration test inserts → transitions → reverts a
+   row + verifies CHECK constraints; per-host policy NOTIFY observable.
+
+3. **#73 — Wire freeze: `ClientMessage.response_result` + `HostPolicy`.**
+   Additive bumps per ADR-0034. New `ResponseResult` message,
+   `ResponseStatus` enum, `HostPolicy` message in `proto/slither/v1/`.
+   `ServerMessage.host_policy` (oneof field, additive) for delivery.
+   Regen Go bindings. v1-agent compatibility holds: agents that don't
+   know `response_result` simply never emit it (same field-number
+   contract as #55's `ast_version` bump). Touches:
+   `proto/slither/v1/agent.proto`, `proto/slither/v1/control.proto`,
+   regen `proto/gen/...`. **Exit:** `make gen` clean; existing tests
+   compile against the new shape; ADR-0011's wire-stability invariant
+   verified.
+
+4. **#74 — Console: response buttons + confirmation modal.** Extend
+   `/alerts/{id}` detail with action buttons gated on `pg.HostPolicy`:
+   "Kill PID N", "Quarantine /path", "Isolate host", "Collect
+   artefacts". Each requires a confirmation modal (HTMX + a small
+   bit of JS) — destructive actions get a typed confirmation;
+   non-destructive (collect, unisolate) get a single-click. New
+   `/hosts/{id}/policy` admin page for promoting hosts out of
+   detect-only. Touches: `server/internal/console/alerts.go`,
+   `server/internal/console/views/alerts.templ`, new
+   `server/internal/console/policy.go`, new
+   `server/internal/console/views/policy.templ`. **Exit:** analyst
+   sees buttons only on response-permitted hosts; viewer sees no
+   buttons; admin can edit policy.
+
+5. **#75 — Server dispatch path.** Operator submits response from
+   console → handler validates host policy + role → inserts
+   `response_actions` row (status=pending) → enqueues
+   `ResponseRequest` onto a per-host channel feeding the Session
+   send goroutine → agent emits `ResponseResult` →
+   `SessionService` resolves to `response_actions` by action_id and
+   flips status. Bounded queue per session with drop-oldest +
+   `response_dispatch_dropped` telemetry counter. Touches:
+   new `server/internal/respond/`,
+   `server/internal/grpcserv/session.go`, `server/internal/app/app.go`.
+   **Exit:** integration test (testcontainers + bufconn) — operator
+   POST → row inserted → fake agent receives ResponseRequest → emits
+   ResponseResult → row transitions to `done`.
+
+6. **#76 — Audit chain on every transition.** Each
+   `response_actions` state change writes one `audit_log` row keyed
+   on `target_kind=response_action`, `target_id=action_id`, with
+   structured detail capturing prev/next status + operator id +
+   error string when failed. Forensic-ready chain. Touches:
+   `server/internal/respond/`, `server/internal/store/pg/response.go`.
+   **Exit:** `audit_log` query for an action shows the full
+   `pending → running → done` (or `→ failed`) trail.
+
+7. **#77 — Agent response executor scaffold.** New
+   `agent/internal/respond/` package with `Executor` that handles
+   `ServerMessage_ResponseRequest`, dispatches by action enum to
+   per-action handlers, returns a `pb.ResponseResult` for the sink to
+   stream back. Cap on concurrent in-flight responses (default 4);
+   queue overflow reports `RESPONSE_STATUS_FAILED` with detail
+   `"queue full"`. Touches: new `agent/internal/respond/executor.go`,
+   wired in `agent/internal/output/grpc/sink.go` + `agent/internal/app/app.go`.
+   **Exit:** unit test — a stub Executor receives a
+   `ResponseRequest` and emits a `ResponseResult` round-trip via a
+   bufconn agent.
+
+8. **#78 — kill_process / kill_tree handlers.** Single PID:
+   `unix.Kill(pid, SIGTERM)` + 3 s grace + `SIGKILL`. Tree: walk
+   `/proc/<pid>/task/<tid>/children` recursively, depth-cap 1024,
+   send TERM to all then KILL after grace. Refuse to kill PID 1, the
+   slither-agent's own PID, or any PID in pid-namespace ancestor
+   chain. Touches: `agent/internal/respond/kill.go`. **Exit:**
+   integration test on a Linux host (privileged): spawn a sleep
+   child, fire kill_process, verify `WaitPid` reports SIGKILL exit;
+   tree variant against a 3-deep fork chain.
+
+9. **#79 — quarantine_file handler.** `mkdir -p
+   /var/lib/slither/quarantine/`; `os.Rename` target into a
+   sha256-of-original-path-named subdir; write a JSON sidecar
+   capturing original path + mtime + size + sha256 + caller's
+   action_id. Refuse to quarantine paths under `/proc`, `/sys`,
+   `/dev`, `/run/systemd`, the slither state dir, or the operator's
+   running shell's $0. Reversal (#85) reads the sidecar to put the
+   file back. Touches: `agent/internal/respond/quarantine.go`.
+   **Exit:** integration test — quarantines `/tmp/x`, verifies file
+   moved + sidecar correct + reversal restores byte-identical
+   content.
+
+10. **#80 — isolate_host / unisolate_host handlers.** Use `iptables`
+    (or `nft` if available; iptables-shim path on RHEL). Isolate
+    rules: append a chain `slither-isolation` allowing established +
+    related, allowing the configured management subnet (default
+    derives from the agent's default-route gateway), dropping
+    everything else. Unisolate flushes the chain.
+    `host_response_policies.allow_isolate` + an additional
+    `mgmt_subnet` text column on `hosts` for operator override.
+    Touches: `agent/internal/respond/isolate.go`,
+    new migration `00016_hosts_mgmt_subnet.sql`. **Exit:** integration
+    test — isolate; assert outbound to non-mgmt is blocked; unisolate;
+    assert restored. Test on a kvm/network-namespaced host (skip on
+    GH-hosted runners; covered in #86 cloud run).
+
+11. **#81 — collect_artifacts handler.** Tarball:
+    `/proc/<pid>/{maps,status,environ,cmdline,fd}` snapshot, recent
+    `journalctl` (60 s window), depth-3 process tree of the target
+    pid + ancestors, `/etc/{passwd,group,os-release}` (no shadow).
+    Memory dump via `/proc/<pid>/mem` is gated on `ptrace_scope` +
+    `dumpable` flag — when blocked, skip with an explicit note in
+    the bundle's manifest rather than failing the whole action.
+    Stream as `result_blob` on `ResponseResult`; server stores under
+    `/var/lib/slither/artefacts/<action_id>.tgz` (new compose volume
+    pattern matching #64's graphs cache). Touches:
+    `agent/internal/respond/collect.go`,
+    `server/internal/respond/sink.go`, deploy/compose updates.
+    **Exit:** integration test — collect against `sleep 30` +
+    verify tarball has expected entries + manifest.
+
+12. **#82 — Sigma `slither.response` block + classifier.** Extend
+    Sigma compiler to recognise an optional top-level `slither.response`
+    block carrying `{action: kill_process, target_field: pid,
+    immediate: true|false}`. Compiler emits the response intent on
+    the `EdgeArtefact` (new field). Validates target_field exists in
+    the rule's selection. Touches: `pkg/ruleast/sigma.go`,
+    `pkg/ruleast/artefact.go`, `pkg/ruleast/compile.go`. **Exit:**
+    golden test — rule with response block round-trips with intent
+    populated; rule referencing missing target_field fails compile.
+
+13. **#83 — Edge auto-respond engine.** When a stateless or stateful
+    edge rule fires AND the rule has a response intent AND the agent's
+    cached `HostPolicy` permits the action class → invoke the local
+    Executor in addition to emitting the DetectionFinding. Both the
+    triggering event and the action's row stream to the server (the
+    server inserts the `response_actions` row with `rule_uid` set,
+    `operator_id` NULL, status starting at `running` since the agent
+    already executed). Detect-only hosts emit a
+    `would_have_executed` field on the DetectionFinding. Touches:
+    `agent/internal/ruleengine/`, `agent/internal/respond/`,
+    `pkg/ocsf/finding.go` (new field), wire bump for
+    DetectionFinding may be needed (additive). **Exit:** integration
+    test — rule with `kill_process` intent + permissive policy fires
+    on a synthetic spawn → child killed within 1 s; same rule on a
+    detect-only host emits `would_have_executed=true` only.
+
+14. **#84 — Per-host policy push.** Server reads
+    `host_response_policies` on Session open, sends initial
+    `ServerMessage.host_policy`. NOTIFY-driven push on policy edits
+    (mirrors hub Refresh from #39). Agent caches latest in atomic
+    pointer; auto-respond gate (#83) consults it; missing policy =
+    all-false = detect-only. Touches:
+    `server/internal/control/policy.go`,
+    `server/internal/grpcserv/session.go`,
+    `agent/internal/output/grpc/sink.go`,
+    `agent/internal/respond/policy.go`. **Exit:** integration test —
+    update policy via console → agent's cached policy reflects
+    within debounce window; auto-respond gate flips correspondingly.
+
+15. **#85 — Reversal flows.** New endpoints + handlers for
+    un-quarantine + un-isolate. Each creates a `response_actions`
+    row with `parent_action` set to the original; reversal handler
+    on the agent reads parent's `result_blob` (or sidecar for
+    quarantine) to perform the inverse. Parent flips to `reverted`
+    when reverse hits `done`. Console "Revert" button on the alert
+    detail's action history list. Touches:
+    `agent/internal/respond/quarantine.go` (un-quarantine),
+    `agent/internal/respond/isolate.go` (already covers
+    UNISOLATE_HOST from #80 — this just adds the parent_action
+    plumbing on the server side),
+    `server/internal/respond/`, console views. **Exit:** integration
+    test — quarantine → revert → file is byte-identical at original
+    path; both `response_actions` rows audited + linked.
+
+16. **#86 — Phase 4 exit validation.** Doc-backed manual run on the
+    Phase 3 cloud fleet (existing stopped instances —
+    `start-instances` brings them back). Promote one agent to
+    `allow_kill_process=true`, leave the other two detect-only.
+    Console-driven kill: operator clicks Kill → `response_actions`
+    row → agent kills → status=done; non-promoted host: button
+    absent. Auto-respond rule with `kill_process` + `immediate: true`:
+    fires + executes on promoted host; emits `would_have_executed`
+    on detect-only host. Reversal: quarantine + un-quarantine
+    round-trip. Audit chain visible in `audit_log`. Capture under
+    `phase4_validation/`; commit `docs/phase4-validation.md`. **Exit:**
+    all green; Phase 4 closed; Phase 5 (hardening) opens.
+
+### 6.2 Cross-cutting notes
+
+- **Wire stability holds.** Phase 4 adds `ResponseResult` + `HostPolicy`
+  + `would_have_executed` on DetectionFinding — all additive
+  inside `slither.v1`. No `slither.v2` discussion. ADR-0011's
+  wire-freeze invariant is preserved per §2.4.
+- **Default-detect-only for every host.** Phase 4 ships safer than
+  Phase 3 in that respect — even with the executor wired, no host
+  acts on a rule without explicit promotion.
+- **Action surface frozen at six.** `kill_process`,
+  `kill_process_tree`, `quarantine_file`, `isolate_host`,
+  `unisolate_host`, `collect_artifacts`. New actions need ADR +
+  enum-bump per §2.4.
+- **Reversal is a new row, not a mutation.** Forensic chain stays
+  append-only.
+- **Phase 4 starts here:** #71 (ADR — already accepted in this
+  commit) → #72 (DB schema) → #73 (wire bump) lands a sequential
+  foundation; everything else parallelises off those three. Biggest
+  single block is #83 (auto-respond), gated on #82's compiler
+  extension.
+
+**Estimated effort:** 4–6 weeks for one person. Biggest unknowns:
+#80 (isolation correctness on heterogeneous nft/iptables hosts) and
+#83 (auto-respond's interaction with the bounded-stateful runtime
+when a rule fires on the same key window twice). Budget slack
+there.
 
 ## 7. Phase 5 — Hardening (bullet)
 
