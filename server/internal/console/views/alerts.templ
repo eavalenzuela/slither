@@ -154,8 +154,121 @@ templ AlertDetail(d AlertDetailData) {
 			} else {
 				<p class="muted">No further transitions available — alert is closed.</p>
 			}
+
+			if d.IsAnalyst {
+				@responseActionsBlock(d)
+			}
+
+			if len(d.ResponseHistory) > 0 {
+				@responseHistoryTable(d.ResponseHistory)
+			}
 		</div>
 	}
+}
+
+// responseActionsBlock renders the Phase 4 response action buttons,
+// gated per-action against the host's policy. Each button submits a
+// form whose target is /alerts/{id}/respond?action=…; the dispatcher
+// (#75) is where the row actually lands. Destructive actions get a
+// typed-confirmation modal; safe ones (collect, un-isolate) get a
+// single-click confirm via a JS dialog. ADR-0034 calls out the
+// "default-detect-only" baseline — when the host has no permitted
+// actions, render an explanatory note instead of a hidden block.
+templ responseActionsBlock(d AlertDetailData) {
+	<h3>Response actions</h3>
+	{{ allowed := allowedResponseActions(d.HostPolicy) }}
+	if len(allowed) == 0 {
+		<p class="muted">
+			This host has no response permissions. Default policy is
+			detect-only; an admin must promote the host on
+			<a href={ templ.URL("/hosts/" + d.Alert.HostID + "/policy") }>its policy page</a>
+			before any action runs.
+		</p>
+	} else {
+		<p class="muted">
+			Buttons are gated against the host's policy. Destructive
+			actions require a typed confirmation; recoverable ones
+			(collect / un-isolate) require a single-click confirm.
+		</p>
+		<div class="response-actions">
+			for _, a := range allowed {
+				@responseActionButton(d.Alert, a)
+			}
+		</div>
+		if d.IsAdmin {
+			<p class="muted">
+				<a href={ templ.URL("/hosts/" + d.Alert.HostID + "/policy") }>Edit policy for this host</a>
+			</p>
+		}
+	}
+}
+
+// responseActionButton wraps each action's form. A `data-typed-confirm`
+// attribute carries the typed-confirmation phrase for destructive
+// actions; `data-confirm` carries the single-click confirm string. The
+// console's JS picks these up and short-circuits submit when the
+// operator backs out. No JS framework — vanilla DOMContentLoaded
+// listener suffices.
+templ responseActionButton(a pg.AlertRow, action pg.ResponseAction) {
+	<form method="post" action={ templ.URL("/alerts/" + a.ID + "/respond") } class="response-form">
+		<input type="hidden" name="action" value={ string(action) }/>
+		// Default target — the dispatcher handler refines per-action
+		// (target_field on the alert row, prompt for path/PID, …).
+		// For #74 the form just declares the action class; #75 owns
+		// the target-resolution UX.
+		<input type="hidden" name="default_target" value={ defaultResponseTarget(a, action) }/>
+		if ResponseActionDestructive(action) {
+			<button
+				type="submit"
+				class="btn response-btn destructive"
+				data-typed-confirm={ "confirm " + string(action) }>
+				{ ResponseActionLabel(action) }
+			</button>
+		} else {
+			<button
+				type="submit"
+				class="btn response-btn"
+				data-confirm={ ResponseActionLabel(action) + " — proceed?" }>
+				{ ResponseActionLabel(action) }
+			</button>
+		}
+	</form>
+}
+
+// responseHistoryTable lists every response action against the host
+// the alert fired on, newest first. Reverse links (#85) are noted by
+// indenting child rows and adding a "↩ reverts <id>" tag.
+templ responseHistoryTable(rows []pg.ResponseActionRow) {
+	<h3>Response history (this host)</h3>
+	<table class="events-table">
+		<thead>
+			<tr>
+				<th>created</th>
+				<th>action</th>
+				<th>target</th>
+				<th>status</th>
+				<th>by</th>
+				<th>reason</th>
+			</tr>
+		</thead>
+		<tbody>
+			for _, r := range rows {
+				<tr>
+					<td class="muted">{ r.CreatedAt.Format("2006-01-02 15:04:05") }</td>
+					<td>
+						{ ResponseActionLabel(r.Action) }
+						if r.ParentAction != "" {
+							<span class="muted"> ↩ reverts { r.ParentAction[:8] }</span>
+						}
+					</td>
+					<td class="muted">{ r.Target }</td>
+					<td><span class={ "alert-status", "alert-status-" + string(r.Status) }>{ ResponseStatusLabel(r.Status) }</span></td>
+					<td class="muted">{ responseActorLabel(r) }</td>
+					<td class="muted">{ r.ReasonCode }</td>
+				</tr>
+			}
+		</tbody>
+	</table>
 }
 
 func alertDetailURL(id string) templ.SafeURL {
@@ -218,6 +331,62 @@ type AlertsListFilters struct {
 	AssignedTo string
 	Since      string // pre-formatted RFC3339Nano; empty = none
 	Until      string
+}
+
+// allowedResponseActions returns the action classes a host's policy
+// permits, in a stable display order so the buttons render
+// deterministically. UNISOLATE_HOST is included only when an
+// existing isolate is plausibly active — for #74 we render both
+// isolate and un-isolate when the policy allows isolate, and let the
+// dispatcher (#75) reject a redundant un-isolate cleanly.
+func allowedResponseActions(p pg.HostPolicy) []pg.ResponseAction {
+	out := make([]pg.ResponseAction, 0, 6)
+	if p.AllowKillProcess {
+		out = append(out, pg.ResponseActionKillProcess)
+	}
+	if p.AllowKillTree {
+		out = append(out, pg.ResponseActionKillTree)
+	}
+	if p.AllowQuarantine {
+		out = append(out, pg.ResponseActionQuarantineFile)
+	}
+	if p.AllowIsolate {
+		out = append(out, pg.ResponseActionIsolateHost, pg.ResponseActionUnisolateHost)
+	}
+	if p.AllowCollect {
+		out = append(out, pg.ResponseActionCollectArtifacts)
+	}
+	return out
+}
+
+// defaultResponseTarget renders the most useful default target the
+// operator can edit before submitting. The dispatcher (#75) inspects
+// the alert's event_ids to pick a real PID / path; #74 ships a
+// best-effort pre-fill so the buttons at least render with sensible
+// placeholders.
+func defaultResponseTarget(a pg.AlertRow, action pg.ResponseAction) string {
+	switch action {
+	case pg.ResponseActionIsolateHost, pg.ResponseActionUnisolateHost:
+		// Isolation acts on the host id; pre-fill is unambiguous.
+		return a.HostID
+	}
+	// PID + path defaults are #75's job — the dispatcher will inspect
+	// the alert's event_ids in CH to pick a real value. Empty here so
+	// the operator sees an empty input rather than a bogus "0".
+	return ""
+}
+
+// responseActorLabel renders the action-history "by" column. Operator-
+// driven actions show the operator id (truncated); rule-driven show
+// the rule_uid prefix; both for completeness.
+func responseActorLabel(r pg.ResponseActionRow) string {
+	if r.OperatorID != "" {
+		return "operator " + r.OperatorID[:8]
+	}
+	if r.RuleUID != "" {
+		return "rule " + r.RuleUID
+	}
+	return "—"
 }
 
 // AlertsURLWithCursor builds a /alerts URL preserving filters and

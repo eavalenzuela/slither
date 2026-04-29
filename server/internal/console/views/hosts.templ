@@ -30,6 +30,7 @@ templ Hosts(d HostsPageData) {
 							<th></th>
 							if d.IsAdmin {
 								<th></th>
+								<th></th>
 							}
 						</tr>
 					</thead>
@@ -53,6 +54,7 @@ templ Hosts(d HostsPageData) {
 								<td class="muted">{ FormatLastSeen(h) }</td>
 								<td class="muted"><a href={ templ.URL("/hosts/" + h.ID + "/process-tree") }>process tree</a></td>
 								if d.IsAdmin {
+									<td class="muted"><a href={ templ.URL("/hosts/" + h.ID + "/policy") }>policy</a></td>
 									<td>
 										if status != HostStatusRevoked {
 											<form method="post" action={ templ.SafeURL("/hosts/" + h.ID + "/revoke") }>

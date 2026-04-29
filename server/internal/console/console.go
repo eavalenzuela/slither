@@ -159,6 +159,17 @@ func (s *Server) routes() {
 		}
 		r.With(s.RequireRole(pg.RoleAdmin)).
 			Post("/hosts/{host_id}/revoke", s.hostsRevoke)
+		// Phase 4 #74: per-host response policy editor (admin-only).
+		r.With(s.RequireRole(pg.RoleAdmin)).Group(func(r chi.Router) {
+			r.Get("/hosts/{host_id}/policy", s.hostsPolicyEdit)
+			r.Post("/hosts/{host_id}/policy", s.hostsPolicyUpdate)
+		})
+
+		// Phase 4 #74: alert response action submit. Stub until #75
+		// fills the dispatcher body — the buttons need a route to
+		// hit so a click doesn't 404 silently.
+		r.With(s.RequireRole(pg.RoleAnalyst, pg.RoleAdmin)).
+			Post("/alerts/{id}/respond", s.alertRespondStub)
 
 		// Alerts (Phase 3 #61). List + detail are viewer-readable;
 		// transitions require analyst or admin.

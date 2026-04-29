@@ -38,6 +38,17 @@ type AlertDetailData struct {
 	// (#64). False when the server was started without a graph cache
 	// or when the alert has no event_ids.
 	ShowGraph bool
+	// HostPolicy is the alert host's per-action permissions (#72).
+	// Buttons gate on PermitsAction; an unset / detect-only policy
+	// renders zero buttons regardless of role.
+	HostPolicy pg.HostPolicy
+	// ResponseHistory is the action chain against this host, newest
+	// first (#85's reverse-chain links land on this slice). Empty
+	// for hosts that never had a response action issued.
+	ResponseHistory []pg.ResponseActionRow
+	// IsAdmin gates the visibility of the admin-only policy edit
+	// link in the host info section.
+	IsAdmin bool
 }
 
 // AlertsCursorLayout is the time format the /alerts pagination

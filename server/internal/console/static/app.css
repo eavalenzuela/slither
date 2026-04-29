@@ -228,3 +228,37 @@ button.danger:hover { background: #ff9c9c; }
     display: block;
     margin: 0 auto;
 }
+
+/* Response action buttons (Phase 4 #74). Destructive actions are
+   visually distinct from the alert lifecycle buttons — typed-confirm
+   is the operator's last guard before a kill / quarantine / isolate
+   reaches the agent. */
+.response-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.5rem 0;
+}
+.response-form { display: inline-block; }
+.response-btn {
+    background: #2c3a4a;
+    color: #d3d8e0;
+    border: 1px solid #3a4a5e;
+    padding: 0.4rem 0.8rem;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.response-btn:hover { background: #3a4a5e; }
+.response-btn.destructive {
+    background: #4a2c2c;
+    color: #ff9c9c;
+    border-color: #6a3a3a;
+}
+.response-btn.destructive:hover { background: #6a3a3a; color: #ffbcbc; }
+
+.alert-status-pending          { background: #2c3a4a; color: #8a99b3; }
+.alert-status-running          { background: #1f3a5e; color: #82aaff; }
+.alert-status-done             { background: #1f4738; color: #6dd9a3; }
+.alert-status-failed           { background: #4a2c2c; color: #f08080; }
+.alert-status-denied_by_policy { background: #4a3f1f; color: #f0c674; }
+.alert-status-reverted         { background: #3a3a4a; color: #aaa9d9; }

@@ -124,12 +124,29 @@ func (s *Server) alertDetail(w http.ResponseWriter, r *http.Request) {
 
 	flash, _ := s.sm.Pop(r.Context(), "flash").(string)
 	role := s.role(r)
+
+	// HostPolicy gates the response action buttons. Failure here is
+	// non-fatal — render the page without the response block rather
+	// than 500 the operator out of seeing the alert detail.
+	policy, perr := s.store.GetHostPolicy(r.Context(), row.HostID)
+	if perr != nil {
+		policy = pg.HostPolicy{HostID: row.HostID}
+	}
+	// Same posture for action history: best-effort.
+	history, herr := s.store.ListResponseActions(r.Context(), row.HostID, 25)
+	if herr != nil {
+		history = nil
+	}
+
 	render(w, r, views.AlertDetail(views.AlertDetailData{
-		Alert:       row,
-		AllowedNext: allowedNextStatuses(row.Status),
-		IsAnalyst:   role == pg.RoleAnalyst || role == pg.RoleAdmin,
-		Flash:       flash,
-		ShowGraph:   s.graphBuilder != nil && len(row.EventIDs) > 0,
+		Alert:           row,
+		AllowedNext:     allowedNextStatuses(row.Status),
+		IsAnalyst:       role == pg.RoleAnalyst || role == pg.RoleAdmin,
+		IsAdmin:         role == pg.RoleAdmin,
+		Flash:           flash,
+		ShowGraph:       s.graphBuilder != nil && len(row.EventIDs) > 0,
+		HostPolicy:      policy,
+		ResponseHistory: history,
 	}))
 }
 

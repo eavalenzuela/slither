@@ -1,0 +1,58 @@
+package views
+
+// HostPolicy is the admin-only /hosts/{id}/policy page. Each
+// permission is a per-action checkbox; "detect-only" is the
+// default (every box unticked) and is the resting state for every
+// freshly enrolled host until an operator actively grants
+// permissions. ADR-0034 spells out why we don't ship an
+// `allow_unisolate` checkbox — reverse actions inherit their
+// parent's permission so an operator can't trap themselves in a
+// state they can't roll back.
+templ HostPolicy(d HostPolicyData) {
+	@Layout("Response policy — " + hostLabel(d.Host)) {
+		<div class="card">
+			<h2>Response policy: { hostLabel(d.Host) }</h2>
+			<p class="muted">
+				Default policy is <strong>detect-only</strong> — alerts
+				continue to fire and findings continue to land, but no
+				response action runs against this host. Promoting a
+				host to allow specific actions is an explicit operator
+				decision; ADR-0034 captures the "two-layer auth" model.
+			</p>
+			if d.Flash != "" {
+				<p class="flash">{ d.Flash }</p>
+			}
+			if d.Error != "" {
+				<p class="flash">{ d.Error }</p>
+			}
+
+			<form method="post" action={ templ.URL("/hosts/" + d.Host.ID + "/policy") } class="filters">
+				<label>
+					<input type="checkbox" name="allow_kill_process" checked?={ d.Policy.AllowKillProcess }/>
+					Kill process — terminate a single PID by SIGTERM then SIGKILL.
+				</label>
+				<label>
+					<input type="checkbox" name="allow_kill_tree" checked?={ d.Policy.AllowKillTree }/>
+					Kill process tree — recursively terminate every descendant of the target PID.
+				</label>
+				<label>
+					<input type="checkbox" name="allow_quarantine" checked?={ d.Policy.AllowQuarantine }/>
+					Quarantine file — move a file to a hashed staging dir with a sidecar manifest.
+				</label>
+				<label>
+					<input type="checkbox" name="allow_isolate" checked?={ d.Policy.AllowIsolate }/>
+					Isolate host — netfilter rules drop everything but the management subnet.
+					Inherited: <strong>un-isolate</strong> uses this same permission.
+				</label>
+				<label>
+					<input type="checkbox" name="allow_collect" checked?={ d.Policy.AllowCollect }/>
+					Collect artefacts — /proc snapshot + recent journal + process tree as a tarball.
+				</label>
+				<div class="actions">
+					<button type="submit">Save policy</button>
+					<a class="muted" href="/hosts">Back to host inventory</a>
+				</div>
+			</form>
+		</div>
+	}
+}
