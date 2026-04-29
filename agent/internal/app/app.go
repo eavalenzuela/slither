@@ -208,6 +208,9 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 		// non-Linux builds (none today, but Phase 7 macOS / Windows
 		// will need their own handlers) skip this call.
 		respond.WireKillHandlers(executor)
+		// Phase 4 #79: quarantine_file. Same Linux-build-tag pattern
+		// — non-Linux falls back to the not-implemented default.
+		respond.WireQuarantineHandlers(executor)
 		submitResponse = func(req *pb.ResponseRequest) {
 			// Submit is non-blocking; recv goroutine never stalls.
 			// Handlers inherit the agent-process context so a Run

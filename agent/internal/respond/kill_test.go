@@ -4,7 +4,6 @@ package respond
 
 import (
 	"context"
-	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -140,12 +139,15 @@ func TestCollectDescendants_ChildAppears(t *testing.T) {
 
 func TestCollectDescendants_RespectsCap(t *testing.T) {
 	t.Parallel()
-	// Use cap=0 so a single self-walk should already overflow.
-	_, err := collectDescendants(os.Getpid(), 0)
+	// Spawn a child so BFS has something to enqueue past root.
+	// cap=1 lets root land but trips on the first descendant.
+	cmd := mustSpawnSleep(t, "30s")
+	defer mustReap(t, cmd)
+	_, err := collectDescendants(os.Getpid(), 1)
 	if err == nil {
-		t.Fatal("expected overflow error at cap=0")
+		t.Fatal("expected overflow error at cap=1 with one child")
 	}
-	if !errors.Is(err, err) || !strings.Contains(err.Error(), "exceeds cap") {
+	if !strings.Contains(err.Error(), "exceeds cap") {
 		t.Errorf("err = %v, want exceeds-cap error", err)
 	}
 }
