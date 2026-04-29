@@ -51,6 +51,13 @@ type Options struct {
 	// RuleSet (Phase 2 §4.1 #39). Production wires this to
 	// ruleengine.Engine.ReplaceRules; tests inject a recorder.
 	OnRuleSet func(*pb.RuleSet)
+
+	// OnResponseRequest, when non-nil, is called for every
+	// server-pushed ResponseRequest (Phase 4 #77). Production
+	// wires this to respond.Executor.Submit; tests inject a
+	// recorder. The callback must be non-blocking — the sink's
+	// recv goroutine cannot stall on a wedged executor.
+	OnResponseRequest func(*pb.ResponseRequest)
 }
 
 // Sink is the gRPC Session-stream output. Implements
@@ -69,6 +76,13 @@ type Sink struct {
 	// when full rather than blocking — diagnostics losing one report
 	// is preferable to the rule-apply path stalling.
 	diags chan *pb.DiagReport
+
+	// results carries ResponseResult messages emitted by the agent's
+	// executor (Phase 4 #77). Capacity matches the executor's worker
+	// pool so a burst of in-flight handlers can each push without
+	// blocking; if the channel saturates the executor counts a
+	// response_exec_result_dropped via telemetry.
+	results chan *pb.ResponseResult
 }
 
 // New constructs a Sink. Reads host_id from disk up-front — a sink
@@ -92,13 +106,20 @@ func New(opts Options, telem *telemetry.Counters) (*Sink, error) {
 	}
 
 	return &Sink{
-		opts:   opts,
-		telem:  telem,
-		hostID: hostID,
-		buf:    make(chan *pb.Envelope, opts.BufferSize),
-		diags:  make(chan *pb.DiagReport, 8),
+		opts:    opts,
+		telem:   telem,
+		hostID:  hostID,
+		buf:     make(chan *pb.Envelope, opts.BufferSize),
+		diags:   make(chan *pb.DiagReport, 8),
+		results: make(chan *pb.ResponseResult, 16),
 	}, nil
 }
+
+// Results returns the executor → sink pipe. Phase 4 #77 wires this
+// into respond.New so handlers push their ResponseResult here; the
+// session goroutine fans onto stream.Send under the same gRPC
+// non-concurrent-send contract that #75 codified for the server side.
+func (s *Sink) Results() chan<- *pb.ResponseResult { return s.results }
 
 // EmitDiag queues a DiagReport with the given warnings to be sent on
 // the next Session iteration. Phase 3 #57: applyRuleSetTo calls this
@@ -273,6 +294,12 @@ func (s *Sink) runSession(ctx context.Context, client pb.AgentServiceClient) err
 			}); err != nil {
 				return err
 			}
+		case res := <-s.results:
+			if err := stream.Send(&pb.ClientMessage{
+				Kind: &pb.ClientMessage_ResponseResult{ResponseResult: res},
+			}); err != nil {
+				return err
+			}
 		case <-hb.C:
 			if err := stream.Send(&pb.ClientMessage{
 				Kind: &pb.ClientMessage_Heartbeat{
@@ -290,15 +317,22 @@ func (s *Sink) runSession(ctx context.Context, client pb.AgentServiceClient) err
 }
 
 // handleServerMessage dispatches one ServerMessage. RuleSet pushes
-// fan into the configured OnRuleSet callback; other kinds are
-// observational today.
+// fan into the configured OnRuleSet callback; ResponseRequest pushes
+// fan into OnResponseRequest (Phase 4 #77). Other kinds are
+// observational today (HostPolicy lands with #84, HuntQuery in
+// Phase 6).
 func (s *Sink) handleServerMessage(msg *pb.ServerMessage) {
 	if msg == nil {
 		return
 	}
-	if rs, ok := msg.GetKind().(*pb.ServerMessage_RuleSet); ok {
-		if s.opts.OnRuleSet != nil && rs.RuleSet != nil {
-			s.opts.OnRuleSet(rs.RuleSet)
+	switch k := msg.GetKind().(type) {
+	case *pb.ServerMessage_RuleSet:
+		if s.opts.OnRuleSet != nil && k.RuleSet != nil {
+			s.opts.OnRuleSet(k.RuleSet)
+		}
+	case *pb.ServerMessage_ResponseRequest:
+		if s.opts.OnResponseRequest != nil && k.ResponseRequest != nil {
+			s.opts.OnResponseRequest(k.ResponseRequest)
 		}
 	}
 }

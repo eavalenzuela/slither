@@ -18,6 +18,7 @@ import (
 	"github.com/t3rmit3/slither/agent/internal/output"
 
 	grpcsink "github.com/t3rmit3/slither/agent/internal/output/grpc"
+	"github.com/t3rmit3/slither/agent/internal/respond"
 	"github.com/t3rmit3/slither/agent/internal/ruleengine"
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
 	applog "github.com/t3rmit3/slither/pkg/log"
@@ -59,7 +60,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	}
 	eng := ruleengine.New(rules, telem)
 
-	sink, err := newSink(cfg, telem, eng, iocStore)
+	sink, err := newSink(ctx, cfg, telem, eng, iocStore)
 	if err != nil {
 		return fmt.Errorf("app: output sink: %w", err)
 	}
@@ -156,13 +157,16 @@ func isCancelled(err error, ctx context.Context) bool {
 // flow in #36) — a missing or empty file is a startup error, not a
 // silent degradation. eng is wired in so the sink's ServerMessage
 // receiver can apply server-pushed RuleSets via Engine.ReplaceRules.
-func newSink(cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engine, iocStore *ioc.Store) (output.Sink, error) {
+func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engine, iocStore *ioc.Store) (output.Sink, error) {
 	switch cfg.Output.Kind {
 	case "stdout", "":
 		return output.NewStdoutJSONL(os.Stdout), nil
 	case "grpc":
 		g := cfg.Output.GRPC
-		var emit func([]string)
+		var (
+			emit           func([]string)
+			submitResponse func(*pb.ResponseRequest)
+		)
 		sink, err := grpcsink.New(grpcsink.Options{
 			ServerAddr:        g.ServerAddr,
 			CAPath:            g.CAPath,
@@ -180,11 +184,31 @@ func newSink(cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engin
 					emit(ws)
 				}
 			}),
+			// Phase 4 #77: server-pushed ResponseRequests fan into
+			// the executor via the same closure-indirection trick.
+			OnResponseRequest: func(req *pb.ResponseRequest) {
+				if submitResponse != nil {
+					submitResponse(req)
+				}
+			},
 		}, telem)
 		if err != nil {
 			return nil, err
 		}
 		emit = sink.EmitDiag
+		// Build the executor against the sink's results channel +
+		// a recorded telem source. Default-stub handlers return
+		// FAILED + "not implemented"; #78-#81 SetHandler real ones.
+		executor := respond.New(respond.Options{
+			Results: sink.Results(),
+			Telem:   telem,
+		})
+		submitResponse = func(req *pb.ResponseRequest) {
+			// Submit is non-blocking; recv goroutine never stalls.
+			// Handlers inherit the agent-process context so a Run
+			// cancellation propagates into in-flight actions.
+			_ = executor.Submit(ctx, req)
+		}
 		return sink, nil
 	}
 	return nil, fmt.Errorf("unknown output.kind %q", cfg.Output.Kind)

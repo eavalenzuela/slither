@@ -25,6 +25,18 @@ type Counters struct {
 	detectionsFired  atomic.Uint64
 	ringbufOverflows atomic.Uint64
 	stateEvicted     atomic.Uint64
+
+	// response — Phase 4 #77 agent executor metrics. ExecQueueFull
+	// fires when Submit hits the worker-pool cap; the dispatch is
+	// completed by emitting a synthetic FAILED ResponseResult so
+	// the server-side row never sticks in `running`. ExecPanic is
+	// the recover() fallback. ResultDropped fires when the outbound
+	// result channel is full at emit time.
+	responseExecDone          atomic.Uint64
+	responseExecFailed        atomic.Uint64
+	responseExecQueueFull     atomic.Uint64
+	responseExecPanic         atomic.Uint64
+	responseExecResultDropped atomic.Uint64
 }
 
 // NewCounters returns a zero-valued Counters.
@@ -94,6 +106,29 @@ func (c *Counters) IncRingOverflows() { c.ringbufOverflows.Add(1) }
 // or a misbehaving by-tuple choice.
 func (c *Counters) IncStateEvicted() { c.stateEvicted.Add(1) }
 
+// IncResponseExecDone — agent executor finished one ResponseRequest
+// with status=DONE.
+func (c *Counters) IncResponseExecDone() { c.responseExecDone.Add(1) }
+
+// IncResponseExecFailed — agent executor finished one ResponseRequest
+// with status=FAILED (handler returned a non-DONE terminal status).
+func (c *Counters) IncResponseExecFailed() { c.responseExecFailed.Add(1) }
+
+// IncResponseExecQueueFull — Submit hit the worker-pool cap; the
+// request was rejected synchronously and a FAILED result was emitted
+// so the server-side state machine still moves the row.
+func (c *Counters) IncResponseExecQueueFull() { c.responseExecQueueFull.Add(1) }
+
+// IncResponseExecPanic — handler panicked; the recover guard caught
+// it and emitted a FAILED result. Sustained growth means a handler
+// bug.
+func (c *Counters) IncResponseExecPanic() { c.responseExecPanic.Add(1) }
+
+// IncResponseExecResultDropped — outbound result channel was full at
+// emit time. Indicates the sink is wedged or the channel is too
+// small for the burst rate.
+func (c *Counters) IncResponseExecResultDropped() { c.responseExecResultDropped.Add(1) }
+
 // Snapshot captures the current counter values.
 type Snapshot struct {
 	EventsProduced   uint64
@@ -108,22 +143,33 @@ type Snapshot struct {
 	DetectionsFired  uint64
 	RingbufOverflows uint64
 	StateEvicted     uint64
+
+	ResponseExecDone          uint64
+	ResponseExecFailed        uint64
+	ResponseExecQueueFull     uint64
+	ResponseExecPanic         uint64
+	ResponseExecResultDropped uint64
 }
 
 // Snapshot returns a point-in-time view of the counters.
 func (c *Counters) Snapshot() Snapshot {
 	return Snapshot{
-		EventsProduced:   c.eventsProduced.Load(),
-		EventsDropped:    c.eventsDropped.Load(),
-		DropsCollector:   c.dropsCollector.Load(),
-		DropsDispatch:    c.dropsDispatch.Load(),
-		DropsEnricher:    c.dropsEnricher.Load(),
-		DropsEngine:      c.dropsEngine.Load(),
-		DropsOutput:      c.dropsOutput.Load(),
-		OutputReconnects: c.outputReconnects.Load(),
-		HeartbeatsSent:   c.heartbeatsSent.Load(),
-		DetectionsFired:  c.detectionsFired.Load(),
-		RingbufOverflows: c.ringbufOverflows.Load(),
-		StateEvicted:     c.stateEvicted.Load(),
+		EventsProduced:            c.eventsProduced.Load(),
+		EventsDropped:             c.eventsDropped.Load(),
+		DropsCollector:            c.dropsCollector.Load(),
+		DropsDispatch:             c.dropsDispatch.Load(),
+		DropsEnricher:             c.dropsEnricher.Load(),
+		DropsEngine:               c.dropsEngine.Load(),
+		DropsOutput:               c.dropsOutput.Load(),
+		OutputReconnects:          c.outputReconnects.Load(),
+		HeartbeatsSent:            c.heartbeatsSent.Load(),
+		DetectionsFired:           c.detectionsFired.Load(),
+		RingbufOverflows:          c.ringbufOverflows.Load(),
+		StateEvicted:              c.stateEvicted.Load(),
+		ResponseExecDone:          c.responseExecDone.Load(),
+		ResponseExecFailed:        c.responseExecFailed.Load(),
+		ResponseExecQueueFull:     c.responseExecQueueFull.Load(),
+		ResponseExecPanic:         c.responseExecPanic.Load(),
+		ResponseExecResultDropped: c.responseExecResultDropped.Load(),
 	}
 }
