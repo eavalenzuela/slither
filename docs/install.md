@@ -169,9 +169,39 @@ With `output.kind: stdout`, OCSF events land in the journal. Swap to
 
 ## 5. Reloading rules and file filters
 
-The agent handles `SIGHUP` as a hot reload for **rules + file-collector
-include/exclude paths**. Everything else (collectors, hashing pool,
-device identity) is startup-fixed and requires a full restart.
+There are two paths, and they target different audiences:
+
+### 5.1 Server-push (production)
+
+For agents enrolled to a `slither-server` (`output.kind: grpc`), rule
+hot reload is server-driven and **operators don't need to do anything
+on the host**. The control plane reacts to `rules` table changes in
+Postgres (NOTIFY-driven, 200 ms-debounced, with a 30 s fallback poll),
+recompiles the canonical RuleSet, and broadcasts it to every
+connected agent's session. The agent applies it via the running
+engine — no SIGHUP, no restart, no per-host action.
+
+The runbook for inserting / disabling a rule lives at
+`scripts/insert-rule.sh` (or, for ad-hoc edits, the rule editor in
+the operator console). Either path goes through the same Postgres
+table the hub watches.
+
+This is the production path. Phase 3 #69 closed the open question
+in IMPLEMENTATION.md §10.1 by selecting it as the sole production
+mechanism.
+
+### 5.2 Local SIGHUP (dev / air-gapped only)
+
+The agent **also** handles `SIGHUP` as a hot reload for **rules +
+file-collector include/exclude paths** drawn from its local YAML
+config (`rules.paths` globs). This path is intended for offline
+iteration on a rule pack before pushing to a real fleet, and for
+deployments running without a `slither-server` peer. It does not
+involve the server and ignores anything pushed via the control
+channel.
+
+Everything else (collectors, hashing pool, device identity) is
+startup-fixed and requires a full restart.
 
 ```bash
 sudo systemctl reload slither-agent.service    # sends SIGHUP
@@ -180,8 +210,14 @@ sudo kill -HUP "$(systemctl show --property MainPID --value slither-agent.servic
 ```
 
 If the reloaded config fails to parse or compile, the agent logs the
-error to stderr and keeps running with the previous config — it does not
-replace the live config on error.
+error to stderr and keeps running with the previous config — it does
+not replace the live config on error.
+
+In a normal Phase 3 deployment with a server, leave `rules.paths`
+empty (or unset) and let the server-push path own rule distribution.
+The two paths are independent: a SIGHUP-driven reload swaps in
+local-YAML rules, but the next server push will replace those with
+the canonical fleet ruleset.
 
 ## 6. Uninstall
 
