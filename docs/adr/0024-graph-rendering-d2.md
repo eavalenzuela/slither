@@ -32,6 +32,19 @@ Options for producing the graph:
 - **Client-side cytoscape.** Violates the HTMX-first decision and adds a JS toolchain for one widget.
 - **Hand-written SVG layout.** Reinventing a graph layout engine. Rejected.
 
+## Implementation pin
+
+- Version: `oss.terrastruct.com/d2 v0.7.1` (pinned in `server/go.mod`).
+- Transitive: `oss.terrastruct.com/util-go` (helpers; pulled by D2).
+- Layout engine: `d2dagrelayout` (pure-Go via embedded JS — no extra runtime dep).
+- Theme: `d2themescatalog.NeutralDefault` (matches the console's plain styling).
+- Library facade: `server/internal/graph.Render(ctx, source) ([]byte, error)`. All other server code goes through it; no other package imports `oss.terrastruct.com/d2/...` directly.
+- Binary impact: server binary grew from ~2.4 MB to ~26 MB (≈+24 MB) due to D2's embedded fonts + Dagre.js bundle. Acceptable given the ADR's "no extra runtime dependency" property; revisit only if release-image size becomes a deployment problem.
+
+## Licensing
+
+D2 ships under MPL-2.0 (per `oss.terrastruct.com/d2`'s `LICENSE`). MPL-2.0 is file-level copyleft and compatible with the project's MIT licence — D2 is consumed as a separate Go module with no source modification, so the file-level reciprocity obligation has no practical reach into Slither code. The earlier draft of this ADR mentioned "Apache 2.0 / MIT" speculatively; the actual upstream licence is recorded here for clarity.
+
 ## References
 
 - PROJECT.md §3.5, §4.3, §9.1 row 25; ADR-0023.
