@@ -33,6 +33,7 @@ import (
 	"github.com/t3rmit3/slither/server/internal/console"
 	"github.com/t3rmit3/slither/server/internal/control"
 	"github.com/t3rmit3/slither/server/internal/detect"
+	"github.com/t3rmit3/slither/server/internal/graph"
 	"github.com/t3rmit3/slither/server/internal/grpcserv"
 	"github.com/t3rmit3/slither/server/internal/ingest"
 	"github.com/t3rmit3/slither/server/internal/mtls"
@@ -136,6 +137,17 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		_ = sessionLis.Close()
 		return fmt.Errorf("app: session key: %w", err)
 	}
+	graphCache, err := graph.NewCache(graph.CacheOptions{
+		Dir: graphsDir(cfg.Console.GraphsDir),
+	})
+	if err != nil {
+		_ = enrollLis.Close()
+		_ = sessionLis.Close()
+		// Cache failure is non-fatal — the alert detail page falls
+		// back to no-graph mode rather than refusing to render.
+		slog.Warn("app: alert flow-graph cache disabled", "err", err)
+		graphCache = nil
+	}
 	consoleSvc := console.New(console.Options{
 		Store:      pgStore,
 		Telem:      telem,
@@ -147,6 +159,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		// SLITHER_LISTENERS_ENROLL config + a public hostname; the
 		// listener bind alone is good enough for compose smoke.
 		DefaultEnrollServer: defaultEnrollServer(cfg.Listeners.Enroll),
+		GraphCache:          graphCache,
 	})
 	consoleSrv := &http.Server{
 		Addr:              cfg.Listeners.Console,
@@ -304,4 +317,15 @@ func defaultEnrollServer(bind string) string {
 		return "<server>" + bind
 	}
 	return bind
+}
+
+// graphsDir resolves the alert flow-graph cache directory. Empty
+// config falls back to /var/lib/slither/graphs (matches the systemd
+// unit's StateDirectory pattern); operators override per-deployment
+// via console.graphs_dir.
+func graphsDir(configured string) string {
+	if configured != "" {
+		return configured
+	}
+	return "/var/lib/slither/graphs"
 }

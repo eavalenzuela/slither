@@ -2,6 +2,7 @@ package console
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/t3rmit3/slither/server/internal/console/views"
+	"github.com/t3rmit3/slither/server/internal/graph"
 	"github.com/t3rmit3/slither/server/internal/store/pg"
 )
 
@@ -127,7 +129,79 @@ func (s *Server) alertDetail(w http.ResponseWriter, r *http.Request) {
 		AllowedNext: allowedNextStatuses(row.Status),
 		IsAnalyst:   role == pg.RoleAnalyst || role == pg.RoleAdmin,
 		Flash:       flash,
+		ShowGraph:   s.graphBuilder != nil && len(row.EventIDs) > 0,
 	}))
+}
+
+// alertGraph renders the detection flow graph for one alert as SVG.
+// The SVG is cached on disk + in memory keyed on (alert_id,
+// hash(event_ids)) so refreshing the detail page is a cheap read.
+//
+// Cache misses do the full DAG walk (CH lookups + D2 render). Builds
+// that exceed the alert's frozen event_ids invalidate naturally
+// because the cache key changes.
+func (s *Server) alertGraph(w http.ResponseWriter, r *http.Request) {
+	if s.graphBuilder == nil || s.graphCache == nil {
+		http.NotFound(w, r)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	row, err := s.store.GetAlert(r.Context(), id)
+	switch {
+	case errors.Is(err, pg.ErrAlertNotFound):
+		http.NotFound(w, r)
+		return
+	case err != nil:
+		http.Error(w, "load alert failed", http.StatusInternalServerError)
+		return
+	}
+
+	if len(row.EventIDs) == 0 {
+		http.Error(w, "alert has no events to graph", http.StatusNoContent)
+		return
+	}
+
+	key := graph.Key(row.ID, row.EventIDs)
+	if svg, ok := s.graphCache.Get(key); ok {
+		writeSVG(w, svg)
+		return
+	}
+
+	source, err := s.graphBuilder.Build(r.Context(), row.ID, row.EventIDs)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("build graph failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if source == "" {
+		http.Error(w, "no events to graph", http.StatusNoContent)
+		return
+	}
+
+	svg, err := graph.Render(r.Context(), source)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("render graph failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if err := s.graphCache.Put(key, svg); err != nil {
+		// Disk write failed — the SVG still renders this request,
+		// but log via the existing audit-log surface so an operator
+		// notices a chronically full StateDirectory. Best-effort.
+		_ = s.store.LogAudit(r.Context(), pg.AuditEntry{
+			ActorType: pg.ActorSystem,
+			Action:    "alert.graph.cache_write_failed",
+			Detail: map[string]any{
+				"alert_id": row.ID,
+				"err":      err.Error(),
+			},
+		})
+	}
+	writeSVG(w, svg)
+}
+
+func writeSVG(w http.ResponseWriter, svg []byte) {
+	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+	w.Header().Set("Cache-Control", "private, max-age=60")
+	_, _ = w.Write(svg)
 }
 
 // alertTransition handles POST /alerts/{id}/transition. The route is

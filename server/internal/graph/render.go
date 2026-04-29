@@ -19,6 +19,14 @@ import (
 	"oss.terrastruct.com/util-go/go2"
 )
 
+// renderMu serialises calls into d2lib.Compile + d2svg.Render. The
+// upstream textmeasure.Ruler caches glyph metrics in non-locked maps,
+// and the dagre layout's embedded JS runtime is single-threaded — both
+// race when invoked concurrently. Serialising here is acceptable
+// because rendered graphs are heavily cached (see Cache); the
+// serial-ised path only runs on miss.
+var renderMu sync.Mutex
+
 var (
 	rulerOnce sync.Once
 	rulerVal  *textmeasure.Ruler
@@ -40,6 +48,9 @@ func Render(ctx context.Context, source string) ([]byte, error) {
 	if source == "" {
 		return nil, errors.New("graph: empty source")
 	}
+
+	renderMu.Lock()
+	defer renderMu.Unlock()
 
 	ruler, err := sharedRuler()
 	if err != nil {

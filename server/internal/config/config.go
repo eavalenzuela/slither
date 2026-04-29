@@ -73,6 +73,10 @@ type MTLS struct {
 // Console configures the operator UI.
 type Console struct {
 	SessionKeyFile string `yaml:"session_key_file"`
+	// GraphsDir is the on-disk root for the alert flow-graph SVG
+	// cache (Phase 3 #64). Empty falls back to /var/lib/slither/graphs
+	// — matches the systemd unit's StateDirectory pattern.
+	GraphsDir string `yaml:"graphs_dir"`
 }
 
 // ErrInvalidConfig wraps every user-visible config error. Callers use

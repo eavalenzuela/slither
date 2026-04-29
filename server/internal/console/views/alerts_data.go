@@ -34,6 +34,10 @@ type AlertDetailData struct {
 	AllowedNext []pg.AlertStatus
 	IsAnalyst   bool
 	Flash       string
+	// ShowGraph signals whether to embed the alert flow-graph image
+	// (#64). False when the server was started without a graph cache
+	// or when the alert has no event_ids.
+	ShowGraph bool
 }
 
 // AlertsCursorLayout is the time format the /alerts pagination

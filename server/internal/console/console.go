@@ -24,6 +24,8 @@ import (
 
 	"github.com/t3rmit3/slither/server/internal/console/static"
 	"github.com/t3rmit3/slither/server/internal/console/views"
+	"github.com/t3rmit3/slither/server/internal/detect"
+	"github.com/t3rmit3/slither/server/internal/graph"
 	"github.com/t3rmit3/slither/server/internal/ingest"
 	"github.com/t3rmit3/slither/server/internal/store/ch"
 	"github.com/t3rmit3/slither/server/internal/store/pg"
@@ -46,6 +48,11 @@ type Options struct {
 	SessionKey          []byte
 	SessionTimeout      time.Duration
 	DefaultEnrollServer string
+	// GraphCache is the on-disk + in-memory SVG cache feeding the
+	// alert flow-graph render path (#64). Optional — when nil, the
+	// detail page omits the graph block entirely so the console
+	// still works on hosts without a writable StateDirectory.
+	GraphCache *graph.Cache
 }
 
 // Server is the chi.Router built around Options. New returns a stdlib
@@ -58,6 +65,8 @@ type Server struct {
 	sm                  *scs.SessionManager
 	mux                 *chi.Mux
 	defaultEnrollServer string
+	graphCache          *graph.Cache
+	graphBuilder        *detect.FlowGraphBuilder
 }
 
 // New constructs the console router. Panics on misconfiguration — a
@@ -93,6 +102,10 @@ func New(opts Options) *Server {
 		sm:                  sm,
 		mux:                 chi.NewRouter(),
 		defaultEnrollServer: opts.DefaultEnrollServer,
+		graphCache:          opts.GraphCache,
+	}
+	if opts.GraphCache != nil && opts.ChStore != nil {
+		s.graphBuilder = &detect.FlowGraphBuilder{Lookup: opts.ChStore}
 	}
 	s.routes()
 	return s
@@ -148,6 +161,9 @@ func (s *Server) routes() {
 		r.Get("/alerts/{id}", s.alertDetail)
 		r.With(s.RequireRole(pg.RoleAnalyst, pg.RoleAdmin)).
 			Post("/alerts/{id}/transition", s.alertTransition)
+		if s.graphBuilder != nil {
+			r.Get("/alerts/{id}/graph.svg", s.alertGraph)
+		}
 
 		// Enrolment-token UX (#45) — admin-only across the board.
 		r.With(s.RequireRole(pg.RoleAdmin)).Group(func(r chi.Router) {

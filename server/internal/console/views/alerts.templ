@@ -129,6 +129,13 @@ templ AlertDetail(d AlertDetailData) {
 				}
 			</dl>
 
+			if d.ShowGraph {
+				<h3>Detection flow</h3>
+				<div class="alert-flow-graph">
+					<img src={ alertGraphURL(d.Alert.ID) } alt="Detection flow graph" loading="lazy"/>
+				</div>
+			}
+
 			if d.IsAnalyst && len(d.AllowedNext) > 0 {
 				<h3>Transition</h3>
 				<form method="post" action={ templ.URL("/alerts/" + d.Alert.ID + "/transition") } class="transition-form">
@@ -153,6 +160,13 @@ templ AlertDetail(d AlertDetailData) {
 
 func alertDetailURL(id string) templ.SafeURL {
 	return templ.URL("/alerts/" + id)
+}
+
+// alertGraphURL builds the SVG endpoint URL for an alert's flow graph.
+// Kept as a templ-reachable helper so the detail page renders a stable
+// path the cache layer can key on.
+func alertGraphURL(id string) templ.SafeURL {
+	return templ.URL("/alerts/" + id + "/graph.svg")
 }
 
 func alertRuleLabel(a pg.AlertRow) string {
