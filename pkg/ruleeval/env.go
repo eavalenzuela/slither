@@ -20,6 +20,7 @@ import (
 type Env struct {
 	event  ocsf.Event
 	access Accessor
+	ioc    ruleast.IOCEnv // optional; enables `|ioc` predicate matching
 }
 
 // EnvFor returns an Env that resolves Sigma field names against the
@@ -28,6 +29,25 @@ type Env struct {
 // → table lookup is paid once per rule, not per event.
 func EnvFor(event ocsf.Event, access Accessor) *Env {
 	return &Env{event: event, access: access}
+}
+
+// EnvForWithIOC returns an Env that additionally resolves `|ioc`
+// predicate references via the supplied IOCEnv. Pass the agent's
+// ioc.Store (or the server detection engine's equivalent) to enable
+// IOC matching; passing nil falls back to plain EnvFor.
+func EnvForWithIOC(event ocsf.Event, access Accessor, ioc ruleast.IOCEnv) *Env {
+	return &Env{event: event, access: access, ioc: ioc}
+}
+
+// MatchIOC satisfies ruleast.IOCEnv when an IOC matcher is wired in.
+// Without one, IOC predicates evaluate false — matches the existing
+// "no-matcher means no-match" behaviour FieldPredicate.Eval enforces
+// at the AST level.
+func (e *Env) MatchIOC(feedID, value string) bool {
+	if e == nil || e.ioc == nil {
+		return false
+	}
+	return e.ioc.MatchIOC(feedID, value)
 }
 
 // Lookup returns the string values bound to a Sigma field on the
@@ -49,5 +69,10 @@ func (e *Env) Lookup(field string) ([]string, bool) {
 	return vs, true
 }
 
-// Compile-time check: *Env satisfies ruleast.Env.
-var _ ruleast.Env = (*Env)(nil)
+// Compile-time checks: *Env satisfies ruleast.Env (always) and
+// ruleast.IOCEnv (the IOC method is a no-op when no matcher is wired,
+// so the interface is satisfied unconditionally).
+var (
+	_ ruleast.Env    = (*Env)(nil)
+	_ ruleast.IOCEnv = (*Env)(nil)
+)

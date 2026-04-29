@@ -61,7 +61,7 @@ func loadRule(t *testing.T, repoRel string) *ruleast.Rule {
 // returns the number of DetectionFinding events emitted.
 func runOne(t *testing.T, rule *ruleast.Rule, ev *ocsf.ProcessActivity) int {
 	t.Helper()
-	rules, err := CompileRules([]*ruleast.Rule{rule}, nil)
+	rules, err := CompileRules([]*ruleast.Rule{rule}, nil, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}
@@ -620,7 +620,7 @@ func TestEyeexamPack_LinuxCore(t *testing.T) {
 // that rule.
 func runOneFile(t *testing.T, rule *ruleast.Rule, ev *ocsf.FileSystemActivity) int {
 	t.Helper()
-	rules, err := CompileRules([]*ruleast.Rule{rule}, nil)
+	rules, err := CompileRules([]*ruleast.Rule{rule}, nil, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}
@@ -808,7 +808,7 @@ func TestEyeexamPack_FileEvents(t *testing.T) {
 // and returns the number of matching DetectionFinding events emitted.
 func runOneNet(t *testing.T, rule *ruleast.Rule, ev *ocsf.NetworkActivity) int {
 	t.Helper()
-	rules, err := CompileRules([]*ruleast.Rule{rule}, nil)
+	rules, err := CompileRules([]*ruleast.Rule{rule}, nil, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}

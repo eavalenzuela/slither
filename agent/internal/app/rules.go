@@ -55,5 +55,5 @@ func loadRules(cfg *config.Config, telem *telemetry.Counters) ([]ruleengine.Comp
 		}
 		parsed = append(parsed, artefact.Rule)
 	}
-	return ruleengine.CompileRules(parsed, telem)
+	return ruleengine.CompileRules(parsed, telem, nil)
 }

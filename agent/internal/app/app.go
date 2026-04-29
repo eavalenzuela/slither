@@ -14,6 +14,7 @@ import (
 	"github.com/t3rmit3/slither/agent/internal/collector"
 	"github.com/t3rmit3/slither/agent/internal/config"
 	"github.com/t3rmit3/slither/agent/internal/enricher"
+	"github.com/t3rmit3/slither/agent/internal/ioc"
 	"github.com/t3rmit3/slither/agent/internal/output"
 
 	grpcsink "github.com/t3rmit3/slither/agent/internal/output/grpc"
@@ -50,13 +51,15 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		FileFilter:          cfg.Collectors.File,
 	})
 
+	iocStore := ioc.New()
+
 	rules, err := loadRules(cfg, telem)
 	if err != nil {
 		return fmt.Errorf("app: %w", err)
 	}
 	eng := ruleengine.New(rules, telem)
 
-	sink, err := newSink(cfg, telem, eng)
+	sink, err := newSink(cfg, telem, eng, iocStore)
 	if err != nil {
 		return fmt.Errorf("app: output sink: %w", err)
 	}
@@ -153,7 +156,7 @@ func isCancelled(err error, ctx context.Context) bool {
 // flow in #36) — a missing or empty file is a startup error, not a
 // silent degradation. eng is wired in so the sink's ServerMessage
 // receiver can apply server-pushed RuleSets via Engine.ReplaceRules.
-func newSink(cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engine) (output.Sink, error) {
+func newSink(cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engine, iocStore *ioc.Store) (output.Sink, error) {
 	switch cfg.Output.Kind {
 	case "stdout", "":
 		return output.NewStdoutJSONL(os.Stdout), nil
@@ -172,7 +175,7 @@ func newSink(cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engin
 			// emit is filled in below — applyRuleSetTo holds the
 			// indirection so the callback closes over the variable
 			// rather than the (still-nil) value at this point.
-			OnRuleSet: applyRuleSetTo(eng, telem, func(ws []string) {
+			OnRuleSet: applyRuleSetTo(eng, telem, iocStore, func(ws []string) {
 				if emit != nil {
 					emit(ws)
 				}
@@ -202,10 +205,10 @@ func newSink(cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engin
 //
 // emitDiag may be nil — in that case refusals still log locally but
 // don't reach the server; production wires the gRPC sink's emitter.
-func applyRuleSetTo(eng ruleengine.Engine, telem *telemetry.Counters, emitDiag func([]string)) func(*pb.RuleSet) {
+func applyRuleSetTo(eng ruleengine.Engine, telem *telemetry.Counters, iocStore *ioc.Store, emitDiag func([]string)) func(*pb.RuleSet) {
 	lastCount := -1
 	return func(rs *pb.RuleSet) {
-		compiled, warnings, err := compileRuleSet(rs, telem)
+		compiled, warnings, err := compileRuleSet(rs, telem, iocStore)
 		if err != nil {
 			slog.Error("ruleset apply",
 				"err", err,

@@ -81,7 +81,7 @@ func withFakeClock(scr *sigmaCompiledRule, fn func() time.Time) func() {
 // fifth crosses the >4 threshold and fires.
 func TestStatefulCountThresholdCrossing(t *testing.T) {
 	rule := compileFixture(t, sudoFloodSigma)
-	rules, err := CompileRules([]*ruleast.Rule{rule}, telemetry.NewCounters())
+	rules, err := CompileRules([]*ruleast.Rule{rule}, telemetry.NewCounters(), nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestStatefulCountThresholdCrossing(t *testing.T) {
 // from the count.
 func TestStatefulWindowExpires(t *testing.T) {
 	rule := compileFixture(t, sudoFloodSigma)
-	rules, err := CompileRules([]*ruleast.Rule{rule}, telemetry.NewCounters())
+	rules, err := CompileRules([]*ruleast.Rule{rule}, telemetry.NewCounters(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestStatefulWindowExpires(t *testing.T) {
 // hitting threshold doesn't make bob's count cross.
 func TestStatefulByUserPartitions(t *testing.T) {
 	rule := compileFixture(t, sudoByUserSigma)
-	rules, err := CompileRules([]*ruleast.Rule{rule}, telemetry.NewCounters())
+	rules, err := CompileRules([]*ruleast.Rule{rule}, telemetry.NewCounters(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestStatefulByUserPartitions(t *testing.T) {
 func TestStatefulCapEviction(t *testing.T) {
 	rule := compileFixture(t, sudoByUserSigma)
 	telem := telemetry.NewCounters()
-	rules, err := CompileRules([]*ruleast.Rule{rule}, telem)
+	rules, err := CompileRules([]*ruleast.Rule{rule}, telem, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestStatefulCapEviction(t *testing.T) {
 // timestamps have all expired so memory doesn't bloat between matches.
 func TestStatefulSweepReclaimsExpiredKeys(t *testing.T) {
 	rule := compileFixture(t, sudoByUserSigma)
-	rules, err := CompileRules([]*ruleast.Rule{rule}, telemetry.NewCounters())
+	rules, err := CompileRules([]*ruleast.Rule{rule}, telemetry.NewCounters(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestStatefulSweepReclaimsExpiredKeys(t *testing.T) {
 // TestStatefulRestartClearsState — a fresh CompileRules call produces
 // a rule with empty state, even if the underlying YAML is identical.
 func TestStatefulRestartClearsState(t *testing.T) {
-	first, err := CompileRules([]*ruleast.Rule{compileFixture(t, sudoByUserSigma)}, nil)
+	first, err := CompileRules([]*ruleast.Rule{compileFixture(t, sudoByUserSigma)}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestStatefulRestartClearsState(t *testing.T) {
 	}
 
 	// Simulate restart: build a brand-new compiled rule from the same YAML.
-	second, err := CompileRules([]*ruleast.Rule{compileFixture(t, sudoByUserSigma)}, nil)
+	second, err := CompileRules([]*ruleast.Rule{compileFixture(t, sudoByUserSigma)}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestStatefulRestartClearsState(t *testing.T) {
 // Match calls. -race catches missing synchronisation.
 func TestStatefulConcurrentTickRace(t *testing.T) {
 	rule := compileFixture(t, sudoByUserSigma)
-	rules, err := CompileRules([]*ruleast.Rule{rule}, telemetry.NewCounters())
+	rules, err := CompileRules([]*ruleast.Rule{rule}, telemetry.NewCounters(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

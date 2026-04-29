@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 
+	"github.com/t3rmit3/slither/agent/internal/ioc"
 	"github.com/t3rmit3/slither/agent/internal/ruleengine"
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
 	"github.com/t3rmit3/slither/pkg/ruleast"
@@ -37,12 +38,29 @@ const (
 // emitted to the server via DiagReport so operators can see refusals
 // without scraping agent stderr.
 //
+// IOC feeds (#67) are loaded into iocStore *before* the compile pass
+// so `|ioc:<feed_id>` references resolve against the freshly-loaded
+// snapshot. iocStore may be nil for callers that don't need IOC
+// matching (legacy local-only rule packs).
+//
 // Compile errors on individual rules are skipped with their UID added
 // to warnings so callers can attribute without re-walking the slice.
-func compileRuleSet(rs *pb.RuleSet, telem *telemetry.Counters) (compiled []ruleengine.CompiledRule, warnings []string, err error) {
+func compileRuleSet(rs *pb.RuleSet, telem *telemetry.Counters, iocStore *ioc.Store) (compiled []ruleengine.CompiledRule, warnings []string, err error) {
 	if rs == nil {
 		return nil, nil, nil
 	}
+
+	// Load feeds first so the registry resolves on this same call.
+	// Apply is safe even when iocStore is nil — we just skip it.
+	if iocStore != nil {
+		iocStore.Apply(rs.GetIocFeeds())
+	}
+
+	var compileOpts []ruleast.CompileOption
+	if iocStore != nil {
+		compileOpts = append(compileOpts, ruleast.WithIOCRegistry(iocStore))
+	}
+
 	parsed := make([]*ruleast.Rule, 0, len(rs.GetRules()))
 	for _, er := range rs.GetRules() {
 		v := ruleast.ASTVersion(er.GetAstVersion())
@@ -58,7 +76,7 @@ func compileRuleSet(rs *pb.RuleSet, telem *telemetry.Counters) (compiled []rulee
 			warnings = append(warnings, formatWarning(er.GetRuleId(), reasonStateCapTooLarge))
 			continue
 		}
-		artefact, _, class, cerr := ruleast.Compile(er.GetCompiledAst())
+		artefact, _, class, cerr := ruleast.Compile(er.GetCompiledAst(), compileOpts...)
 		if cerr != nil {
 			warnings = append(warnings, formatWarning(er.GetRuleId(), reasonCompileFailed))
 			continue
@@ -71,7 +89,11 @@ func compileRuleSet(rs *pb.RuleSet, telem *telemetry.Counters) (compiled []rulee
 		}
 		parsed = append(parsed, artefact.Rule)
 	}
-	out, err := ruleengine.CompileRules(parsed, telem)
+	var matcher ruleast.IOCEnv
+	if iocStore != nil {
+		matcher = iocStore
+	}
+	out, err := ruleengine.CompileRules(parsed, telem, matcher)
 	if err != nil {
 		return nil, warnings, fmt.Errorf("compileRuleSet: wrap: %w", err)
 	}

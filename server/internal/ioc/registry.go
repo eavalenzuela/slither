@@ -23,6 +23,7 @@ import (
 // store without spinning up a database.
 type FeedSource interface {
 	ListIOCFeeds(ctx context.Context) ([]pg.IOCFeed, error)
+	GetIOCFeedEntries(ctx context.Context, feedID string) (pg.IOCFeedWithEntries, error)
 }
 
 // Registry caches feed metadata for the compile-time gate. Concurrent
@@ -38,8 +39,9 @@ type snapshot struct {
 }
 
 type feedEntry struct {
-	count int
-	kind  string
+	count   int
+	kind    string
+	entries []string
 }
 
 // New constructs an empty registry. Call Refresh once before serving
@@ -65,9 +67,18 @@ func (r *Registry) Refresh(ctx context.Context) (int, error) {
 	}
 	next := &snapshot{feeds: make(map[string]feedEntry, len(feeds))}
 	for _, f := range feeds {
+		// Loading entries upfront keeps the wire-build path read-only
+		// against the snapshot (no per-push pg query). Memory cost is
+		// bounded by the per-feed cap × feed count; production tuning
+		// notes live in ADR-0018.
+		full, ferr := r.src.GetIOCFeedEntries(ctx, f.FeedID)
+		if ferr != nil {
+			return 0, fmt.Errorf("ioc.Registry.Refresh: load %q: %w", f.FeedID, ferr)
+		}
 		next.feeds[f.FeedID] = feedEntry{
-			count: f.EntryCount,
-			kind:  string(f.Kind),
+			count:   full.EntryCount,
+			kind:    string(full.Kind),
+			entries: full.Entries,
 		}
 	}
 	r.snapshot.Store(next)
@@ -87,6 +98,23 @@ func (r *Registry) Lookup(feedID string) (entryCount int, kind string, ok bool) 
 		return 0, "", false
 	}
 	return entry.count, entry.kind, true
+}
+
+// Entries returns the cached feed entries + kind for feedID. Used by
+// the control hub (Phase 3 #67) to populate RuleSet.IocFeeds before
+// each push so the agent has the feed contents in hand alongside the
+// rule that references them. Returns (nil, "", false) for unknown
+// feeds.
+func (r *Registry) Entries(feedID string) (entries []string, kind string, ok bool) {
+	snap := r.snapshot.Load()
+	if snap == nil {
+		return nil, "", false
+	}
+	entry, present := snap.feeds[feedID]
+	if !present {
+		return nil, "", false
+	}
+	return entry.entries, entry.kind, true
 }
 
 // Compile-time guard that Registry implements ruleast.IOCRegistry.

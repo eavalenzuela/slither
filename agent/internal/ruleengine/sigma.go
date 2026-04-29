@@ -30,7 +30,10 @@ const stateCapDefault uint32 = 1024
 //
 // telem may be nil — in that case state evictions go uncounted but the
 // hot path still works (used by tests that don't exercise telemetry).
-func CompileRules(rules []*ruleast.Rule, telem *telemetry.Counters) ([]CompiledRule, error) {
+//
+// ioc may be nil — rules without `|ioc` predicates evaluate fine; rules
+// with them only fire when ioc is wired and the matched feed is loaded.
+func CompileRules(rules []*ruleast.Rule, telem *telemetry.Counters, ioc ruleast.IOCEnv) ([]CompiledRule, error) {
 	out := make([]CompiledRule, 0, len(rules))
 	for _, r := range rules {
 		if r == nil {
@@ -44,7 +47,7 @@ func CompileRules(rules []*ruleast.Rule, telem *telemetry.Counters) ([]CompiledR
 		if acc == nil {
 			return nil, fmt.Errorf("ruleengine: rule %q: no field taxonomy for %q", r.ID, r.Category)
 		}
-		scr := &sigmaCompiledRule{r: r, class: cls, access: acc, now: time.Now}
+		scr := &sigmaCompiledRule{r: r, class: cls, access: acc, ioc: ioc, now: time.Now}
 		if r.Aggregation != nil {
 			if r.Aggregation.TimeframeSecs == 0 {
 				return nil, fmt.Errorf("ruleengine: rule %q: stateful rule missing timeframe", r.ID)
@@ -61,7 +64,8 @@ type sigmaCompiledRule struct {
 	r      *ruleast.Rule
 	class  ocsf.ClassID
 	access ruleeval.Accessor
-	state  *ruleState // nil for stateless rules
+	state  *ruleState     // nil for stateless rules
+	ioc    ruleast.IOCEnv // nil for rules without `|ioc` predicates
 	now    func() time.Time
 }
 
@@ -73,7 +77,7 @@ func (s *sigmaCompiledRule) Match(e ocsf.Event) bool {
 	if e.ClassID() != s.class {
 		return false
 	}
-	env := ruleeval.EnvFor(e, s.access)
+	env := ruleeval.EnvForWithIOC(e, s.access, s.ioc)
 	if !s.r.Match(env) {
 		return false
 	}

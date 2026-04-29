@@ -9,8 +9,9 @@ import (
 )
 
 type stubFeedSource struct {
-	feeds []pg.IOCFeed
-	err   error
+	feeds   []pg.IOCFeed
+	entries map[string][]string
+	err     error
 }
 
 func (s *stubFeedSource) ListIOCFeeds(_ context.Context) ([]pg.IOCFeed, error) {
@@ -18,6 +19,22 @@ func (s *stubFeedSource) ListIOCFeeds(_ context.Context) ([]pg.IOCFeed, error) {
 		return nil, s.err
 	}
 	return s.feeds, nil
+}
+
+func (s *stubFeedSource) GetIOCFeedEntries(_ context.Context, feedID string) (pg.IOCFeedWithEntries, error) {
+	if s.err != nil {
+		return pg.IOCFeedWithEntries{}, s.err
+	}
+	for _, f := range s.feeds {
+		if f.FeedID != feedID {
+			continue
+		}
+		return pg.IOCFeedWithEntries{
+			IOCFeed: f,
+			Entries: s.entries[feedID],
+		}, nil
+	}
+	return pg.IOCFeedWithEntries{}, pg.ErrIOCFeedNotFound
 }
 
 func TestRegistry_LookupReturnsMissForUnknown(t *testing.T) {
@@ -30,10 +47,16 @@ func TestRegistry_LookupReturnsMissForUnknown(t *testing.T) {
 
 func TestRegistry_RefreshAndLookup(t *testing.T) {
 	t.Parallel()
-	src := &stubFeedSource{feeds: []pg.IOCFeed{
-		{FeedID: "ips", EntryCount: 4, Kind: pg.IOCKindIPv4},
-		{FeedID: "hashes", EntryCount: 100_001, Kind: pg.IOCKindSHA256},
-	}}
+	src := &stubFeedSource{
+		feeds: []pg.IOCFeed{
+			{FeedID: "ips", EntryCount: 4, Kind: pg.IOCKindIPv4},
+			{FeedID: "hashes", EntryCount: 100_001, Kind: pg.IOCKindSHA256},
+		},
+		entries: map[string][]string{
+			"ips":    {"203.0.113.1", "203.0.113.2"},
+			"hashes": nil,
+		},
+	}
 	r := New(src)
 	n, err := r.Refresh(context.Background())
 	if err != nil {
@@ -54,9 +77,12 @@ func TestRegistry_RefreshAndLookup(t *testing.T) {
 
 func TestRegistry_RefreshErrorKeepsPreviousSnapshot(t *testing.T) {
 	t.Parallel()
-	src := &stubFeedSource{feeds: []pg.IOCFeed{
-		{FeedID: "alpha", EntryCount: 1, Kind: pg.IOCKindDomain},
-	}}
+	src := &stubFeedSource{
+		feeds: []pg.IOCFeed{
+			{FeedID: "alpha", EntryCount: 1, Kind: pg.IOCKindDomain},
+		},
+		entries: map[string][]string{"alpha": {"evil.example.com"}},
+	}
 	r := New(src)
 	if _, err := r.Refresh(context.Background()); err != nil {
 		t.Fatalf("first Refresh: %v", err)

@@ -55,12 +55,14 @@ type RuleSource interface {
 }
 
 // IOCRegistrar refreshes + looks up IOC feed sizes for the compiler's
-// predicate-3 gate. *ioc.Registry satisfies it. Optional — when nil,
-// rules referencing `|ioc:<feed_id>` predicates fail compile and are
-// dropped from the wire payload (rather than silently slipping past
-// ADR-0018).
+// predicate-3 gate. Entries returns the cached feed contents so the
+// hub can populate RuleSet.IocFeeds for the agent push (#67).
+// *ioc.Registry satisfies it. Optional — when nil, rules referencing
+// `|ioc:<feed_id>` predicates fail compile and are dropped from the
+// wire payload (rather than silently slipping past ADR-0018).
 type IOCRegistrar interface {
 	Refresh(ctx context.Context) (int, error)
+	Entries(feedID string) (entries []string, kind string, ok bool)
 	ruleast.IOCRegistry
 }
 
@@ -200,12 +202,13 @@ func (h *Hub) publishOne(ch chan *pb.RuleSet, rs *pb.RuleSet) {
 //
 // Per-rule classification is logged at INFO via the slog facade (#49)
 // so operators can audit what landed where without scraping pg.
-func buildRuleSet(rows []pg.Rule, version uint64, iocs ruleast.IOCRegistry) (rs *pb.RuleSet, skipped int) {
+func buildRuleSet(rows []pg.Rule, version uint64, iocs IOCRegistrar) (rs *pb.RuleSet, skipped int) {
 	rules := make([]*pb.EdgeRule, 0, len(rows))
 	var compileOpts []ruleast.CompileOption
 	if iocs != nil {
 		compileOpts = append(compileOpts, ruleast.WithIOCRegistry(iocs))
 	}
+	feedRefs := make(map[string]struct{})
 	for _, r := range rows {
 		artefact, _, class, err := ruleast.Compile([]byte(r.SourceYAML), compileOpts...)
 		if err != nil {
@@ -236,6 +239,9 @@ func buildRuleSet(rows []pg.Rule, version uint64, iocs ruleast.IOCRegistry) (rs 
 			er.StateWindowSecs = artefact.StateWindowSecs
 			er.StateCap = artefact.StateCap
 		}
+		for _, f := range artefact.IOCFeeds {
+			feedRefs[f] = struct{}{}
+		}
 		slog.Info("hub: include rule",
 			"rule_uid", r.UID,
 			"classification", string(class),
@@ -244,12 +250,64 @@ func buildRuleSet(rows []pg.Rule, version uint64, iocs ruleast.IOCRegistry) (rs 
 			"state_cap", er.StateCap)
 		rules = append(rules, er)
 	}
+
+	// Bundle the entries for every IOC feed any included edge rule
+	// references. Agents apply these to their in-memory store before
+	// re-compiling rules, so a `|ioc:foo` predicate has its data ready
+	// the moment the rule lands. Feeds are bundled only when they're
+	// actually referenced — unreferenced feeds stay server-side until
+	// a rule pulls them in.
+	var iocFeeds []*pb.IocFeed
+	if len(feedRefs) > 0 && iocs != nil {
+		iocFeeds = make([]*pb.IocFeed, 0, len(feedRefs))
+		for feedID := range feedRefs {
+			entries, kindStr, ok := iocs.Entries(feedID)
+			if !ok {
+				slog.Warn("hub: feed referenced but missing in registry",
+					"feed_id", feedID)
+				continue
+			}
+			iocFeeds = append(iocFeeds, &pb.IocFeed{
+				FeedId:  feedID,
+				Kind:    feedKindToProto(kindStr),
+				Entries: entries,
+			})
+		}
+		// Stable order so wire payloads are deterministic across pushes.
+		sortFeeds(iocFeeds)
+	}
+
 	return &pb.RuleSet{
 		ControlId:  fmt.Sprintf("ruleset-%d", version),
 		Version:    fmt.Sprintf("%d", version),
 		CompiledAt: timestamppb.New(time.Now()),
 		Rules:      rules,
+		IocFeeds:   iocFeeds,
 	}, skipped
+}
+
+func feedKindToProto(s string) pb.FeedKind {
+	switch s {
+	case "sha256":
+		return pb.FeedKind_FEED_KIND_SHA256
+	case "ipv4":
+		return pb.FeedKind_FEED_KIND_IPV4
+	case "ipv6":
+		return pb.FeedKind_FEED_KIND_IPV6
+	case "domain":
+		return pb.FeedKind_FEED_KIND_DOMAIN
+	case "filename":
+		return pb.FeedKind_FEED_KIND_FILENAME
+	}
+	return pb.FeedKind_FEED_KIND_UNSPECIFIED
+}
+
+func sortFeeds(in []*pb.IocFeed) {
+	for i := 1; i < len(in); i++ {
+		for j := i; j > 0 && in[j-1].GetFeedId() > in[j].GetFeedId(); j-- {
+			in[j-1], in[j] = in[j], in[j-1]
+		}
+	}
 }
 
 func ruleDisplayName(r pg.Rule, compiled *ruleast.Rule) string {

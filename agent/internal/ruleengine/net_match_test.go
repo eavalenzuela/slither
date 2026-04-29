@@ -50,7 +50,7 @@ func netActivityFixture(proto, dstIP string, dstPort uint16, exe string) *ocsf.N
 }
 
 func TestNetworkRuleFiresDetection(t *testing.T) {
-	compiled, err := CompileRules([]*ruleast.Rule{compileFixture(t, netConnectSigma)}, nil)
+	compiled, err := CompileRules([]*ruleast.Rule{compileFixture(t, netConnectSigma)}, nil, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestNetworkRuleFiresDetection(t *testing.T) {
 }
 
 func TestNetworkRuleNoMatchOnDifferentPort(t *testing.T) {
-	compiled, err := CompileRules([]*ruleast.Rule{compileFixture(t, netConnectSigma)}, nil)
+	compiled, err := CompileRules([]*ruleast.Rule{compileFixture(t, netConnectSigma)}, nil, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}

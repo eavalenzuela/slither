@@ -72,7 +72,7 @@ detection:
 
 func TestEngineEmitsEventAndFinding(t *testing.T) {
 	rule := compileFixture(t, curlSigma)
-	rules, err := CompileRules([]*ruleast.Rule{rule, compileFixture(t, noiseSigma)}, nil)
+	rules, err := CompileRules([]*ruleast.Rule{rule, compileFixture(t, noiseSigma)}, nil, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}
@@ -136,7 +136,7 @@ detection:
     TargetFilename|startswith: /tmp/
   condition: sel
 `)
-	rules, err := CompileRules([]*ruleast.Rule{procRule, fileRule}, nil)
+	rules, err := CompileRules([]*ruleast.Rule{procRule, fileRule}, nil, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}
@@ -191,7 +191,7 @@ detection:
     User: root
   condition: sel
 `)
-	rules, err := CompileRules([]*ruleast.Rule{expensive, cheap}, nil)
+	rules, err := CompileRules([]*ruleast.Rule{expensive, cheap}, nil, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}
@@ -207,7 +207,7 @@ detection:
 
 func TestEngineDetectionQueueFullExits(t *testing.T) {
 	rule := compileFixture(t, curlSigma)
-	rules, err := CompileRules([]*ruleast.Rule{rule}, nil)
+	rules, err := CompileRules([]*ruleast.Rule{rule}, nil, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}
@@ -236,14 +236,14 @@ func TestCompileRulesRejectsUnknownCategory(t *testing.T) {
 	// reject it; we build the struct directly to prove the engine's own
 	// guard also catches it — defence in depth.
 	r := &ruleast.Rule{ID: "zz", Category: ruleast.Category("ddos_packet_flood")}
-	if _, err := CompileRules([]*ruleast.Rule{r}, nil); err == nil {
+	if _, err := CompileRules([]*ruleast.Rule{r}, nil, nil); err == nil {
 		t.Fatalf("expected CompileRules to reject unknown category")
 	}
 }
 
 func TestReplaceRulesSwapsIndex(t *testing.T) {
 	start := compileFixture(t, curlSigma)
-	startCompiled, err := CompileRules([]*ruleast.Rule{start}, nil)
+	startCompiled, err := CompileRules([]*ruleast.Rule{start}, nil, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestReplaceRulesSwapsIndex(t *testing.T) {
 func TestReplaceRulesCoalescesBursts(t *testing.T) {
 	eng := New(nil, telemetry.NewCounters()).(*engine)
 	rule := compileFixture(t, curlSigma)
-	compiled, err := CompileRules([]*ruleast.Rule{rule}, nil)
+	compiled, err := CompileRules([]*ruleast.Rule{rule}, nil, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}

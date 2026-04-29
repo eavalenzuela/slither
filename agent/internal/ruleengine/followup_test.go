@@ -13,7 +13,7 @@ import (
 // Followup events are deferred enrichments of prior events; the original has
 // already been rule-matched and re-matching would double-count detections.
 func TestEngineSkipsFollowupEvents(t *testing.T) {
-	rules, err := CompileRules([]*ruleast.Rule{compileFixture(t, curlSigma)}, nil)
+	rules, err := CompileRules([]*ruleast.Rule{compileFixture(t, curlSigma)}, nil, nil)
 	if err != nil {
 		t.Fatalf("CompileRules: %v", err)
 	}
