@@ -1,0 +1,25 @@
+title: Shell exec immediately followed by outbound net connect
+id: 8b7c4d00-0004-4000-8000-000000000401
+status: experimental
+description: |
+  A shell exec (bash/sh/dash) within a few seconds of an outbound TCP
+  connect by the same actor. Server-only because `near` correlates
+  two streams (process_creation + network_connection) the agent can't
+  see in isolation — ADR-0018 predicate 1.
+level: high
+tags:
+  - attack.execution
+  - attack.t1059
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  shell_exec:
+    Image|endswith:
+      - /bash
+      - /sh
+      - /dash
+  net_connect:
+    Initiated: 'true'
+  condition: shell_exec near net_connect
+timeframe: 10s

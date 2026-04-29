@@ -1,0 +1,31 @@
+=== Phase 3 #70 alerts state ===
+
+--- alerts by rule_uid ---
+               rule_uid               | count 
+--------------------------------------+-------
+ 8b7c4d00-0001-4000-8000-000000000001 |   168
+ 8b7c4d00-0001-4000-8000-000000000008 |    12
+ 8b7c4d00-0001-4000-8000-000000000013 |    12
+ 8b7c4d00-0001-4000-8000-000000000018 |    24
+ 8b7c4d00-0003-4000-8000-000000000301 |    46
+ 8b7c4d00-0003-4000-8000-000000000302 |    34
+(6 rows)
+
+
+--- alerts by host_id ---
+                  hostname                   | count 
+---------------------------------------------+-------
+ ip-172-31-19-7                              |   100
+ ip-172-31-26-27                             |   100
+ ip-172-31-31-200.us-west-2.compute.internal |    96
+(3 rows)
+
+
+--- DetectionFinding events in CH ---
+bcd9c963-60ea-421c-8b2f-71ce29fcf29c	100
+448b6b7f-0070-4888-9859-464920e2e8e5	100
+56f4dd23-b1d3-44eb-9c58-4cadfc2214c5	96
+
+--- detect engine state ---
+slither-server  | time=2026-04-29T21:17:05.982Z level=INFO msg="detect: refreshed" plan_count=0 skipped=0 max_keys_per_rule=10000
+slither-server  | time=2026-04-29T21:40:52.735Z level=INFO msg="detect: refreshed" plan_count=3 skipped=1 max_keys_per_rule=10000

@@ -1,0 +1,57 @@
+=== Phase 3 #70 rule push ===
+
+--- pg state ---
+                 uid                  | classification 
+--------------------------------------+----------------
+ 8b7c4d00-0001-4000-8000-000000000001 | edge_only
+ 8b7c4d00-0001-4000-8000-000000000008 | edge_only
+ 8b7c4d00-0001-4000-8000-00000000000d | edge_only
+ 8b7c4d00-0001-4000-8000-000000000013 | edge_only
+ 8b7c4d00-0001-4000-8000-000000000018 | edge_only
+ 8b7c4d00-0003-4000-8000-000000000301 | edge_only
+ 8b7c4d00-0003-4000-8000-000000000302 | edge_only
+ 8b7c4d00-0003-4000-8000-000000000303 | edge_only
+ 8b7c4d00-0004-4000-8000-000000000401 | server_only
+ 8b7c4d00-0004-4000-8000-000000000402 | server_only
+ 8b7c4d00-0004-4000-8000-000000000403 | server_only
+ 8b7c4d00-0004-4000-8000-000000000404 | server_only
+ 8b7c4d00-0005-4000-8000-000000000501 | edge_only
+ 8b7c4d00-0005-4000-8000-000000000502 | edge_only
+(14 rows)
+
+
+--- IOC feeds ---
+         feed_id         |  kind  | cardinality 
+-------------------------+--------+-------------
+ bad-hashes              | sha256 |           3
+ bad-ips                 | ipv4   |           7
+ oversize-threat-domains | domain |      100001
+(3 rows)
+
+
+--- hub broadcast (latest refresh) ---
+slither-server  | time=2026-04-29T21:32:47.549Z level=INFO msg="hub: include rule" rule_uid=8b7c4d00-0003-4000-8000-000000000301 classification=edge_only ast_version=2 state_window_secs=60 state_cap=1024
+slither-server  | time=2026-04-29T21:32:47.549Z level=INFO msg="hub: include rule" rule_uid=8b7c4d00-0003-4000-8000-000000000302 classification=edge_only ast_version=2 state_window_secs=60 state_cap=1024
+slither-server  | time=2026-04-29T21:32:47.549Z level=INFO msg="hub: include rule" rule_uid=8b7c4d00-0003-4000-8000-000000000303 classification=edge_only ast_version=2 state_window_secs=60 state_cap=1024
+slither-server  | time=2026-04-29T21:32:47.550Z level=INFO msg="hub: skip rule (server-only)" rule_uid=8b7c4d00-0004-4000-8000-000000000401 classification=server_only
+slither-server  | time=2026-04-29T21:32:47.550Z level=INFO msg="hub: skip rule (server-only)" rule_uid=8b7c4d00-0004-4000-8000-000000000402 classification=server_only
+slither-server  | time=2026-04-29T21:32:47.550Z level=INFO msg="hub: skip rule (server-only)" rule_uid=8b7c4d00-0004-4000-8000-000000000403 classification=server_only
+slither-server  | time=2026-04-29T21:32:47.550Z level=INFO msg="hub: skip rule (server-only)" rule_uid=8b7c4d00-0004-4000-8000-000000000404 classification=server_only
+slither-server  | time=2026-04-29T21:32:47.550Z level=INFO msg="hub: include rule" rule_uid=8b7c4d00-0005-4000-8000-000000000501 classification=edge_only ast_version=1 state_window_secs=0 state_cap=0
+slither-server  | time=2026-04-29T21:32:47.550Z level=INFO msg="hub: include rule" rule_uid=8b7c4d00-0005-4000-8000-000000000502 classification=edge_only ast_version=1 state_window_secs=0 state_cap=0
+slither-server  | time=2026-04-29T21:32:47.550Z level=INFO msg="hub: refreshed" rule_count=10 skipped=4 version=46 subscribers=3
+slither-server  | time=2026-04-29T21:33:06.001Z level=INFO msg="hub: include rule" rule_uid=8b7c4d00-0001-4000-8000-000000000001 classification=edge_only ast_version=1 state_window_secs=0 state_cap=0
+slither-server  | time=2026-04-29T21:33:06.001Z level=INFO msg="hub: include rule" rule_uid=8b7c4d00-0001-4000-8000-000000000008 classification=edge_only ast_version=1 state_window_secs=0 state_cap=0
+slither-server  | time=2026-04-29T21:33:06.001Z level=INFO msg="hub: include rule" rule_uid=8b7c4d00-0001-4000-8000-00000000000d classification=edge_only ast_version=1 state_window_secs=0 state_cap=0
+slither-server  | time=2026-04-29T21:33:06.001Z level=INFO msg="hub: include rule" rule_uid=8b7c4d00-0001-4000-8000-000000000013 classification=edge_only ast_version=1 state_window_secs=0 state_cap=0
+slither-server  | time=2026-04-29T21:33:06.002Z level=INFO msg="hub: include rule" rule_uid=8b7c4d00-0001-4000-8000-000000000018 classification=edge_only ast_version=1 state_window_secs=0 state_cap=0
+slither-server  | time=2026-04-29T21:33:06.002Z level=INFO msg="hub: include rule" rule_uid=8b7c4d00-0003-4000-8000-000000000301 classification=edge_only ast_version=2 state_window_secs=60 state_cap=1024
+slither-server  | time=2026-04-29T21:33:06.002Z level=INFO msg="hub: include rule" rule_uid=8b7c4d00-0003-4000-8000-000000000302 classification=edge_only ast_version=2 state_window_secs=60 state_cap=1024
+slither-server  | time=2026-04-29T21:33:06.002Z level=INFO msg="hub: include rule" rule_uid=8b7c4d00-0003-4000-8000-000000000303 classification=edge_only ast_version=2 state_window_secs=60 state_cap=1024
+slither-server  | time=2026-04-29T21:33:06.002Z level=INFO msg="hub: skip rule (server-only)" rule_uid=8b7c4d00-0004-4000-8000-000000000401 classification=server_only
+slither-server  | time=2026-04-29T21:33:06.002Z level=INFO msg="hub: skip rule (server-only)" rule_uid=8b7c4d00-0004-4000-8000-000000000402 classification=server_only
+slither-server  | time=2026-04-29T21:33:06.002Z level=INFO msg="hub: skip rule (server-only)" rule_uid=8b7c4d00-0004-4000-8000-000000000403 classification=server_only
+slither-server  | time=2026-04-29T21:33:06.002Z level=INFO msg="hub: skip rule (server-only)" rule_uid=8b7c4d00-0004-4000-8000-000000000404 classification=server_only
+slither-server  | time=2026-04-29T21:33:06.002Z level=INFO msg="hub: include rule" rule_uid=8b7c4d00-0005-4000-8000-000000000501 classification=edge_only ast_version=1 state_window_secs=0 state_cap=0
+slither-server  | time=2026-04-29T21:33:06.002Z level=INFO msg="hub: include rule" rule_uid=8b7c4d00-0005-4000-8000-000000000502 classification=edge_only ast_version=1 state_window_secs=0 state_cap=0
+slither-server  | time=2026-04-29T21:33:06.002Z level=INFO msg="hub: refreshed" rule_count=10 skipped=4 version=47 subscribers=3

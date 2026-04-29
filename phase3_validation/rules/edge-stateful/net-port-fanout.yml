@@ -1,0 +1,19 @@
+title: TCP fan-out to single dst port (10+ unique IPs within 60 s)
+id: 8b7c4d00-0003-4000-8000-000000000303
+status: experimental
+description: |
+  Connections to ten or more distinct destination IPs on a single
+  outbound port from one host inside a minute. Lateral-movement /
+  scan signal; bounded-stateful edge rule keyed on DstPort.
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1046
+logsource:
+  product: linux
+  category: network_connection
+detection:
+  selection:
+    Initiated: 'true'
+  condition: selection | count() by DstPort > 10
+timeframe: 60s

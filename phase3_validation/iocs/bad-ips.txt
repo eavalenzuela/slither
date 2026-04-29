@@ -1,0 +1,11 @@
+# Curated test feed for the edge IOC validation. Documentation-only IPs
+# (RFC 5737 TEST-NET-3) so we don't accidentally reach a real host
+# during the scenario. The first entry is the one the scenario script
+# connects to.
+203.0.113.5
+203.0.113.6
+203.0.113.7
+198.51.100.10
+198.51.100.11
+192.0.2.1
+192.0.2.2

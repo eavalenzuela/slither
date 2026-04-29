@@ -1,0 +1,19 @@
+title: File creation matching known-bad SHA-256 (edge IOC match)
+id: 8b7c4d00-0005-4000-8000-000000000502
+status: experimental
+description: |
+  File create / modify whose hash matches the bad-hashes feed.
+  Feed size stays inside the 100k cap so the rule rides edge-
+  resident; runtime resolves SHA-256 set membership in O(1).
+level: high
+tags:
+  - attack.execution
+  - attack.t1204.002
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection:
+    Hashes|ioc:
+      - bad-hashes
+  condition: selection

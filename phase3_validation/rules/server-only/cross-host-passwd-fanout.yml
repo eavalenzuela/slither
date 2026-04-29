@@ -1,0 +1,20 @@
+title: /etc/passwd reads observed across hosts within 5 minutes
+id: 8b7c4d00-0004-4000-8000-000000000402
+status: experimental
+description: |
+  Passwd reads firing on multiple hosts inside a 5-minute window —
+  a credential-harvesting fan-out signal that no single agent can
+  see. cross_host: true forces ServerOnly per ADR-0018 predicate 1.
+level: high
+tags:
+  - attack.credential-access
+  - attack.t1003
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection:
+    TargetFilename|endswith: /etc/passwd
+  condition: selection | count() by HostId > 3
+timeframe: 5m
+cross_host: true

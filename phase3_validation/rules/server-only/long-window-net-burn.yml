@@ -1,0 +1,21 @@
+title: Sustained outbound on dst-port 443 (>100 / 1 hour, by host)
+id: 8b7c4d00-0004-4000-8000-000000000403
+status: experimental
+description: |
+  More than 100 outbound TCP-443 connections from a single host in
+  one hour. Window exceeds the agent's bounded-stateful 300 s cap,
+  so the rule classifies ServerOnly per ADR-0018 predicate 2 and
+  evaluates on the server detection engine.
+level: medium
+tags:
+  - attack.command-and-control
+  - attack.t1071
+logsource:
+  product: linux
+  category: network_connection
+detection:
+  selection:
+    DstPort: 443
+    Initiated: 'true'
+  condition: selection | count() by HostId > 100
+timeframe: 1h

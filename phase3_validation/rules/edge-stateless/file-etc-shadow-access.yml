@@ -1,0 +1,19 @@
+title: /etc/shadow accessed outside core utilities
+id: 8b7c4d00-0001-4000-8000-00000000000d
+description: Read/write to /etc/shadow by anything other than core auth utilities.
+level: high
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection:
+    TargetFilename: /etc/shadow
+  allowed:
+    Image|endswith:
+      - /passwd
+      - /chage
+      - /usermod
+      - /sshd
+      - /pam_unix.so
+      - /login
+  condition: selection and not allowed

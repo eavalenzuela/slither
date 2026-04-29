@@ -1,0 +1,20 @@
+title: Outbound TCP to known-bad IP (edge IOC match)
+id: 8b7c4d00-0005-4000-8000-000000000501
+status: experimental
+description: |
+  Connect to a destination IP listed in the curated bad-ips feed.
+  The feed is small (≤ 100k IPv4 entries), so the rule stays edge-
+  resident and fires without a server round-trip.
+level: high
+tags:
+  - attack.command-and-control
+  - attack.t1071
+logsource:
+  product: linux
+  category: network_connection
+detection:
+  selection:
+    DstAddr|ioc:
+      - bad-ips
+    Initiated: 'true'
+  condition: selection

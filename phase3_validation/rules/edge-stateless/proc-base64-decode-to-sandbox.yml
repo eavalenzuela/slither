@@ -1,0 +1,25 @@
+title: base64 decode written into a world-writable dir
+id: 8b7c4d00-0001-4000-8000-000000000013
+status: experimental
+description: |
+  base64 invoked with -d / --decode while the same command line writes
+  into /tmp or /dev/shm. Strong indicator of staged-payload deobfuscation
+  (T1140) prior to in-memory or sandbox-dir execution.
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1140
+  - attack.t1027
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  decoder_in_cmdline:
+    CommandLine|contains:
+      - 'base64 -d'
+      - 'base64 --decode'
+  to_sandbox:
+    CommandLine|contains:
+      - /tmp/
+      - /dev/shm/
+  condition: decoder_in_cmdline and to_sandbox

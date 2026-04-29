@@ -1,0 +1,22 @@
+title: /tmp file-create burst (10+ within 60 s)
+id: 8b7c4d00-0003-4000-8000-000000000302
+status: experimental
+description: |
+  Ten or more file creations under /tmp by the same actor pid within
+  one minute. Useful proxy for staging directories during exfil prep.
+  Bounded-stateful edge rule with timeframe 60 s; window aggregates
+  by ActorPid.
+level: low
+tags:
+  - attack.collection
+  - attack.t1074
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection:
+    TargetFilename|startswith:
+      - /tmp/
+      - /var/tmp/
+  condition: selection | count() by ActorPid > 10
+timeframe: 60s

@@ -1,0 +1,12 @@
+=== Phase 3 #70 stack-up ===
+Server: 34.219.108.5 (private 172.31.24.48)
+Agents:
+  debian-13:    44.252.73.161 (private 172.31.26.27)
+  rhel-10:      34.219.119.248 (private 172.31.31.200)
+  ubuntu-24.04: 44.247.218.226 (private 172.31.19.7)
+
+Compose stack:
+NAME                 IMAGE                                      COMMAND                  SERVICE      CREATED         STATUS                   PORTS
+slither-clickhouse   clickhouse/clickhouse-server:24.8-alpine   "/entrypoint.sh"         clickhouse   4 minutes ago   Up 4 minutes (healthy)   8123/tcp, 9000/tcp, 9009/tcp
+slither-postgres     postgres:16-alpine                         "docker-entrypoint.s…"   postgres     4 minutes ago   Up 4 minutes (healthy)   5432/tcp
+slither-server       compose-server                             "/usr/local/bin/slit…"   server       4 minutes ago   Up 4 minutes (healthy)   0.0.0.0:8080->8080/tcp, 0.0.0.0:9443-9444->9443-9444/tcp

@@ -1,0 +1,6 @@
+# Curated SHA-256 feed for edge IOC validation. The first entry is the
+# canonical hash of "phase3-validation\n" which the scenario script
+# writes to disk to drive a hit.
+6f0e6e8c5a3a3aa6c2b5f7c4af8d4789f7e4e2a35a1c0bce62f6f0b1be0a5b78
+b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855

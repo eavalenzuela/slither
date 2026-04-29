@@ -1,0 +1,92 @@
+=== Phase 3 #70 / §4.1 #46 multi-host load test ===
+Duration: 60s, exec count: 100, on 3 agents in parallel
+Run start: 2026-04-29T21:52:27Z
+
+
+----- debian -----
+>>> restart agent (clean baseline)
+>>> stress-ng --exec 100 --timeout 60s as admin
+stress-ng: metrc: [2802] stressor       bogo ops real time  usr time  sys time   bogo ops/s     bogo ops/s
+stress-ng: metrc: [2802]                           (secs)    (secs)    (secs)   (real time) (usr+sys time)
+stress-ng: metrc: [2802] exec              50146     65.04    169.19    123.05       771.02         171.59
+stress-ng: info:  [2802] skipped: 0
+stress-ng: info:  [2802] passed: 100: exec (100)
+stress-ng: info:  [2802] failed: 0
+stress-ng: info:  [2802] metrics untrustworthy: 0
+stress-ng: info:  [2802] successful run completed in 1 min, 34.04 secs
+>>> stop agent (flush telemetry)
+>>> agent telemetry
+Apr 29 21:54:07 ip-172-31-26-27 slither-agent[2784]: telemetry: events=475608 dropped=0 (collector=0 dispatch=0 enricher=0 engine=0 output=0) detections=0 ringbuf_overflows=0 output_reconnects=0 heartbeats_sent=3
+>>> restart agent for next iteration
+
+----- ubuntu -----
+>>> restart agent (clean baseline)
+>>> stress-ng --exec 100 --timeout 60s as ubuntu
+stress-ng: metrc: [3522] stressor       bogo ops real time  usr time  sys time   bogo ops/s     bogo ops/s
+stress-ng: metrc: [3522]                           (secs)    (secs)    (secs)   (real time) (usr+sys time)
+stress-ng: metrc: [3522] exec              51462     62.49     82.01    127.65       823.46         245.45
+stress-ng: info:  [3522] skipped: 0
+stress-ng: info:  [3522] passed: 100: exec (100)
+stress-ng: info:  [3522] failed: 0
+stress-ng: info:  [3522] metrics untrustworthy: 0
+stress-ng: info:  [3522] successful run completed in 1 min, 11.34 secs
+>>> stop agent (flush telemetry)
+>>> agent telemetry
+Apr 29 21:53:44 ip-172-31-19-7 slither-agent[3507]: telemetry: events=464340 dropped=0 (collector=0 dispatch=0 enricher=0 engine=0 output=0) detections=0 ringbuf_overflows=0 output_reconnects=0 heartbeats_sent=2
+>>> restart agent for next iteration
+
+----- rhel -----
+>>> restart agent (clean baseline)
+>>> stress-ng --exec 100 --timeout 60s as ec2-user
+stress-ng: metrc: [5708] stressor       bogo ops real time  usr time  sys time   bogo ops/s     bogo ops/s
+stress-ng: metrc: [5708]                           (secs)    (secs)    (secs)   (real time) (usr+sys time)
+stress-ng: metrc: [5708] exec              97962     63.27     55.70     87.27      1548.42         685.19
+stress-ng: info:  [5708] skipped: 0
+stress-ng: info:  [5708] passed: 100: exec (100)
+stress-ng: info:  [5708] failed: 0
+stress-ng: info:  [5708] metrics untrustworthy: 0
+stress-ng: info:  [5708] successful run completed in 1 min, 8.10 secs
+>>> stop agent (flush telemetry)
+>>> agent telemetry
+Apr 29 21:53:40 ip-172-31-31-200.us-west-2.compute.internal slither-agent[5690]: telemetry: events=929447 dropped=18233 (collector=0 dispatch=0 enricher=0 engine=18233 output=0) detections=0 ringbuf_overflows=0 output_reconnects=0 heartbeats_sent=2
+>>> restart agent for next iteration
+
+----- server telemetry (post-restart flush) -----
+slither-server  | time=2026-04-29T21:50:01.148Z level=INFO msg="ingest router: alert inserted" alert_id=14f5b453-5133-4003-97e0-032f197e75ac rule_uid=8b7c4d00-0003-4000-8000-000000000302 host_id=bcd9c963-60ea-421c-8b2f-71ce29fcf29c severity=2
+slither-server  | time=2026-04-29T21:50:01.156Z level=INFO msg="ingest router: alert inserted" alert_id=5ebe833e-fdc4-41c6-b84c-26049330b290 rule_uid=8b7c4d00-0003-4000-8000-000000000302 host_id=bcd9c963-60ea-421c-8b2f-71ce29fcf29c severity=2
+slither-server  | time=2026-04-29T21:50:01.991Z level=INFO msg="ingest router: alert inserted" alert_id=f7bda32a-d3a7-4a50-be33-a89afd6b70c3 rule_uid=8b7c4d00-0003-4000-8000-000000000302 host_id=bcd9c963-60ea-421c-8b2f-71ce29fcf29c severity=2
+slither-server  | time=2026-04-29T21:50:01.993Z level=INFO msg="ingest router: alert inserted" alert_id=65468aae-d352-4c34-91da-00c9750f54b7 rule_uid=8b7c4d00-0003-4000-8000-000000000302 host_id=bcd9c963-60ea-421c-8b2f-71ce29fcf29c severity=2
+slither-server  | time=2026-04-29T21:51:18.082Z level=INFO msg="ingest router: alert inserted" alert_id=c6a883af-56fe-467b-81fb-78bcff9ef97a rule_uid=8b7c4d00-0003-4000-8000-000000000301 host_id=bcd9c963-60ea-421c-8b2f-71ce29fcf29c severity=3
+slither-server  | telemetry: events_received=5184 dropped=0 (ingest=0 subscriber=0) batches_flushed=74 ruleset_refreshes=5 rulesets_pushed=15 enroll=0/0 sessions_active=0 sessions_closed=3 heartbeats=12 authn_failures=0
+slither-server  | time=2026-04-29T21:52:27.811Z level=INFO msg="ingest router: alert inserted" alert_id=f8a0c797-0574-4b44-a7d3-713460c1e747 rule_uid=8b7c4d00-0003-4000-8000-000000000301 host_id=bcd9c963-60ea-421c-8b2f-71ce29fcf29c severity=3
+slither-server  | time=2026-04-29T21:52:28.110Z level=INFO msg="ingest router: alert inserted" alert_id=54bcf371-1fac-48f5-8927-de629a166b45 rule_uid=8b7c4d00-0001-4000-8000-000000000018 host_id=56f4dd23-b1d3-44eb-9c58-4cadfc2214c5 severity=2
+slither-server  | time=2026-04-29T21:52:28.112Z level=INFO msg="ingest router: alert inserted" alert_id=fe6ead00-a1b2-43a5-b4eb-ddee5f35c81e rule_uid=8b7c4d00-0001-4000-8000-000000000018 host_id=56f4dd23-b1d3-44eb-9c58-4cadfc2214c5 severity=2
+slither-server  | time=2026-04-29T21:52:28.123Z level=INFO msg="ingest router: alert inserted" alert_id=1a33e6a7-de2f-4ddc-bdc6-88a267036ff9 rule_uid=8b7c4d00-0001-4000-8000-000000000018 host_id=448b6b7f-0070-4888-9859-464920e2e8e5 severity=2
+slither-server  | time=2026-04-29T21:52:28.125Z level=INFO msg="ingest router: alert inserted" alert_id=d31084ae-d445-4161-a587-50a8e76a035c rule_uid=8b7c4d00-0001-4000-8000-000000000018 host_id=448b6b7f-0070-4888-9859-464920e2e8e5 severity=2
+slither-server  | time=2026-04-29T21:52:28.126Z level=INFO msg="ingest router: alert inserted" alert_id=997512e2-e0a8-48e3-8afe-0c6a767a7bac rule_uid=8b7c4d00-0001-4000-8000-000000000018 host_id=448b6b7f-0070-4888-9859-464920e2e8e5 severity=2
+slither-server  | time=2026-04-29T21:52:28.128Z level=INFO msg="ingest router: alert inserted" alert_id=e423ab78-e831-457e-8851-ac089e09ad0e rule_uid=8b7c4d00-0001-4000-8000-000000000018 host_id=448b6b7f-0070-4888-9859-464920e2e8e5 severity=2
+slither-server  | time=2026-04-29T21:52:28.129Z level=INFO msg="ingest router: alert inserted" alert_id=a422424d-12a8-4dce-971a-5f4840b9e780 rule_uid=8b7c4d00-0001-4000-8000-000000000018 host_id=448b6b7f-0070-4888-9859-464920e2e8e5 severity=2
+slither-server  | time=2026-04-29T21:52:28.130Z level=INFO msg="ingest router: alert inserted" alert_id=d601a42c-ee8a-4d58-86b0-e650b9f0930a rule_uid=8b7c4d00-0001-4000-8000-000000000018 host_id=448b6b7f-0070-4888-9859-464920e2e8e5 severity=2
+slither-server  | time=2026-04-29T21:52:28.376Z level=INFO msg="ingest router: alert inserted" alert_id=412c7bc9-8681-4514-b0e4-8fd065ce64f5 rule_uid=8b7c4d00-0001-4000-8000-000000000018 host_id=bcd9c963-60ea-421c-8b2f-71ce29fcf29c severity=2
+slither-server  | time=2026-04-29T21:52:28.377Z level=INFO msg="ingest router: alert inserted" alert_id=046463fa-e47b-4bdf-9001-5f77fc673e0a rule_uid=8b7c4d00-0001-4000-8000-000000000018 host_id=bcd9c963-60ea-421c-8b2f-71ce29fcf29c severity=2
+slither-server  | time=2026-04-29T21:52:28.379Z level=INFO msg="ingest router: alert inserted" alert_id=9e159520-ff47-450b-8ded-b7eca0cbc5d6 rule_uid=8b7c4d00-0001-4000-8000-000000000018 host_id=bcd9c963-60ea-421c-8b2f-71ce29fcf29c severity=2
+slither-server  | time=2026-04-29T21:52:28.380Z level=INFO msg="ingest router: alert inserted" alert_id=92c2dd5c-fe08-48ab-aec5-1e0a9a470107 rule_uid=8b7c4d00-0001-4000-8000-000000000018 host_id=bcd9c963-60ea-421c-8b2f-71ce29fcf29c severity=2
+slither-server  | telemetry: events_received=811017 dropped=393 (ingest=0 subscriber=393) batches_flushed=179 ruleset_refreshes=6 rulesets_pushed=24 enroll=0/0 sessions_active=0 sessions_closed=9 heartbeats=12 authn_failures=0
+
+=== SUMMARY ===
+
+Agent drop rate (Phase 1 / §4.1 #46 criterion: <1%)
+  Debian 13   (c7i.xlarge, 6.12.74)      : events=475608   dropped=0      = 0.000%  PASS
+  Ubuntu 24.04(c7i.xlarge, 6.17.0-aws)   : events=464340   dropped=0      = 0.000%  PASS
+  RHEL 10     (c7i.xlarge, 6.12.0-el10)  : events=929447   dropped=18233  = 1.962%  FAIL (engine drops)
+
+Server subscriber drop rate
+  events_received=811017 dropped=393 (subscriber=393)         = 0.048%  PASS
+
+RHEL note: matches Phase 1's documented 4-vCPU RHEL scheduler limit
+(see project_phase_status.md / Phase 1 #29). RHEL 4-vCPU plateaued
+at 11.61% drop_rate in Phase 1; here at 1.96% it's already a
+5-6x improvement, just still over the 1% bar. Production RHEL
+deployments per Phase 1 guidance need >4 vCPUs.
+
+Run end: 2026-04-29T21:55:08Z

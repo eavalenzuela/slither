@@ -1,0 +1,316 @@
+=== Phase 3 #70 scenarios ===
+
+============ debian (admin@44.252.73.161) ============
+▶▶▶ 01-edge-stateless.sh
+▶ bash-reverse-shell: bash -c true /dev/tcp/198.51.100.5/4444
+▶ passwd-read: cat /etc/passwd
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/usr/sbin/nologin
+man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
+mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
+news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
+uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
+proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
+irc:x:39:39:ircd:/run/ircd:/usr/sbin/nologin
+_apt:x:42:65534::/nonexistent:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+systemd-network:x:998:998:systemd Network Management:/:/usr/sbin/nologin
+systemd-timesync:x:997:997:systemd Time Synchronization:/:/usr/sbin/nologin
+dhcpcd:x:100:65534:DHCP Client Daemon:/usr/lib/dhcpcd:/bin/false
+uuidd:x:101:101::/run/uuidd:/usr/sbin/nologin
+messagebus:x:996:996:System Message Bus:/nonexistent:/usr/sbin/nologin
+tcpdump:x:102:102::/nonexistent:/usr/sbin/nologin
+systemd-resolve:x:990:990:systemd Resolver:/:/usr/sbin/nologin
+sshd:x:989:65534:sshd user:/run/sshd:/usr/sbin/nologin
+polkitd:x:988:988:User for polkitd:/:/usr/sbin/nologin
+admin:x:1000:1000:Debian:/home/admin:/bin/bash
+▶ base64-sandbox: sh -c echo cGhhc2UzCg== | base64 -d > /tmp/phase3-b64.out
+▶ chmod-world-writable: sh -c touch /tmp/phase3-ww && chmod 0777 /tmp/phase3-ww
+▶ shadow-access: sh -c cat /etc/shadow > /dev/null 2>&1 || true
+stateless edge scenarios complete
+▶▶▶ 02-edge-stateful.sh
+▶ proc-curl-burst: 6 invocations of /usr/bin/curl
+▶ file-tmp-write-burst: 12 file creates by one bash
+▶ net-port-fanout: 12 connect attempts to TEST-NET-2 on port 53/udp
+stateful edge scenarios complete
+▶▶▶ 03-server-only.sh
+▶ near-shell-exec-then-net: bash + curl in tight sequence
+▶ cross-host-passwd-fanout: passwd read
+server-only scenarios complete
+▶▶▶ 04-edge-ioc.sh
+▶ net-bad-ip-egress: connect to 203.0.113.5
+▶ file-bad-hash-touch: write file with seeded SHA-256
+83bfc11d275f228c1775ee9d9fed89d629a3b243d03d3724b9f98da06555fb73  /tmp/phase3-bad-hash.bin
+edge IOC scenarios complete
+
+============ ubuntu (ubuntu@44.247.218.226) ============
+▶▶▶ 01-edge-stateless.sh
+▶ bash-reverse-shell: bash -c true /dev/tcp/198.51.100.5/4444
+▶ passwd-read: cat /etc/passwd
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/usr/sbin/nologin
+man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
+mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
+news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
+uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
+proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
+irc:x:39:39:ircd:/run/ircd:/usr/sbin/nologin
+_apt:x:42:65534::/nonexistent:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+systemd-network:x:998:998:systemd Network Management:/:/usr/sbin/nologin
+systemd-timesync:x:996:996:systemd Time Synchronization:/:/usr/sbin/nologin
+dhcpcd:x:100:65534:DHCP Client Daemon,,,:/usr/lib/dhcpcd:/bin/false
+messagebus:x:101:101::/nonexistent:/usr/sbin/nologin
+syslog:x:102:102::/nonexistent:/usr/sbin/nologin
+systemd-resolve:x:991:991:systemd Resolver:/:/usr/sbin/nologin
+uuidd:x:103:103::/run/uuidd:/usr/sbin/nologin
+tss:x:104:104:TPM software stack,,,:/var/lib/tpm:/bin/false
+sshd:x:105:65534::/run/sshd:/usr/sbin/nologin
+pollinate:x:106:1::/var/cache/pollinate:/bin/false
+tcpdump:x:107:108::/nonexistent:/usr/sbin/nologin
+landscape:x:108:109::/var/lib/landscape:/usr/sbin/nologin
+fwupd-refresh:x:990:990:Firmware update daemon:/var/lib/fwupd:/usr/sbin/nologin
+polkitd:x:989:989:User for polkitd:/:/usr/sbin/nologin
+ec2-instance-connect:x:109:65534::/nonexistent:/usr/sbin/nologin
+_chrony:x:110:112:Chrony daemon,,,:/var/lib/chrony:/usr/sbin/nologin
+ubuntu:x:1000:1000:Ubuntu:/home/ubuntu:/bin/bash
+▶ base64-sandbox: sh -c echo cGhhc2UzCg== | base64 -d > /tmp/phase3-b64.out
+▶ chmod-world-writable: sh -c touch /tmp/phase3-ww && chmod 0777 /tmp/phase3-ww
+▶ shadow-access: sh -c cat /etc/shadow > /dev/null 2>&1 || true
+stateless edge scenarios complete
+▶▶▶ 02-edge-stateful.sh
+▶ proc-curl-burst: 6 invocations of /usr/bin/curl
+▶ file-tmp-write-burst: 12 file creates by one bash
+▶ net-port-fanout: 12 connect attempts to TEST-NET-2 on port 53/udp
+stateful edge scenarios complete
+▶▶▶ 03-server-only.sh
+▶ near-shell-exec-then-net: bash + curl in tight sequence
+▶ cross-host-passwd-fanout: passwd read
+server-only scenarios complete
+▶▶▶ 04-edge-ioc.sh
+▶ net-bad-ip-egress: connect to 203.0.113.5
+▶ file-bad-hash-touch: write file with seeded SHA-256
+83bfc11d275f228c1775ee9d9fed89d629a3b243d03d3724b9f98da06555fb73  /tmp/phase3-bad-hash.bin
+edge IOC scenarios complete
+
+============ rhel (ec2-user@34.219.119.248) ============
+▶▶▶ 01-edge-stateless.sh
+▶ bash-reverse-shell: bash -c true /dev/tcp/198.51.100.5/4444
+▶ passwd-read: cat /etc/passwd
+root:x:0:0:Super User:/root:/bin/bash
+bin:x:1:1:bin:/bin:/usr/sbin/nologin
+daemon:x:2:2:daemon:/sbin:/usr/sbin/nologin
+adm:x:3:4:adm:/var/adm:/usr/sbin/nologin
+lp:x:4:7:lp:/var/spool/lpd:/usr/sbin/nologin
+sync:x:5:0:sync:/sbin:/bin/sync
+shutdown:x:6:0:shutdown:/sbin:/sbin/shutdown
+halt:x:7:0:halt:/sbin:/sbin/halt
+mail:x:8:12:mail:/var/spool/mail:/usr/sbin/nologin
+operator:x:11:0:operator:/root:/usr/sbin/nologin
+games:x:12:100:games:/usr/games:/usr/sbin/nologin
+ftp:x:14:50:FTP User:/var/ftp:/usr/sbin/nologin
+nobody:x:65534:65534:Kernel Overflow User:/:/usr/sbin/nologin
+yggdrasil:x:999:999:yggdrasil system user:/var/lib/yggdrasil:/usr/sbin/nologin
+yggdrasil-worker:x:998:998:yggdrasil worker user:/:/usr/sbin/nologin
+dbus:x:81:81:System message bus:/:/sbin/nologin
+tss:x:59:59:Account used for TPM access:/:/usr/sbin/nologin
+systemd-oom:x:997:996:systemd Userspace OOM Killer:/:/sbin/nologin
+polkitd:x:114:114:User for polkitd:/:/sbin/nologin
+dhcpcd:x:996:995:Minimalistic DHCP client:/var/lib/dhcpcd:/usr/sbin/nologin
+sssd:x:995:994:User for sssd:/run/sssd/:/sbin/nologin
+sshd:x:74:74:Privilege-separated SSH:/usr/share/empty.sshd:/usr/sbin/nologin
+chrony:x:994:993:chrony system user:/var/lib/chrony:/sbin/nologin
+systemd-coredump:x:992:992:systemd Core Dumper:/:/usr/sbin/nologin
+ec2-user:x:1000:1000:Cloud User:/home/ec2-user:/bin/bash
+▶ base64-sandbox: sh -c echo cGhhc2UzCg== | base64 -d > /tmp/phase3-b64.out
+▶ chmod-world-writable: sh -c touch /tmp/phase3-ww && chmod 0777 /tmp/phase3-ww
+▶ shadow-access: sh -c cat /etc/shadow > /dev/null 2>&1 || true
+stateless edge scenarios complete
+▶▶▶ 02-edge-stateful.sh
+▶ proc-curl-burst: 6 invocations of /usr/bin/curl
+▶ file-tmp-write-burst: 12 file creates by one bash
+▶ net-port-fanout: 12 connect attempts to TEST-NET-2 on port 53/udp
+stateful edge scenarios complete
+▶▶▶ 03-server-only.sh
+▶ near-shell-exec-then-net: bash + curl in tight sequence
+▶ cross-host-passwd-fanout: passwd read
+server-only scenarios complete
+▶▶▶ 04-edge-ioc.sh
+▶ net-bad-ip-egress: connect to 203.0.113.5
+▶ file-bad-hash-touch: write file with seeded SHA-256
+83bfc11d275f228c1775ee9d9fed89d629a3b243d03d3724b9f98da06555fb73  /tmp/phase3-bad-hash.bin
+edge IOC scenarios complete
+=== Phase 3 #70 scenarios (post-restart, detect engine active) ===
+
+============ debian ============
+▶▶▶ 01-edge-stateless.sh
+▶ bash-reverse-shell: bash -c true /dev/tcp/198.51.100.5/4444
+▶ passwd-read: cat /etc/passwd
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/usr/sbin/nologin
+man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
+mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
+news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
+uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
+proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
+irc:x:39:39:ircd:/run/ircd:/usr/sbin/nologin
+_apt:x:42:65534::/nonexistent:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+systemd-network:x:998:998:systemd Network Management:/:/usr/sbin/nologin
+systemd-timesync:x:997:997:systemd Time Synchronization:/:/usr/sbin/nologin
+dhcpcd:x:100:65534:DHCP Client Daemon:/usr/lib/dhcpcd:/bin/false
+uuidd:x:101:101::/run/uuidd:/usr/sbin/nologin
+messagebus:x:996:996:System Message Bus:/nonexistent:/usr/sbin/nologin
+tcpdump:x:102:102::/nonexistent:/usr/sbin/nologin
+systemd-resolve:x:990:990:systemd Resolver:/:/usr/sbin/nologin
+sshd:x:989:65534:sshd user:/run/sshd:/usr/sbin/nologin
+polkitd:x:988:988:User for polkitd:/:/usr/sbin/nologin
+admin:x:1000:1000:Debian:/home/admin:/bin/bash
+▶ base64-sandbox: sh -c echo cGhhc2UzCg== | base64 -d > /tmp/phase3-b64.out
+▶ chmod-world-writable: sh -c touch /tmp/phase3-ww && chmod 0777 /tmp/phase3-ww
+▶ shadow-access: sh -c cat /etc/shadow > /dev/null 2>&1 || true
+stateless edge scenarios complete
+▶▶▶ 02-edge-stateful.sh
+▶ proc-curl-burst: 6 invocations of /usr/bin/curl
+▶ file-tmp-write-burst: 12 file creates by one bash
+▶ net-port-fanout: 12 connect attempts to TEST-NET-2 on port 53/udp
+stateful edge scenarios complete
+▶▶▶ 03-server-only.sh
+▶ near-shell-exec-then-net: bash + curl in tight sequence
+▶ cross-host-passwd-fanout: passwd read
+server-only scenarios complete
+▶▶▶ 04-edge-ioc.sh
+▶ net-bad-ip-egress: connect to 203.0.113.5
+▶ file-bad-hash-touch: write file with seeded SHA-256
+83bfc11d275f228c1775ee9d9fed89d629a3b243d03d3724b9f98da06555fb73  /tmp/phase3-bad-hash.bin
+edge IOC scenarios complete
+
+============ ubuntu ============
+▶▶▶ 01-edge-stateless.sh
+▶ bash-reverse-shell: bash -c true /dev/tcp/198.51.100.5/4444
+▶ passwd-read: cat /etc/passwd
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/usr/sbin/nologin
+man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
+mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
+news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
+uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
+proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
+irc:x:39:39:ircd:/run/ircd:/usr/sbin/nologin
+_apt:x:42:65534::/nonexistent:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+systemd-network:x:998:998:systemd Network Management:/:/usr/sbin/nologin
+systemd-timesync:x:996:996:systemd Time Synchronization:/:/usr/sbin/nologin
+dhcpcd:x:100:65534:DHCP Client Daemon,,,:/usr/lib/dhcpcd:/bin/false
+messagebus:x:101:101::/nonexistent:/usr/sbin/nologin
+syslog:x:102:102::/nonexistent:/usr/sbin/nologin
+systemd-resolve:x:991:991:systemd Resolver:/:/usr/sbin/nologin
+uuidd:x:103:103::/run/uuidd:/usr/sbin/nologin
+tss:x:104:104:TPM software stack,,,:/var/lib/tpm:/bin/false
+sshd:x:105:65534::/run/sshd:/usr/sbin/nologin
+pollinate:x:106:1::/var/cache/pollinate:/bin/false
+tcpdump:x:107:108::/nonexistent:/usr/sbin/nologin
+landscape:x:108:109::/var/lib/landscape:/usr/sbin/nologin
+fwupd-refresh:x:990:990:Firmware update daemon:/var/lib/fwupd:/usr/sbin/nologin
+polkitd:x:989:989:User for polkitd:/:/usr/sbin/nologin
+ec2-instance-connect:x:109:65534::/nonexistent:/usr/sbin/nologin
+_chrony:x:110:112:Chrony daemon,,,:/var/lib/chrony:/usr/sbin/nologin
+ubuntu:x:1000:1000:Ubuntu:/home/ubuntu:/bin/bash
+▶ base64-sandbox: sh -c echo cGhhc2UzCg== | base64 -d > /tmp/phase3-b64.out
+▶ chmod-world-writable: sh -c touch /tmp/phase3-ww && chmod 0777 /tmp/phase3-ww
+▶ shadow-access: sh -c cat /etc/shadow > /dev/null 2>&1 || true
+stateless edge scenarios complete
+▶▶▶ 02-edge-stateful.sh
+▶ proc-curl-burst: 6 invocations of /usr/bin/curl
+▶ file-tmp-write-burst: 12 file creates by one bash
+▶ net-port-fanout: 12 connect attempts to TEST-NET-2 on port 53/udp
+stateful edge scenarios complete
+▶▶▶ 03-server-only.sh
+▶ near-shell-exec-then-net: bash + curl in tight sequence
+▶ cross-host-passwd-fanout: passwd read
+server-only scenarios complete
+▶▶▶ 04-edge-ioc.sh
+▶ net-bad-ip-egress: connect to 203.0.113.5
+▶ file-bad-hash-touch: write file with seeded SHA-256
+83bfc11d275f228c1775ee9d9fed89d629a3b243d03d3724b9f98da06555fb73  /tmp/phase3-bad-hash.bin
+edge IOC scenarios complete
+
+============ rhel ============
+▶▶▶ 01-edge-stateless.sh
+▶ bash-reverse-shell: bash -c true /dev/tcp/198.51.100.5/4444
+▶ passwd-read: cat /etc/passwd
+root:x:0:0:Super User:/root:/bin/bash
+bin:x:1:1:bin:/bin:/usr/sbin/nologin
+daemon:x:2:2:daemon:/sbin:/usr/sbin/nologin
+adm:x:3:4:adm:/var/adm:/usr/sbin/nologin
+lp:x:4:7:lp:/var/spool/lpd:/usr/sbin/nologin
+sync:x:5:0:sync:/sbin:/bin/sync
+shutdown:x:6:0:shutdown:/sbin:/sbin/shutdown
+halt:x:7:0:halt:/sbin:/sbin/halt
+mail:x:8:12:mail:/var/spool/mail:/usr/sbin/nologin
+operator:x:11:0:operator:/root:/usr/sbin/nologin
+games:x:12:100:games:/usr/games:/usr/sbin/nologin
+ftp:x:14:50:FTP User:/var/ftp:/usr/sbin/nologin
+nobody:x:65534:65534:Kernel Overflow User:/:/usr/sbin/nologin
+yggdrasil:x:999:999:yggdrasil system user:/var/lib/yggdrasil:/usr/sbin/nologin
+yggdrasil-worker:x:998:998:yggdrasil worker user:/:/usr/sbin/nologin
+dbus:x:81:81:System message bus:/:/sbin/nologin
+tss:x:59:59:Account used for TPM access:/:/usr/sbin/nologin
+systemd-oom:x:997:996:systemd Userspace OOM Killer:/:/sbin/nologin
+polkitd:x:114:114:User for polkitd:/:/sbin/nologin
+dhcpcd:x:996:995:Minimalistic DHCP client:/var/lib/dhcpcd:/usr/sbin/nologin
+sssd:x:995:994:User for sssd:/run/sssd/:/sbin/nologin
+sshd:x:74:74:Privilege-separated SSH:/usr/share/empty.sshd:/usr/sbin/nologin
+chrony:x:994:993:chrony system user:/var/lib/chrony:/sbin/nologin
+systemd-coredump:x:992:992:systemd Core Dumper:/:/usr/sbin/nologin
+ec2-user:x:1000:1000:Cloud User:/home/ec2-user:/bin/bash
+▶ base64-sandbox: sh -c echo cGhhc2UzCg== | base64 -d > /tmp/phase3-b64.out
+▶ chmod-world-writable: sh -c touch /tmp/phase3-ww && chmod 0777 /tmp/phase3-ww
+▶ shadow-access: sh -c cat /etc/shadow > /dev/null 2>&1 || true
+stateless edge scenarios complete
+▶▶▶ 02-edge-stateful.sh
+▶ proc-curl-burst: 6 invocations of /usr/bin/curl
+▶ file-tmp-write-burst: 12 file creates by one bash
+▶ net-port-fanout: 12 connect attempts to TEST-NET-2 on port 53/udp
+stateful edge scenarios complete
+▶▶▶ 03-server-only.sh
+▶ near-shell-exec-then-net: bash + curl in tight sequence
+▶ cross-host-passwd-fanout: passwd read
+server-only scenarios complete
+▶▶▶ 04-edge-ioc.sh
+▶ net-bad-ip-egress: connect to 203.0.113.5
+▶ file-bad-hash-touch: write file with seeded SHA-256
+83bfc11d275f228c1775ee9d9fed89d629a3b243d03d3724b9f98da06555fb73  /tmp/phase3-bad-hash.bin
+edge IOC scenarios complete

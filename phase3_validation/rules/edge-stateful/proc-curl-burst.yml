@@ -1,0 +1,19 @@
+title: curl burst (5+ invocations within 60 s)
+id: 8b7c4d00-0003-4000-8000-000000000301
+status: experimental
+description: |
+  Five or more curl invocations from the same user inside one minute.
+  Bounded-stateful edge rule (Phase 3 #56) — fires on the agent without
+  a server round-trip; window 60 s, key = User.
+level: medium
+tags:
+  - attack.execution
+  - attack.t1105
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: /curl
+  condition: selection | count() by User > 5
+timeframe: 60s

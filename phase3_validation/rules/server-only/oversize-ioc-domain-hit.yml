@@ -1,0 +1,20 @@
+title: Domain hit against oversize threat-feed (server-side IOC eval)
+id: 8b7c4d00-0004-4000-8000-000000000404
+status: experimental
+description: |
+  Outbound DNS / TLS SNI matches the oversize-threat-domains feed
+  (>100k entries; ADR-0018 predicate 3 forces ServerOnly).
+  Demonstrates that an oversize feed downgrades the rule to the
+  server detection engine without the operator needing force_edge.
+level: high
+tags:
+  - attack.command-and-control
+  - attack.t1071.001
+logsource:
+  product: linux
+  category: network_connection
+detection:
+  selection:
+    DstHostname|ioc:
+      - oversize-threat-domains
+  condition: selection

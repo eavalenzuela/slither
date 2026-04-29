@@ -1,0 +1,15 @@
+=== Phase 3 #70 graph rendering ===
+
+--- alert flow graph ---
+URL: http://<server>:8080/alerts/85c03b5a-da47-42ce-ab17-f2bb7451cab2/graph.svg
+-rw-rw-r-- 1 t3rmit3 t3rmit3 12350 Apr 29 14:49 phase3_validation/alert-graph.svg
+Begin SVG:
+<?xml version="1.0" encoding="utf-8"?><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" data-d2-version="v0.7.1-HEAD" preserveAspectRatio="xMinYMin meet" viewBox="0 0 
+Has <svg>: 1
+
+--- process tree (debian agent, pid=1952, depth=4) ---
+URL: http://<server>:8080/hosts/448b6b7f-0070-4888-9859-464920e2e8e5/process-tree?pid=1952&depth=4
+-rw-rw-r-- 1 t3rmit3 t3rmit3 16363 Apr 29 14:49 phase3_validation/process-tree-debian.html
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" data-d2-version="v0.7.1-HEAD" preserveAspectRatio="xMinYMin meet" viewBox="0 0 958 606"
+<svg class="d2-1681078693 d2-svg" width="958" height="606" viewBox="-21 -21 958 606"
+/bin/sh
