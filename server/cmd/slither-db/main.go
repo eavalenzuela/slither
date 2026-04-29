@@ -24,6 +24,7 @@ import (
 
 	"github.com/t3rmit3/slither/pkg/ruleast"
 	"github.com/t3rmit3/slither/pkg/version"
+	"github.com/t3rmit3/slither/server/internal/ioc"
 	"github.com/t3rmit3/slither/server/internal/store/pg"
 )
 
@@ -108,7 +109,24 @@ func insertRule(ctx context.Context, dsn string, args []string) error {
 		return fmt.Errorf("insert-rule: read %s: %w", *file, err)
 	}
 
-	_, plan, class, err := ruleast.Compile(yamlBytes)
+	// Open pg first so we can build the IOC registry the compiler
+	// consults. Rules with `|ioc:` references would otherwise fail
+	// compile here even though the feeds are already in pg.
+	store, err := pg.Open(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("insert-rule: pg open: %w", err)
+	}
+	defer store.Close()
+
+	iocReg := ioc.New(store)
+	if _, refreshErr := iocReg.Refresh(ctx); refreshErr != nil {
+		// Non-fatal — a rule without `|ioc:` references compiles fine
+		// regardless. Surface the error so an operator notices a
+		// chronically empty registry.
+		fmt.Fprintf(os.Stderr, "slither-db: warning: ioc registry refresh failed: %v\n", refreshErr)
+	}
+
+	_, plan, class, err := ruleast.Compile(yamlBytes, ruleast.WithIOCRegistry(iocReg))
 	if err != nil {
 		return fmt.Errorf("insert-rule: compile: %w", err)
 	}
@@ -130,12 +148,6 @@ func insertRule(ctx context.Context, dsn string, args []string) error {
 			return fmt.Errorf("insert-rule: marshal server plan: %w", err)
 		}
 	}
-
-	store, err := pg.Open(ctx, dsn)
-	if err != nil {
-		return fmt.Errorf("insert-rule: pg open: %w", err)
-	}
-	defer store.Close()
 
 	var updatedByID string
 	user, err := store.GetUserByUsername(ctx, *updatedBy)

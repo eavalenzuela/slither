@@ -11,8 +11,17 @@
 set -euo pipefail
 
 PKI_DIR="${PKI_DIR:-/pki}"
+GRAPHS_DIR="${GRAPHS_DIR:-/graphs}"
 PG_DSN="${SLITHER_STORAGE_POSTGRES_DSN:?SLITHER_STORAGE_POSTGRES_DSN required}"
 CH_DSN="${SLITHER_STORAGE_CLICKHOUSE_DSN:?SLITHER_STORAGE_CLICKHOUSE_DSN required}"
+
+# Make the alert-flow-graph cache dir writable by the server's nonroot
+# uid (65532). Compose mounts a named volume here; first-touch is the
+# bootstrap container so we own the chown.
+if [ -d "$GRAPHS_DIR" ]; then
+    chmod 0755 "$GRAPHS_DIR"
+    chown -R 65532:65532 "$GRAPHS_DIR" 2>/dev/null || true
+fi
 
 # gen-ca.sh expects to be invoked from a repo root and writes into
 # `deploy/pki/` relative to the script's parent directory. Fake that

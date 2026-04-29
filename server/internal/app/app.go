@@ -142,15 +142,15 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		_ = sessionLis.Close()
 		return fmt.Errorf("app: session key: %w", err)
 	}
-	graphCache, err := graph.NewCache(graph.CacheOptions{
+	graphCache, cacheErr := graph.NewCache(graph.CacheOptions{
 		Dir: graphsDir(cfg.Console.GraphsDir),
 	})
-	if err != nil {
-		_ = enrollLis.Close()
-		_ = sessionLis.Close()
+	if cacheErr != nil {
 		// Cache failure is non-fatal — the alert detail page falls
 		// back to no-graph mode rather than refusing to render.
-		slog.Warn("app: alert flow-graph cache disabled", "err", err)
+		// Listeners stay up; closing them here was a copy-paste bug
+		// that tore the server down on a permission-denied mkdir.
+		slog.Warn("app: alert flow-graph cache disabled", "err", cacheErr)
 		graphCache = nil
 	}
 	consoleSvc := console.New(console.Options{

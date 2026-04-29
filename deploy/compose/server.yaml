@@ -30,3 +30,7 @@ console:
   # Bootstrap container mints this into the shared pki volume so the
   # server image can keep its volume mount read-only.
   session_key_file: /etc/slither/pki/session.key
+  # Alert flow-graph SVG cache (#64). Bootstrap chowns this to the
+  # nonroot uid before the server starts so the named volume mount
+  # is writable from the distroless container.
+  graphs_dir: /var/lib/slither/graphs

@@ -77,11 +77,13 @@ services:
       SLITHER_STORAGE_POSTGRES_DSN: "postgres://slither:slither-dev@postgres:5432/slither?sslmode=disable"
       SLITHER_STORAGE_CLICKHOUSE_DSN: "clickhouse://slither:slither-dev@clickhouse:9000/slither"
       PKI_DIR: /pki
+      GRAPHS_DIR: /graphs
       # Comment this out to let bootstrap-admin generate a random
       # password and print it to stdout.
       SLITHER_BOOTSTRAP_PASSWORD: "slither-admin-dev"
     volumes:
       - pki:/pki
+      - graphs:/graphs
     restart: "no"
 
   server:
@@ -104,6 +106,7 @@ services:
     volumes:
       - pki:/etc/slither/pki:ro
       - ./server.yaml:/etc/slither/server.yaml:ro
+      - graphs:/var/lib/slither/graphs
     healthcheck:
       test: ["CMD", "/usr/local/bin/slither-server", "--version"]
       interval: 10s
@@ -114,3 +117,4 @@ volumes:
   pg-data:
   ch-data:
   pki:
+  graphs:

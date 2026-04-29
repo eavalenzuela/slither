@@ -90,30 +90,30 @@ The same migration MODIFY-COLUMNs:
 
 | Table                              | Column         | Old type   | New type                    |
 |------------------------------------|----------------|------------|-----------------------------|
-| ocsf_process_activity_1007         | severity_id    | UInt8      | LowCardinality(UInt8)       |
-| ocsf_process_activity_1007         | activity_id    | UInt8      | LowCardinality(UInt8)       |
 | ocsf_process_activity_1007         | process_name   | String     | LowCardinality(String)      |
 | ocsf_process_activity_1007         | user_name      | String     | LowCardinality(String)      |
-| ocsf_file_system_activity_1001     | severity_id    | UInt8      | LowCardinality(UInt8)       |
-| ocsf_file_system_activity_1001     | activity_id    | UInt8      | LowCardinality(UInt8)       |
 | ocsf_file_system_activity_1001     | actor_name     | String     | LowCardinality(String)      |
-| ocsf_network_activity_4001         | severity_id    | UInt8      | LowCardinality(UInt8)       |
-| ocsf_network_activity_4001         | activity_id    | UInt8      | LowCardinality(UInt8)       |
 | ocsf_network_activity_4001         | actor_name     | String     | LowCardinality(String)      |
-| ocsf_detection_finding_2004        | severity_id    | UInt8      | LowCardinality(UInt8)       |
-| ocsf_detection_finding_2004        | activity_id    | UInt8      | LowCardinality(UInt8)       |
 | ocsf_detection_finding_2004        | rule_uid       | String     | LowCardinality(String)      |
 | ocsf_detection_finding_2004        | rule_name      | String     | LowCardinality(String)      |
 
 **Why these columns:**
-- `severity_id`, `activity_id`: small fixed enum. Dictionary smaller
-  than the row count even on the first part.
 - `process_name` / `user_name` / `actor_name`: bounded by the number of
   binaries / accounts on a host. A typical Linux box has < 5k unique
   binaries; user_name almost always < 100. Dictionary lookups stay in
   L1 cache.
 - `rule_uid` / `rule_name`: bounded by the rule pack size, single-digit
   thousands worst case.
+
+**Why not severity_id / activity_id (correction):** the original draft
+of this ADR also listed `LowCardinality(UInt8)` for these enum
+columns. ClickHouse rejects that combination by default with the
+`allow_suspicious_low_cardinality_types` guard — the dictionary
+overhead on a 1-byte integer typically exceeds the saving, and the
+engine is right. The migration was amended (commit follows) to drop
+those columns from the LowCardinality set; they stay plain UInt8.
+The win on small-int columns would have to come from a delta /
+DoubleDelta codec, not from LowCardinality, and that's deferred.
 
 **Why not these columns:**
 - `class_uid`: one value per table — no dictionary win.

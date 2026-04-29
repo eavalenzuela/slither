@@ -105,23 +105,27 @@ func (s *Store) ListProcessChildren(
 	// earliest row in the group — usually the exec event. Same idea
 	// for parent_pid + process_name. Avoids picking exit-event
 	// metadata when an exec event also exists.
+	// Aliases are intentionally non-colliding with source column names.
+	// CH's argMin(col, ...) AS col would otherwise be re-evaluated when
+	// the WHERE/GROUP BY references col, tripping
+	// "Aggregate function argMin(...) is found in WHERE" (CH error 184).
 	stmt := `
 		SELECT
-			toString(any(event_id)) AS event_id,
-			toString(host_id)       AS host_id,
+			toString(any(event_id)) AS proj_event_id,
+			toString(host_id)       AS proj_host_id,
 			pid,
-			argMin(parent_pid, observed_at)  AS parent_pid,
-			argMin(exec_path, observed_at)   AS exec_path,
-			argMin(process_name, observed_at) AS process_name,
-			argMin(cmdline, observed_at)     AS cmdline,
-			min(observed_at)                 AS observed_at
+			argMin(parent_pid, observed_at)   AS proj_parent_pid,
+			argMin(exec_path, observed_at)    AS proj_exec_path,
+			argMin(process_name, observed_at) AS proj_process_name,
+			argMin(cmdline, observed_at)      AS proj_cmdline,
+			min(observed_at)                  AS proj_observed_at
 		FROM ocsf_process_activity_1007
-		WHERE host_id   = ?
+		WHERE host_id    = ?
 		  AND parent_pid = ?
 		  AND observed_at >= fromUnixTimestamp64Nano(?)
 		  AND observed_at <= fromUnixTimestamp64Nano(?)
 		GROUP BY host_id, pid
-		ORDER BY observed_at ASC
+		ORDER BY proj_observed_at ASC
 		LIMIT ?
 	`
 	rows, err := s.conn.Query(ctx, stmt,

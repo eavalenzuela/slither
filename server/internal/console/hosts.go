@@ -106,7 +106,7 @@ func (s *Server) hostsProcessTree(w http.ResponseWriter, r *http.Request) {
 
 	source, err := s.processTreeBuilder.Build(r.Context(), host.ID, data.Pid, depth, time.Time{})
 	if err != nil {
-		http.Error(w, "build process tree failed", http.StatusInternalServerError)
+		http.Error(w, "build process tree failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if source == "" {
