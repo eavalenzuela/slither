@@ -80,6 +80,52 @@ enum ResponseAction {
   RESPONSE_ACTION_COLLECT_ARTIFACTS = 6;
 }
 
+// ResponseResult is the agent's reply for one ResponseRequest. Phase 4
+// #73 wire bump per ADR-0034 — additive within slither.v1; v0 agents
+// that never emit it stay compatible.
+message ResponseResult {
+  // control_id echoes ResponseRequest.control_id so the server can
+  // correlate without an extra lookup.
+  string control_id = 1;
+  // action_id is the response_actions row id; populated when the
+  // server dispatched the action with one (the dispatcher always
+  // does). Empty for ResponseRequests sent ad-hoc / for testing.
+  string action_id = 2;
+  ResponseStatus status = 3;
+  // detail is a human-readable message — error string on failure or
+  // a one-line summary on success ("killed pid 12345 with SIGTERM").
+  string detail = 4;
+  // result_blob carries the COLLECT_ARTIFACTS tarball and is empty
+  // for every other action.
+  bytes result_blob = 5;
+}
+
+enum ResponseStatus {
+  RESPONSE_STATUS_UNSPECIFIED = 0;
+  RESPONSE_STATUS_DONE = 1;
+  RESPONSE_STATUS_FAILED = 2;
+}
+
+// HostPolicy is the per-host response-action policy ADR-0034
+// describes. The server pushes a HostPolicy on Session open and on
+// every policy edit; the agent caches it and consults the cache from
+// the auto-respond gate. Default value (all-false) is the
+// detect-only baseline a fresh enrolment receives until an operator
+// promotes the host.
+message HostPolicy {
+  bool allow_kill_process = 1;
+  bool allow_kill_tree = 2;
+  bool allow_quarantine = 3;
+  // allow_isolate covers both ISOLATE_HOST and UNISOLATE_HOST per
+  // ADR-0034 — reverse actions inherit the parent permission.
+  bool allow_isolate = 4;
+  bool allow_collect = 5;
+  // version is a server-side monotonic so the agent can detect
+  // out-of-order delivery (the per-session hub channel is
+  // capacity-1 drop-stale, same shape as RuleSet).
+  string version = 6;
+}
+
 // HuntQuery distributes a one-shot query to matching hosts.
 // Phase 6 — skeleton message for v1 wire freeze.
 message HuntQuery {

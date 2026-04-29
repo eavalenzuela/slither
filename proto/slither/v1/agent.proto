@@ -55,6 +55,10 @@ message ClientMessage {
     Heartbeat heartbeat = 2;
     Ack ack = 3;
     DiagReport diag = 4;
+    // Phase 4 #73: response result corresponding to a server-issued
+    // ResponseRequest. Additive within slither.v1; v0 agents that
+    // don't know the field never emit it.
+    ResponseResult response_result = 5;
   }
 }
 
@@ -65,6 +69,10 @@ message ServerMessage {
     ResponseRequest response_request = 2;
     HuntQuery hunt_query = 3;           // Phase 6; skeleton for v1 freeze
     ConfigUpdate config_update = 4;
+    // Phase 4 #73: per-host response policy (ADR-0034). Pushed once
+    // on Session open and on every policy edit — the agent caches
+    // it for the auto-respond gate. v0 agents ignore.
+    HostPolicy host_policy = 5;
   }
 }
 
