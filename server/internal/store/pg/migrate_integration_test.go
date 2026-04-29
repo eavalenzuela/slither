@@ -28,8 +28,12 @@ var expectedTables = []string{
 	"alerts",
 	"audit_log",
 	"enrollment_tokens",
+	"host_response_policies",
 	"hosts",
+	"iocs",
+	"response_actions",
 	"rules",
+	"sessions",
 	"users",
 }
 

@@ -68,9 +68,16 @@ linters:
 
     misspell:
       locale: UK
-      # stdlib identifiers we can't rename (pkix.Name.Organization, etc.)
+      # Identifiers we can't rename without breaking external wire/API
+      # contracts. `artifacts` is locked into proto's RESPONSE_ACTION_
+      # COLLECT_ARTIFACTS enum (ADR-0034 / ADR-0011 wire freeze) so the
+      # mirroring Go const + DB CHECK string must stay US-spelled.
       ignore-rules:
         - Organization
+        - artifacts
+        - Artifacts
+        - collect_artifacts
+        - CollectArtifacts
 
   exclusions:
     generated: lax
