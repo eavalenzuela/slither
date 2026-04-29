@@ -203,6 +203,11 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 			Results: sink.Results(),
 			Telem:   telem,
 		})
+		// Phase 4 #78: wire the real kill_process / kill_tree
+		// handlers. Linux-only via build tag in respond/kill.go;
+		// non-Linux builds (none today, but Phase 7 macOS / Windows
+		// will need their own handlers) skip this call.
+		respond.WireKillHandlers(executor)
 		submitResponse = func(req *pb.ResponseRequest) {
 			// Submit is non-blocking; recv goroutine never stalls.
 			// Handlers inherit the agent-process context so a Run
