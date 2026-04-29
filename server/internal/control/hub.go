@@ -54,9 +54,20 @@ type RuleSource interface {
 	ListEnabledRules(ctx context.Context) ([]pg.Rule, error)
 }
 
+// IOCRegistrar refreshes + looks up IOC feed sizes for the compiler's
+// predicate-3 gate. *ioc.Registry satisfies it. Optional — when nil,
+// rules referencing `|ioc:<feed_id>` predicates fail compile and are
+// dropped from the wire payload (rather than silently slipping past
+// ADR-0018).
+type IOCRegistrar interface {
+	Refresh(ctx context.Context) (int, error)
+	ruleast.IOCRegistry
+}
+
 // Hub is the broadcast point for RuleSet pushes.
 type Hub struct {
 	src   RuleSource
+	iocs  IOCRegistrar
 	telem *telemetry.Counters
 
 	mu      sync.Mutex
@@ -66,8 +77,9 @@ type Hub struct {
 }
 
 // NewHub constructs a Hub. src is required; telem may be nil and is
-// substituted with a fresh counters value.
-func NewHub(src RuleSource, telem *telemetry.Counters) *Hub {
+// substituted with a fresh counters value. iocs is optional — passing
+// it enables the IOC compile-time gate.
+func NewHub(src RuleSource, telem *telemetry.Counters, iocs IOCRegistrar) *Hub {
 	if src == nil {
 		panic("control.NewHub: nil rule source")
 	}
@@ -76,6 +88,7 @@ func NewHub(src RuleSource, telem *telemetry.Counters) *Hub {
 	}
 	return &Hub{
 		src:   src,
+		iocs:  iocs,
 		telem: telem,
 		subs:  make(map[string]chan *pb.RuleSet),
 	}
@@ -90,7 +103,19 @@ func (h *Hub) Refresh(ctx context.Context) (skipped int, err error) {
 	if err != nil {
 		return 0, fmt.Errorf("control.Refresh: list: %w", err)
 	}
-	rs, skipped := buildRuleSet(rows, h.version.Add(1))
+	if h.iocs != nil {
+		feedCount, refreshErr := h.iocs.Refresh(ctx)
+		if refreshErr != nil {
+			// Don't tear down the rule push because IOC refresh
+			// flapped; the previous snapshot is still atomically
+			// readable. Log loudly so an oncall sees the drift.
+			slog.Warn("hub: ioc registry refresh failed (using stale snapshot)",
+				"err", refreshErr)
+		} else {
+			slog.Debug("hub: ioc registry refreshed", "feed_count", feedCount)
+		}
+	}
+	rs, skipped := buildRuleSet(rows, h.version.Add(1), h.iocs)
 
 	h.mu.Lock()
 	h.current = rs
@@ -175,10 +200,14 @@ func (h *Hub) publishOne(ch chan *pb.RuleSet, rs *pb.RuleSet) {
 //
 // Per-rule classification is logged at INFO via the slog facade (#49)
 // so operators can audit what landed where without scraping pg.
-func buildRuleSet(rows []pg.Rule, version uint64) (rs *pb.RuleSet, skipped int) {
+func buildRuleSet(rows []pg.Rule, version uint64, iocs ruleast.IOCRegistry) (rs *pb.RuleSet, skipped int) {
 	rules := make([]*pb.EdgeRule, 0, len(rows))
+	var compileOpts []ruleast.CompileOption
+	if iocs != nil {
+		compileOpts = append(compileOpts, ruleast.WithIOCRegistry(iocs))
+	}
 	for _, r := range rows {
-		artefact, _, class, err := ruleast.Compile([]byte(r.SourceYAML))
+		artefact, _, class, err := ruleast.Compile([]byte(r.SourceYAML), compileOpts...)
 		if err != nil {
 			// A row that no longer compiles is dropped from the wire
 			// payload but kept in the table — operators see the row

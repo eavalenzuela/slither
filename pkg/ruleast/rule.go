@@ -41,6 +41,11 @@ const (
 	OpEndsWith
 	OpRegex
 	OpCIDR
+	// OpIOC matches a field's value against the entries of one or
+	// more IOC feeds. Predicate values are interpreted as feed_ids;
+	// the runtime resolves them via Env.MatchIOC. Composes with no
+	// other modifiers (#66).
+	OpIOC
 )
 
 func (o Operator) String() string {
@@ -57,6 +62,8 @@ func (o Operator) String() string {
 		return "regex"
 	case OpCIDR:
 		return "cidr"
+	case OpIOC:
+		return "ioc"
 	}
 	return fmt.Sprintf("op(%d)", o)
 }
@@ -234,6 +241,19 @@ type Env interface {
 	Lookup(field string) ([]string, bool)
 }
 
+// IOCEnv is an optional capability an Env can advertise to evaluate
+// `|ioc:<feed_id>` predicates. An Env that doesn't implement IOCEnv
+// causes IOC predicates to evaluate false — useful in tests, but in
+// production every agent + server Env wires this up.
+type IOCEnv interface {
+	// MatchIOC reports whether value is present in the IOC feed
+	// identified by feedID. A missing feed returns false (rather than
+	// erroring) so a runtime feed reload race can't crash the
+	// evaluator; the compile-time gate already validated feed
+	// presence.
+	MatchIOC(feedID, value string) bool
+}
+
 // Selection is a named OR-of-AND group of field predicates. Sigma's
 // selection semantics:
 //
@@ -281,10 +301,15 @@ func (s *Selection) Cost() int {
 // produce the strings in Values; the runtime evaluator deals only with
 // the post-transform forms.
 type FieldPredicate struct {
-	Field   string
-	Op      Operator
-	Mods    Modifiers
-	Values  []string // OR across values, unless ModAll flips to AND
+	Field  string
+	Op     Operator
+	Mods   Modifiers
+	Values []string // OR across values, unless ModAll flips to AND.
+	// FeedIDs holds the IOC feed identifiers Op == OpIOC resolves at
+	// runtime. Sigma's `|ioc` modifier puts feed_ids into the YAML
+	// value position; the compiler moves them here so Values stays
+	// reserved for string-match Operators.
+	FeedIDs []string
 	regexps []*regexp.Regexp
 	cidrs   []netip.Prefix // populated when Op == OpCIDR
 }
@@ -307,6 +332,24 @@ func (p *FieldPredicate) Eval(env Env) bool {
 	}
 	bound, ok := env.Lookup(p.Field)
 	if !ok || len(bound) == 0 {
+		return false
+	}
+	if p.Op == OpIOC {
+		ioc, ok := env.(IOCEnv)
+		if !ok {
+			return false
+		}
+		// OR across feeds AND OR across bound values: any (feed, value)
+		// hit fires the predicate. ModAll is rejected at compile time
+		// for OpIOC since intersecting feeds rarely makes sense for
+		// indicator matching.
+		for _, feed := range p.FeedIDs {
+			for _, have := range bound {
+				if ioc.MatchIOC(feed, have) {
+					return true
+				}
+			}
+		}
 		return false
 	}
 	if p.Mods.Has(ModAll) {

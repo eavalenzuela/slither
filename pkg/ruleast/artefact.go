@@ -83,6 +83,12 @@ type EdgeArtefact struct {
 	// opt-in per rule via top-level `lookback: true`). Stateless rules
 	// always carry false.
 	Lookback bool
+
+	// IOCFeeds names every IOC feed_id the rule's `|ioc` predicates
+	// reference. Empty for rules that don't use IOC matching. The
+	// agent's IOC store (#67) preloads these feeds before the rule
+	// is enabled so an IOC predicate never silently misses.
+	IOCFeeds []string
 }
 
 // IsStateful reports whether the artefact carries non-zero state
@@ -133,6 +139,11 @@ type ServerPlan struct {
 	// the detection engine to keep the rule's window keyed across hosts
 	// rather than per host.
 	CrossHost bool `json:"cross_host,omitempty"`
+
+	// IOCFeeds names every IOC feed_id the rule references. Server
+	// detection engine #58 reads this directly when rebuilding plans
+	// after a feed reload; empty for rules that don't use `|ioc`.
+	IOCFeeds []string `json:"ioc_feeds,omitempty"`
 }
 
 // TemporalJoin is the wire form of a Sigma `near` join.

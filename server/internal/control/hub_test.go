@@ -39,7 +39,7 @@ func TestHub_RefreshAndSubscribe(t *testing.T) {
 	src := &stubSource{rules: []pg.Rule{{
 		UID: "rule-1", Name: "Test rule", SourceYAML: sampleYAML,
 	}}}
-	hub := NewHub(src, telemetry.NewCounters())
+	hub := NewHub(src, telemetry.NewCounters(), nil)
 
 	if _, err := hub.Refresh(context.Background()); err != nil {
 		t.Fatalf("Refresh: %v", err)
@@ -72,7 +72,7 @@ func TestHub_FanOutAndDropOldest(t *testing.T) {
 	src := &stubSource{rules: []pg.Rule{{
 		UID: "rule-1", SourceYAML: sampleYAML,
 	}}}
-	hub := NewHub(src, telemetry.NewCounters())
+	hub := NewHub(src, telemetry.NewCounters(), nil)
 	if _, err := hub.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestHub_SkipUncompilableRule(t *testing.T) {
 		{UID: "good", SourceYAML: sampleYAML},
 		{UID: "bad", SourceYAML: "not valid sigma yaml ::: {{}}"},
 	}}
-	hub := NewHub(src, telemetry.NewCounters())
+	hub := NewHub(src, telemetry.NewCounters(), nil)
 	skipped, err := hub.Refresh(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestHub_SkipUncompilableRule(t *testing.T) {
 }
 
 func TestHub_UnsubscribeClosesChannel(t *testing.T) {
-	hub := NewHub(&stubSource{}, telemetry.NewCounters())
+	hub := NewHub(&stubSource{}, telemetry.NewCounters(), nil)
 	ch := hub.Subscribe("x")
 	hub.Unsubscribe("x")
 	if _, ok := <-ch; ok {
@@ -159,7 +159,7 @@ func TestHub_EmitsStatefulV2Bounds(t *testing.T) {
 	src := &stubSource{rules: []pg.Rule{{
 		UID: "stateful-1", Name: "Stateful", SourceYAML: statefulYAML,
 	}}}
-	hub := NewHub(src, telemetry.NewCounters())
+	hub := NewHub(src, telemetry.NewCounters(), nil)
 	if _, err := hub.Refresh(context.Background()); err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestHub_FiltersServerOnly(t *testing.T) {
 		{UID: "edge-rule", SourceYAML: sampleYAML},
 		{UID: "server-only", SourceYAML: serverOnlyYAML},
 	}}
-	hub := NewHub(src, telemetry.NewCounters())
+	hub := NewHub(src, telemetry.NewCounters(), nil)
 	skipped, err := hub.Refresh(context.Background())
 	if err != nil {
 		t.Fatal(err)

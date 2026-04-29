@@ -354,6 +354,10 @@ func parseFieldKey(key string) (string, Operator, Modifiers, error) {
 			if err := setOp(OpCIDR, seg); err != nil {
 				return "", 0, 0, err
 			}
+		case "ioc":
+			if err := setOp(OpIOC, seg); err != nil {
+				return "", 0, 0, err
+			}
 		case "all":
 			mods |= ModAll
 		case "null":
@@ -397,6 +401,9 @@ func validateModifierComposition(mods Modifiers, op Operator) error {
 	if op == OpCIDR && mods != 0 {
 		return fmt.Errorf("modifier \"cidr\" composes with no other modifiers")
 	}
+	if op == OpIOC && mods != 0 {
+		return fmt.Errorf("modifier \"ioc\" composes with no other modifiers")
+	}
 	if op == OpRegex && mods&^ModAll != 0 {
 		return fmt.Errorf("modifier \"regex\" composes only with \"all\"")
 	}
@@ -426,6 +433,19 @@ func buildPredicate(field string, op Operator, mods Modifiers, raw any) (FieldPr
 	}
 	if len(values) == 0 {
 		return FieldPredicate{}, fmt.Errorf("empty value list")
+	}
+	if op == OpIOC {
+		// IOC values are feed_ids — light validation here keeps a
+		// typo from sneaking through to runtime where it would just
+		// silently miss.
+		feeds := make([]string, 0, len(values))
+		for _, v := range values {
+			if strings.TrimSpace(v) == "" {
+				return FieldPredicate{}, fmt.Errorf("ioc feed_id may not be empty")
+			}
+			feeds = append(feeds, strings.TrimSpace(v))
+		}
+		return FieldPredicate{Field: field, Op: op, Mods: mods, FeedIDs: feeds}, nil
 	}
 	values = applyEncodingModifiers(values, mods)
 	pred := FieldPredicate{Field: field, Op: op, Mods: mods, Values: values}

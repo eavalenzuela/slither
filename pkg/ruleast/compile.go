@@ -18,12 +18,17 @@ import "fmt"
 // trip an ADR-0018 predicate while declaring `force_edge: true` also
 // return ErrCompile with the predicate cited in the message — the
 // vocabulary mirrors the agent's runtime refusal reasons in ADR-0032.
-func Compile(src []byte) (*EdgeArtefact, *ServerPlan, Classification, error) {
+func Compile(src []byte, opts ...CompileOption) (*EdgeArtefact, *ServerPlan, Classification, error) {
 	rule, doc, err := compileSigma(src)
 	if err != nil {
 		return nil, nil, "", err
 	}
-	return classify(rule, doc.ForceEdge, doc.Lookback, doc.CrossHost)
+	cfg := applyOptions(opts)
+	iocVerdict, err := classifyIOC(rule, doc.ForceEdge, cfg.IOCRegistry)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	return classify(rule, doc.ForceEdge, doc.Lookback, doc.CrossHost, iocVerdict)
 }
 
 // ParseRule is Compile minus the classification gate: it returns the
@@ -36,6 +41,95 @@ func Compile(src []byte) (*EdgeArtefact, *ServerPlan, Classification, error) {
 func ParseRule(src []byte) (*Rule, error) {
 	rule, _, err := compileSigma(src)
 	return rule, err
+}
+
+// iocVerdict is the per-rule output of the IOC classification gate.
+// Empty FeedIDs means the rule has no IOC predicates and the gate is a
+// no-op. ServerOnly is set when any referenced feed exceeds
+// MaxIOCFeedEntries (ADR-0018 predicate 3) — `force_edge: true`
+// against an oversize feed fails compile rather than silently downgrading.
+type iocVerdict struct {
+	FeedIDs    []string
+	ServerOnly bool
+	Reason     string // populated when ServerOnly is true
+}
+
+// classifyIOC walks the rule's predicates, validates every IOC feed
+// reference against the registry, and decides whether feed sizes
+// force ServerOnly classification. Returns ErrCompile when a referenced
+// feed is unknown or when force_edge contradicts predicate 3.
+func classifyIOC(rule *Rule, forceEdge bool, reg IOCRegistry) (iocVerdict, error) {
+	feeds := collectIOCFeeds(rule)
+	if len(feeds) == 0 {
+		return iocVerdict{}, nil
+	}
+	if reg == nil {
+		return iocVerdict{}, compileErr(rule.ID, "ruleast",
+			fmt.Errorf("rule references ioc feeds %v but compiler was given no registry", feeds))
+	}
+	verdict := iocVerdict{FeedIDs: feeds}
+	for _, feedID := range feeds {
+		count, _, ok := reg.Lookup(feedID)
+		if !ok {
+			return iocVerdict{}, compileErr(rule.ID, "ruleast",
+				fmt.Errorf("ioc feed %q not found in registry", feedID))
+		}
+		if count > MaxIOCFeedEntries {
+			if forceEdge {
+				return iocVerdict{}, compileErr(rule.ID, "ruleast",
+					fmt.Errorf("force_edge violates ADR-0018 predicate \"ioc_feed_too_large\": feed %q has %d entries (cap %d)",
+						feedID, count, MaxIOCFeedEntries))
+			}
+			verdict.ServerOnly = true
+			verdict.Reason = fmt.Sprintf("ioc feed %q has %d entries (cap %d)",
+				feedID, count, MaxIOCFeedEntries)
+		}
+	}
+	return verdict, nil
+}
+
+// collectIOCFeeds walks every selection branch and returns the
+// deduplicated set of feed_ids referenced by OpIOC predicates.
+func collectIOCFeeds(rule *Rule) []string {
+	if rule == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	for _, sel := range rule.Selections {
+		for _, branch := range sel.Branches {
+			for i := range branch {
+				if branch[i].Op != OpIOC {
+					continue
+				}
+				for _, f := range branch[i].FeedIDs {
+					if _, ok := seen[f]; !ok {
+						seen[f] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(seen))
+	for k := range seen {
+		out = append(out, k)
+	}
+	// Stable order so golden tests + ServerPlan output are deterministic.
+	sortStrings(out)
+	return out
+}
+
+func sortStrings(in []string) {
+	// Tiny insertion sort to avoid an unconditional `sort` import in
+	// the hot compile path; len(in) is bounded by the rule's IOC
+	// reference count which is single-digit in practice.
+	for i := 1; i < len(in); i++ {
+		for j := i; j > 0 && in[j-1] > in[j]; j-- {
+			in[j-1], in[j] = in[j], in[j-1]
+		}
+	}
 }
 
 // classify implements the subset of ADR-0018 predicates the compiler
@@ -52,7 +146,7 @@ func ParseRule(src []byte) (*Rule, error) {
 //
 // force_edge against a violating predicate fails compile with the
 // predicate name cited.
-func classify(rule *Rule, forceEdge, lookback, crossHost bool) (*EdgeArtefact, *ServerPlan, Classification, error) {
+func classify(rule *Rule, forceEdge, lookback, crossHost bool, ioc iocVerdict) (*EdgeArtefact, *ServerPlan, Classification, error) {
 	// Predicate 1: cross-stream / cross-host inputs aren't locally
 	// observable, so the rule cannot run on the agent.
 	join := temporalJoinFrom(rule)
@@ -65,6 +159,7 @@ func classify(rule *Rule, forceEdge, lookback, crossHost bool) (*EdgeArtefact, *
 			RuleID:    rule.ID,
 			Lookback:  lookback,
 			CrossHost: crossHost,
+			IOCFeeds:  ioc.FeedIDs,
 		}
 		if rule.Aggregation != nil {
 			plan.Aggregation = rule.Aggregation
@@ -75,6 +170,20 @@ func classify(rule *Rule, forceEdge, lookback, crossHost bool) (*EdgeArtefact, *
 			plan.TimeframeSecs = join.WithinSecs
 		}
 		return nil, plan, ClassificationServerOnly, nil
+	}
+
+	// Predicate 3: oversize IOC feeds force ServerOnly even on
+	// otherwise-edge-eligible rules. force_edge against an oversize
+	// feed already failed in classifyIOC; reaching here means feeds
+	// are within cap or no feeds at all.
+	if ioc.ServerOnly {
+		return nil, &ServerPlan{
+			RuleID:        rule.ID,
+			Aggregation:   rule.Aggregation,
+			TimeframeSecs: aggTimeframe(rule),
+			Lookback:      lookback,
+			IOCFeeds:      ioc.FeedIDs,
+		}, ClassificationServerOnly, nil
 	}
 
 	if rule.Aggregation == nil {
@@ -91,6 +200,7 @@ func classify(rule *Rule, forceEdge, lookback, crossHost bool) (*EdgeArtefact, *
 		return &EdgeArtefact{
 			Rule:       rule,
 			ASTVersion: ASTVersionV1,
+			IOCFeeds:   ioc.FeedIDs,
 		}, nil, ClassificationEdgeOnly, nil
 	}
 
@@ -111,6 +221,7 @@ func classify(rule *Rule, forceEdge, lookback, crossHost bool) (*EdgeArtefact, *
 			Aggregation:   rule.Aggregation,
 			TimeframeSecs: window,
 			Lookback:      lookback,
+			IOCFeeds:      ioc.FeedIDs,
 		}, ClassificationServerOnly, nil
 	case stateCap > maxStateCap:
 		// Defensive — stateCap is set to maxStateCap above. Kept so
@@ -125,6 +236,7 @@ func classify(rule *Rule, forceEdge, lookback, crossHost bool) (*EdgeArtefact, *
 			Aggregation:   rule.Aggregation,
 			TimeframeSecs: window,
 			Lookback:      lookback,
+			IOCFeeds:      ioc.FeedIDs,
 		}, ClassificationServerOnly, nil
 	}
 
@@ -134,7 +246,19 @@ func classify(rule *Rule, forceEdge, lookback, crossHost bool) (*EdgeArtefact, *
 		StateWindowSecs: window,
 		StateCap:        stateCap,
 		Lookback:        lookback,
+		IOCFeeds:        ioc.FeedIDs,
 	}, nil, ClassificationEdgeOnly, nil
+}
+
+// aggTimeframe returns the rule's aggregation timeframe in seconds, or
+// 0 when the rule is stateless. Pulled out of inline conditionals so
+// the IOC-only ServerOnly path can populate ServerPlan.TimeframeSecs
+// without re-checking nil aggregation.
+func aggTimeframe(rule *Rule) uint32 {
+	if rule == nil || rule.Aggregation == nil {
+		return 0
+	}
+	return rule.Aggregation.TimeframeSecs
 }
 
 // temporalJoinFrom returns the wire-form join spec when the rule's

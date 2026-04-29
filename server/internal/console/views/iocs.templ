@@ -1,0 +1,120 @@
+package views
+
+import (
+	"strconv"
+
+	"github.com/t3rmit3/slither/server/internal/store/pg"
+)
+
+// IOCsListData drives /iocs.
+type IOCsListData struct {
+	Feeds []pg.IOCFeed
+	Flash string
+}
+
+// IOCsList shows every feed with an entry count + a Delete button.
+templ IOCsList(d IOCsListData) {
+	@Layout("IOC feeds") {
+		<div class="card">
+			<h2>IOC feeds</h2>
+			<p class="muted">
+				Sigma rules reference these via <code>Field|ioc: feed_id</code>.
+				Feeds with more than 100k entries force the rule server-only
+				per ADR-0018 predicate 3.
+			</p>
+			if d.Flash != "" {
+				<p class="flash">{ d.Flash }</p>
+			}
+
+			<p><a href="/iocs/new">Create new feed</a></p>
+
+			if len(d.Feeds) == 0 {
+				<p class="muted">No feeds configured yet.</p>
+			} else {
+				<table class="events-table">
+					<thead>
+						<tr>
+							<th>feed_id</th>
+							<th>name</th>
+							<th>kind</th>
+							<th>entries</th>
+							<th>updated</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, f := range d.Feeds {
+							<tr>
+								<td><code>{ f.FeedID }</code></td>
+								<td>{ f.Name }</td>
+								<td>{ string(f.Kind) }</td>
+								<td>{ strconv.Itoa(f.EntryCount) }</td>
+								<td class="muted">{ f.UpdatedAt.Format("2006-01-02 15:04:05") }</td>
+								<td>
+									<form method="post" action={ templ.URL("/iocs/" + f.FeedID + "/delete") }>
+										<button type="submit" class="danger">Delete</button>
+									</form>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	}
+}
+
+// IOCsFormData drives the create page. Name + Kind + Entries are
+// echoed back to the form on validation failure so the operator
+// doesn't have to re-paste their feed.
+type IOCsFormData struct {
+	FeedID     string
+	Name       string
+	Kind       pg.IOCKind
+	EntriesRaw string
+	Error      string
+}
+
+// IOCsForm is the create page.
+templ IOCsForm(d IOCsFormData) {
+	@Layout("New IOC feed") {
+		<div class="card">
+			<h2>New IOC feed</h2>
+			<p class="muted">
+				One entry per line. Blank lines and lines starting with
+				<code>#</code> are dropped. Up to 100,000 entries.
+			</p>
+			if d.Error != "" {
+				<p class="flash">{ d.Error }</p>
+			}
+			<form method="post" action="/iocs/new" class="filters">
+				<label>
+					feed_id
+					<input type="text" name="feed_id" value={ d.FeedID } required pattern="[A-Za-z0-9_\\-]+" placeholder="bad-ips"/>
+				</label>
+				<label>
+					name
+					<input type="text" name="name" value={ d.Name } required placeholder="Threat-feed-2026-Q2"/>
+				</label>
+				<label>
+					kind
+					<select name="kind" required>
+						<option value="" selected?={ d.Kind == "" }>—</option>
+						<option value="sha256" selected?={ d.Kind == pg.IOCKindSHA256 }>sha256</option>
+						<option value="ipv4"   selected?={ d.Kind == pg.IOCKindIPv4 }>ipv4</option>
+						<option value="ipv6"   selected?={ d.Kind == pg.IOCKindIPv6 }>ipv6</option>
+						<option value="domain" selected?={ d.Kind == pg.IOCKindDomain }>domain</option>
+					</select>
+				</label>
+				<label class="ioc-entries-label">
+					entries (one per line)
+					<textarea name="entries" rows="20" cols="80">{ d.EntriesRaw }</textarea>
+				</label>
+				<div class="actions">
+					<button type="submit">Create</button>
+					<a class="muted" href="/iocs">Cancel</a>
+				</div>
+			</form>
+		</div>
+	}
+}

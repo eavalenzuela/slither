@@ -176,6 +176,14 @@ func (s *Server) routes() {
 			r.Post("/enrolment-tokens", s.enrolmentTokensCreate)
 			r.Post("/enrolment-tokens/{token_id}/revoke", s.enrolmentTokensRevoke)
 		})
+
+		// IOC feeds (#66) — admin-only CRUD.
+		r.With(s.RequireRole(pg.RoleAdmin)).Group(func(r chi.Router) {
+			r.Get("/iocs", s.iocsList)
+			r.Get("/iocs/new", s.iocsNew)
+			r.Post("/iocs/new", s.iocsCreate)
+			r.Post("/iocs/{feed_id}/delete", s.iocsDelete)
+		})
 	})
 }
 

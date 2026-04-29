@@ -36,6 +36,7 @@ import (
 	"github.com/t3rmit3/slither/server/internal/graph"
 	"github.com/t3rmit3/slither/server/internal/grpcserv"
 	"github.com/t3rmit3/slither/server/internal/ingest"
+	"github.com/t3rmit3/slither/server/internal/ioc"
 	"github.com/t3rmit3/slither/server/internal/mtls"
 	"github.com/t3rmit3/slither/server/internal/store/ch"
 	"github.com/t3rmit3/slither/server/internal/store/pg"
@@ -96,7 +97,11 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	})
 
 	// --- Rule distribution hub ---
-	hub := control.NewHub(pgStore, telem)
+	iocReg := ioc.New(pgStore)
+	if _, refreshErr := iocReg.Refresh(ctx); refreshErr != nil {
+		slog.Warn("app: initial ioc registry refresh failed", "err", refreshErr)
+	}
+	hub := control.NewHub(pgStore, telem, iocReg)
 
 	// --- Server-side detection engine (Phase 3 #58 + #59) ---
 	detectEngine := detect.New(bus, pgStore, telem, detect.Options{})
