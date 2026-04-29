@@ -211,6 +211,10 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 		// Phase 4 #79: quarantine_file. Same Linux-build-tag pattern
 		// — non-Linux falls back to the not-implemented default.
 		respond.WireQuarantineHandlers(executor)
+		// Phase 4 #80: isolate_host / unisolate_host. iptables-driven
+		// slither-isolation chain; mgmt subnet from req.Target or
+		// autoderived from /proc/net/route.
+		respond.WireIsolationHandlers(executor)
 		submitResponse = func(req *pb.ResponseRequest) {
 			// Submit is non-blocking; recv goroutine never stalls.
 			// Handlers inherit the agent-process context so a Run
