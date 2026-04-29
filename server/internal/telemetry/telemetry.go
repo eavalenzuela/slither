@@ -46,6 +46,16 @@ type Counters struct {
 	alertsDeduped  atomic.Uint64
 	alertsErrored  atomic.Uint64
 
+	// response — Phase 4 #75 dispatcher. Dispatched bumps when the
+	// dispatcher hands a ResponseRequest off to a session's send
+	// channel; dropped bumps when the per-host queue is full and the
+	// dispatch is dropped (operator-visible signal that an agent's
+	// session is congested or absent). Completed bumps on every
+	// terminal ResponseResult the agent emits.
+	responseDispatched atomic.Uint64
+	responseDropped    atomic.Uint64
+	responseCompleted  atomic.Uint64
+
 	// subscriberPublishes counts pushes per Session subscriber name
 	// (e.g. "session:host-1"). Populated by IncSubscriberPublish on
 	// every successful stream.Send of a RuleSet so operators can see
@@ -148,6 +158,22 @@ func (c *Counters) IncAlertsDeduped() { c.alertsDeduped.Add(1) }
 // outage or a malformed payload (rule_uid empty, host_id unparseable).
 func (c *Counters) IncAlertsErrored() { c.alertsErrored.Add(1) }
 
+// IncResponseDispatched — Phase 4 #75 dispatcher accepted one action
+// onto a session's send channel.
+func (c *Counters) IncResponseDispatched() { c.responseDispatched.Add(1) }
+
+// IncResponseDropped — per-host send queue was full when the
+// dispatcher tried to enqueue. The corresponding response_actions
+// row stays in `pending` until either the agent reconnects (so the
+// hub Subscribe replays the latest snapshot) or an operator manually
+// re-dispatches.
+func (c *Counters) IncResponseDropped() { c.responseDropped.Add(1) }
+
+// IncResponseCompleted — agent emitted a terminal ResponseResult
+// (DONE or FAILED). Sustained growth without a matching
+// IncResponseDispatched signals stuck pending actions.
+func (c *Counters) IncResponseCompleted() { c.responseCompleted.Add(1) }
+
 // Snapshot captures the current counter values.
 type Snapshot struct {
 	EventsReceived        uint64
@@ -170,6 +196,9 @@ type Snapshot struct {
 	AlertsInserted        uint64
 	AlertsDeduped         uint64
 	AlertsErrored         uint64
+	ResponseDispatched    uint64
+	ResponseDropped       uint64
+	ResponseCompleted     uint64
 	SubscriberPublishes   map[string]uint64
 }
 
@@ -205,6 +234,9 @@ func (c *Counters) Snapshot() Snapshot {
 		AlertsInserted:        c.alertsInserted.Load(),
 		AlertsDeduped:         c.alertsDeduped.Load(),
 		AlertsErrored:         c.alertsErrored.Load(),
+		ResponseDispatched:    c.responseDispatched.Load(),
+		ResponseDropped:       c.responseDropped.Load(),
+		ResponseCompleted:     c.responseCompleted.Load(),
 		SubscriberPublishes:   subs,
 	}
 }

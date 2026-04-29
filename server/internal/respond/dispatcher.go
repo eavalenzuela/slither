@@ -1,0 +1,307 @@
+// Package respond owns the Phase 4 #75 response-action dispatcher.
+//
+// The dispatcher is the seam between operator intent (a console POST
+// to /alerts/{id}/respond) or rule intent (an edge auto-respond
+// finding) and the agent's executor on the wire. It sits in front of
+// pg (response_actions / host_response_policies) and the agent
+// SessionService send channel.
+//
+// Lifecycle of one action:
+//
+//  1. Dispatch() validates the requested action against the host's
+//     policy (HostPolicy.PermitsAction). Detect-only hosts get a
+//     "denied_by_policy" row written + an early return — the agent
+//     never sees the request.
+//  2. Permitted actions land as a `pending` row via
+//     pg.InsertResponseAction.
+//  3. The action is enqueued onto the per-host channel a session's
+//     send goroutine consumes (see Subscribe below). Queue overflow
+//     drops with a counter bump; the row stays in `pending` so an
+//     operator can re-dispatch.
+//  4. The agent runs the action and emits ResponseResult. The
+//     SessionService.handle path calls OnResult, which transitions
+//     the row to done/failed via pg.TransitionResponseAction (which
+//     also writes the audit row, atomic with the state change).
+//
+// The Hub keeps a per-host capacity-N channel; new sessions Subscribe
+// at session-open, queued actions stream onto the channel when the
+// session is up. Disconnected agents see queued actions on reconnect
+// (the Subscribe call drains any pending entries the hub had stashed).
+package respond
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	pb "github.com/t3rmit3/slither/proto/gen/slither/v1"
+	"github.com/t3rmit3/slither/server/internal/store/pg"
+	"github.com/t3rmit3/slither/server/internal/telemetry"
+)
+
+// queueDepth is the per-host pending channel capacity. Sized so a
+// burst of operator-driven actions on a single host (e.g. an analyst
+// killing every shell from a brute-force scenario) doesn't drop, but
+// not so large that a wedged agent buffers unbounded.
+const queueDepth = 32
+
+// Hub fans response-action requests out to per-host channels for the
+// SessionService send goroutines to consume. Safe for concurrent
+// Dispatch + Subscribe + OnResult callers.
+type Hub struct {
+	store *pg.Store
+	telem *telemetry.Counters
+
+	mu     sync.Mutex
+	queues map[string]chan *pb.ResponseRequest // host_id -> pending dispatch channel
+}
+
+// NewHub constructs a Hub. store is required; telem may be nil and
+// gets a fresh counters value.
+func NewHub(store *pg.Store, telem *telemetry.Counters) *Hub {
+	if store == nil {
+		panic("respond.NewHub: nil store")
+	}
+	if telem == nil {
+		telem = telemetry.NewCounters()
+	}
+	return &Hub{
+		store:  store,
+		telem:  telem,
+		queues: make(map[string]chan *pb.ResponseRequest),
+	}
+}
+
+// DispatchInput is the input shape for the operator + rule paths.
+type DispatchInput struct {
+	HostID     string            // required
+	AlertID    string            // optional
+	Action     pg.ResponseAction // required
+	Target     string            // required (pid/path/host_id)
+	OperatorID string            // operator-driven path
+	RuleUID    string            // rule-driven path
+	Reason     string            // optional human-readable detail
+	Deadline   time.Duration     // 0 = no deadline carried on the wire
+}
+
+// ErrPolicyDenied is returned when the host's policy does not permit
+// the requested action class. The dispatcher still inserts a
+// response_actions row with status=denied_by_policy so the audit
+// trail captures the attempt.
+var ErrPolicyDenied = errors.New("respond.Hub.Dispatch: action denied by host policy")
+
+// Dispatch validates + persists + enqueues an action. Returns the
+// pg.ResponseActionRow on success (status=pending) or on policy
+// denial (status=denied_by_policy + ErrPolicyDenied wrapped).
+//
+// Caller is expected to short-circuit ErrPolicyDenied with a UI
+// message rather than treating it as a server error — the row was
+// still written so the audit chain is complete.
+func (h *Hub) Dispatch(ctx context.Context, in DispatchInput) (pg.ResponseActionRow, error) {
+	if in.HostID == "" {
+		return pg.ResponseActionRow{}, errors.New("respond.Hub.Dispatch: host_id required")
+	}
+	if in.Action == "" {
+		return pg.ResponseActionRow{}, errors.New("respond.Hub.Dispatch: action required")
+	}
+	if in.Target == "" {
+		return pg.ResponseActionRow{}, errors.New("respond.Hub.Dispatch: target required")
+	}
+	if in.OperatorID == "" && in.RuleUID == "" {
+		return pg.ResponseActionRow{}, errors.New("respond.Hub.Dispatch: operator_id or rule_uid required")
+	}
+
+	policy, err := h.store.GetHostPolicy(ctx, in.HostID)
+	if err != nil {
+		return pg.ResponseActionRow{}, fmt.Errorf("respond.Hub.Dispatch: load policy: %w", err)
+	}
+	if !policy.PermitsAction(in.Action) {
+		// Insert + transition to denied_by_policy so the audit chain
+		// captures the rejection.
+		row, ierr := h.store.InsertResponseAction(ctx, pg.ResponseActionInsert{
+			HostID:     in.HostID,
+			AlertID:    in.AlertID,
+			Action:     in.Action,
+			Target:     in.Target,
+			OperatorID: in.OperatorID,
+			RuleUID:    in.RuleUID,
+			ReasonCode: in.Reason,
+		})
+		if ierr != nil {
+			return pg.ResponseActionRow{}, fmt.Errorf("respond.Hub.Dispatch: insert (denied path): %w", ierr)
+		}
+		denied, terr := h.store.TransitionResponseAction(ctx, pg.ResponseActionTransition{
+			ActionID: row.ID,
+			To:       pg.ResponseStatusDeniedByPolicy,
+			Detail:   "host policy does not permit " + string(in.Action),
+			ActorID:  in.OperatorID,
+		})
+		if terr != nil {
+			return pg.ResponseActionRow{}, fmt.Errorf("respond.Hub.Dispatch: deny: %w", terr)
+		}
+		return denied, fmt.Errorf("%w: action=%s", ErrPolicyDenied, in.Action)
+	}
+
+	row, err := h.store.InsertResponseAction(ctx, pg.ResponseActionInsert{
+		HostID:     in.HostID,
+		AlertID:    in.AlertID,
+		Action:     in.Action,
+		Target:     in.Target,
+		OperatorID: in.OperatorID,
+		RuleUID:    in.RuleUID,
+		ReasonCode: in.Reason,
+	})
+	if err != nil {
+		return pg.ResponseActionRow{}, fmt.Errorf("respond.Hub.Dispatch: insert: %w", err)
+	}
+
+	req := &pb.ResponseRequest{
+		ControlId:  row.ID,
+		OperatorId: in.OperatorID,
+		Action:     responseActionToProto(in.Action),
+		Target:     in.Target,
+	}
+	if in.Deadline > 0 {
+		req.Deadline = timestamppb.New(time.Now().Add(in.Deadline))
+	}
+	if !h.enqueue(in.HostID, req) {
+		// Drop counter; row stays pending so an operator can re-dispatch.
+		h.telem.IncResponseDropped()
+		slog.Warn("respond: dispatch dropped (host queue full)",
+			"host_id", in.HostID, "action_id", row.ID)
+		return row, nil
+	}
+	h.telem.IncResponseDispatched()
+	slog.Info("respond: dispatched",
+		"host_id", in.HostID, "action_id", row.ID, "action", in.Action)
+	return row, nil
+}
+
+// Subscribe is called by the SessionService send goroutine on Session
+// open. Returns the per-host channel + an unsubscribe function. A
+// session reconnecting to a host with queued (but undispatched)
+// actions sees them on the channel immediately.
+//
+// Each host has at most one subscriber at a time — multiple agents
+// claiming the same host_id is an enrolment-flow violation, not a
+// dispatcher concern. If a duplicate Subscribe lands, the previous
+// channel is closed (forces the previous send loop out) and the new
+// session takes ownership.
+func (h *Hub) Subscribe(hostID string) (queue <-chan *pb.ResponseRequest, unsubscribe func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if old, ok := h.queues[hostID]; ok {
+		close(old)
+	}
+	ch := make(chan *pb.ResponseRequest, queueDepth)
+	h.queues[hostID] = ch
+	return ch, func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if cur, ok := h.queues[hostID]; ok && cur == ch {
+			close(cur)
+			delete(h.queues, hostID)
+		}
+	}
+}
+
+// OnResult is the path the SessionService calls when an agent emits
+// a ResponseResult. Resolves the response_actions row by control_id
+// (which the dispatcher set to row.ID at enqueue time) and
+// transitions to done/failed.
+//
+// actorID is the operator who issued the action, if any — used by
+// the audit row inside TransitionResponseAction. Empty for rule-
+// driven actions.
+func (h *Hub) OnResult(ctx context.Context, result *pb.ResponseResult) error {
+	if result == nil {
+		return errors.New("respond.Hub.OnResult: nil result")
+	}
+	actionID := result.GetControlId()
+	if actionID == "" {
+		return errors.New("respond.Hub.OnResult: empty control_id")
+	}
+	// Validate that control_id is a UUID — the dispatcher always
+	// sets it to row.ID. A non-UUID control_id is a misuse from a
+	// future ad-hoc test client; reject loudly rather than poison
+	// the response_actions table.
+	if _, err := uuid.Parse(actionID); err != nil {
+		return fmt.Errorf("respond.Hub.OnResult: control_id not a uuid: %w", err)
+	}
+
+	to := pg.ResponseStatusDone
+	if result.GetStatus() == pb.ResponseStatus_RESPONSE_STATUS_FAILED {
+		to = pg.ResponseStatusFailed
+	}
+
+	// The agent transitions running -> done/failed; pg's state
+	// machine refuses pending -> done so we walk via running.
+	current, err := h.store.GetResponseAction(ctx, actionID)
+	if err != nil {
+		return fmt.Errorf("respond.Hub.OnResult: lookup %s: %w", actionID, err)
+	}
+	if current.Status == pg.ResponseStatusPending {
+		if _, err := h.store.TransitionResponseAction(ctx, pg.ResponseActionTransition{
+			ActionID: actionID,
+			To:       pg.ResponseStatusRunning,
+			ActorID:  current.OperatorID,
+		}); err != nil {
+			return fmt.Errorf("respond.Hub.OnResult: pending→running: %w", err)
+		}
+	}
+	if _, err := h.store.TransitionResponseAction(ctx, pg.ResponseActionTransition{
+		ActionID:   actionID,
+		To:         to,
+		Detail:     result.GetDetail(),
+		ResultBlob: result.GetResultBlob(),
+		ActorID:    current.OperatorID,
+	}); err != nil {
+		return fmt.Errorf("respond.Hub.OnResult: terminal: %w", err)
+	}
+	h.telem.IncResponseCompleted()
+	return nil
+}
+
+// enqueue tries to push req onto the per-host channel. Returns false
+// if the channel is full or no subscriber is attached — both cases
+// surface as IncResponseDropped at the call site.
+func (h *Hub) enqueue(hostID string, req *pb.ResponseRequest) bool {
+	h.mu.Lock()
+	ch, ok := h.queues[hostID]
+	h.mu.Unlock()
+	if !ok {
+		return false
+	}
+	select {
+	case ch <- req:
+		return true
+	default:
+		return false
+	}
+}
+
+// responseActionToProto maps the pg-side string enum to the proto
+// enum. Six action classes; ADR-0034 freezes both vocabularies.
+func responseActionToProto(a pg.ResponseAction) pb.ResponseAction {
+	switch a {
+	case pg.ResponseActionKillProcess:
+		return pb.ResponseAction_RESPONSE_ACTION_KILL_PROCESS
+	case pg.ResponseActionKillTree:
+		return pb.ResponseAction_RESPONSE_ACTION_KILL_PROCESS_TREE
+	case pg.ResponseActionQuarantineFile:
+		return pb.ResponseAction_RESPONSE_ACTION_QUARANTINE_FILE
+	case pg.ResponseActionIsolateHost:
+		return pb.ResponseAction_RESPONSE_ACTION_ISOLATE_HOST
+	case pg.ResponseActionUnisolateHost:
+		return pb.ResponseAction_RESPONSE_ACTION_UNISOLATE_HOST
+	case pg.ResponseActionCollectArtifacts:
+		return pb.ResponseAction_RESPONSE_ACTION_COLLECT_ARTIFACTS
+	}
+	return pb.ResponseAction_RESPONSE_ACTION_UNSPECIFIED
+}

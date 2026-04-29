@@ -3,10 +3,12 @@ package console
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/t3rmit3/slither/server/internal/console/views"
+	"github.com/t3rmit3/slither/server/internal/respond"
 	"github.com/t3rmit3/slither/server/internal/store/pg"
 )
 
@@ -77,13 +79,71 @@ func (s *Server) hostsPolicyUpdate(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/hosts/"+hostID+"/policy", http.StatusSeeOther)
 }
 
-// alertRespondStub returns 501 Not Implemented for now. The full
-// dispatcher path lands in #75 (server/internal/respond/). Buttons
-// rendered by the alert detail page hit this endpoint; until #75
-// fills the body we reject with a clear message instead of letting
-// the form 404 silently.
-func (s *Server) alertRespondStub(w http.ResponseWriter, r *http.Request) {
-	http.Error(w,
-		"response dispatch not yet implemented (lands in Phase 4 #75)",
-		http.StatusNotImplemented)
+// alertRespond accepts a POST from the alert detail's response
+// action buttons, validates the action against the host policy, and
+// hands it off to respond.Hub.Dispatch. Phase 4 #75. Form fields:
+//
+//	action  one of pg.ResponseAction values
+//	target  the resolved target (PID / path / host_id). The
+//	        operator types this when prompted, or it pre-fills from
+//	        the alert when the action class has an unambiguous default.
+//	reason  optional one-line note carried into the audit row's reason_code
+//
+// Routing wraps this in RequireRole(analyst, admin) at registration,
+// so this handler trusts that the user has *some* response role; the
+// per-action permission gate is enforced inside Dispatch via
+// pg.HostPolicy.PermitsAction.
+func (s *Server) alertRespond(w http.ResponseWriter, r *http.Request) {
+	if s.responseHub == nil {
+		http.Error(w, "response dispatcher not configured", http.StatusServiceUnavailable)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	r.Body = http.MaxBytesReader(w, r.Body, 4*1024)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	action := pg.ResponseAction(strings.TrimSpace(r.PostFormValue("action")))
+	target := strings.TrimSpace(r.PostFormValue("target"))
+	if target == "" {
+		target = strings.TrimSpace(r.PostFormValue("default_target"))
+	}
+	reason := strings.TrimSpace(r.PostFormValue("reason"))
+
+	alert, err := s.store.GetAlert(r.Context(), id)
+	switch {
+	case errors.Is(err, pg.ErrAlertNotFound):
+		http.NotFound(w, r)
+		return
+	case err != nil:
+		http.Error(w, "load alert failed", http.StatusInternalServerError)
+		return
+	}
+
+	row, dispatchErr := s.responseHub.Dispatch(r.Context(), respond.DispatchInput{
+		HostID:     alert.HostID,
+		AlertID:    alert.ID,
+		Action:     action,
+		Target:     target,
+		OperatorID: s.userID(r),
+		Reason:     reason,
+	})
+	switch {
+	case errors.Is(dispatchErr, respond.ErrPolicyDenied):
+		// Row was still written with status=denied_by_policy so the
+		// audit chain captures the attempt; surface a flash to the
+		// operator and bounce back to the alert detail.
+		s.sm.Put(r.Context(), "flash",
+			"Action denied by host policy. An admin can promote the host on its policy page.")
+		http.Redirect(w, r, "/alerts/"+id, http.StatusSeeOther)
+		return
+	case dispatchErr != nil:
+		http.Error(w, "dispatch failed: "+dispatchErr.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.sm.Put(r.Context(), "flash",
+		"Dispatched "+string(action)+" (action "+row.ID[:8]+"); see history for status.")
+	http.Redirect(w, r, "/alerts/"+id, http.StatusSeeOther)
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/t3rmit3/slither/server/internal/detect"
 	"github.com/t3rmit3/slither/server/internal/graph"
 	"github.com/t3rmit3/slither/server/internal/ingest"
+	"github.com/t3rmit3/slither/server/internal/respond"
 	"github.com/t3rmit3/slither/server/internal/store/ch"
 	"github.com/t3rmit3/slither/server/internal/store/pg"
 	"github.com/t3rmit3/slither/server/internal/telemetry"
@@ -53,6 +54,11 @@ type Options struct {
 	// detail page omits the graph block entirely so the console
 	// still works on hosts without a writable StateDirectory.
 	GraphCache *graph.Cache
+	// ResponseHub dispatches operator-driven response actions onto
+	// per-host send queues (Phase 4 #75). Optional — when nil, the
+	// alert response button POST returns 503 cleanly rather than
+	// trying to dispatch.
+	ResponseHub *respond.Hub
 }
 
 // Server is the chi.Router built around Options. New returns a stdlib
@@ -68,6 +74,7 @@ type Server struct {
 	graphCache          *graph.Cache
 	graphBuilder        *detect.FlowGraphBuilder
 	processTreeBuilder  *detect.ProcessTreeBuilder
+	responseHub         *respond.Hub
 }
 
 // New constructs the console router. Panics on misconfiguration — a
@@ -104,6 +111,7 @@ func New(opts Options) *Server {
 		mux:                 chi.NewRouter(),
 		defaultEnrollServer: opts.DefaultEnrollServer,
 		graphCache:          opts.GraphCache,
+		responseHub:         opts.ResponseHub,
 	}
 	if opts.GraphCache != nil && opts.ChStore != nil {
 		s.graphBuilder = &detect.FlowGraphBuilder{Lookup: opts.ChStore}
@@ -165,11 +173,13 @@ func (s *Server) routes() {
 			r.Post("/hosts/{host_id}/policy", s.hostsPolicyUpdate)
 		})
 
-		// Phase 4 #74: alert response action submit. Stub until #75
-		// fills the dispatcher body — the buttons need a route to
-		// hit so a click doesn't 404 silently.
+		// Phase 4 #75: alert response action dispatch. The handler
+		// validates the action against pg.HostPolicy and hands off
+		// to respond.Hub.Dispatch. Wrapped in
+		// RequireRole(analyst,admin); the per-action permission
+		// gate lives inside Dispatch.
 		r.With(s.RequireRole(pg.RoleAnalyst, pg.RoleAdmin)).
-			Post("/alerts/{id}/respond", s.alertRespondStub)
+			Post("/alerts/{id}/respond", s.alertRespond)
 
 		// Alerts (Phase 3 #61). List + detail are viewer-readable;
 		// transitions require analyst or admin.

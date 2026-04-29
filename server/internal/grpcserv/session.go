@@ -35,6 +35,16 @@ type RuleHub interface {
 	Unsubscribe(name string)
 }
 
+// ResponseHub is the dependency the Session handler needs from the
+// respond package (Phase 4 #75). Subscribe attaches the session's
+// send goroutine to the per-host pending-action channel; OnResult
+// resolves an agent-emitted ResponseResult to its response_actions
+// row and transitions the row.
+type ResponseHub interface {
+	Subscribe(hostID string) (<-chan *pb.ResponseRequest, func())
+	OnResult(ctx context.Context, result *pb.ResponseResult) error
+}
+
 // SessionService implements AgentService.Session. It embeds
 // UnimplementedAgentServiceServer so it satisfies AgentServiceServer
 // with Enroll left unimplemented — the two halves of AgentService run
@@ -44,10 +54,11 @@ type RuleHub interface {
 type SessionService struct {
 	pb.UnimplementedAgentServiceServer
 
-	Store   *pg.Store
-	Bus     *ingest.Bus
-	Telem   *telemetry.Counters
-	RuleHub RuleHub // optional; nil disables rule push
+	Store       *pg.Store
+	Bus         *ingest.Bus
+	Telem       *telemetry.Counters
+	RuleHub     RuleHub     // optional; nil disables rule push
+	ResponseHub ResponseHub // optional; nil disables response dispatch
 
 	// PeerHostIDExtractor is overridable for tests that route through
 	// bufconn without real client certs. Production leaves it nil and
@@ -103,7 +114,7 @@ func (s *SessionService) Session(stream pb.AgentService_SessionServer) error {
 	// by cancelling sendCtx on its own return.
 	sendCtx, cancelSend := context.WithCancel(ctx)
 	var sendWG sync.WaitGroup
-	if s.RuleHub != nil {
+	if s.RuleHub != nil || s.ResponseHub != nil {
 		sendWG.Add(1)
 		go func() {
 			defer sendWG.Done()
@@ -127,22 +138,37 @@ func (s *SessionService) Session(stream pb.AgentService_SessionServer) error {
 	}
 }
 
-// runSendLoop subscribes to the rule hub for this session and pushes
-// every RuleSet it receives on the stream. Exits when sendCtx is done
-// or stream.Send returns an error (broken transport — Recv will see it
-// next read and tear down).
+// runSendLoop owns stream.Send for the lifetime of the session. It
+// fans together RuleSet pushes (Phase 2 #39) and ResponseRequest
+// pushes (Phase 4 #75) so a single goroutine touches stream.Send,
+// matching gRPC's non-concurrent-send contract.
+//
+// Exits when sendCtx is done or stream.Send returns an error (broken
+// transport — Recv will see it next read and tear down).
 func (s *SessionService) runSendLoop(sendCtx context.Context, hostID string, stream pb.AgentService_SessionServer) {
 	subName := "session:" + hostID
-	updates := s.RuleHub.Subscribe(subName)
-	defer s.RuleHub.Unsubscribe(subName)
+
+	var rsUpdates <-chan *pb.RuleSet
+	if s.RuleHub != nil {
+		rsUpdates = s.RuleHub.Subscribe(subName)
+		defer s.RuleHub.Unsubscribe(subName)
+	}
+
+	var rrUpdates <-chan *pb.ResponseRequest
+	var rrUnsubscribe func()
+	if s.ResponseHub != nil {
+		rrUpdates, rrUnsubscribe = s.ResponseHub.Subscribe(hostID)
+		defer rrUnsubscribe()
+	}
 
 	for {
 		select {
 		case <-sendCtx.Done():
 			return
-		case rs, ok := <-updates:
+		case rs, ok := <-rsUpdates:
 			if !ok {
-				return
+				rsUpdates = nil // disable this case; keep ranging on the rest
+				continue
 			}
 			if rs == nil {
 				continue
@@ -158,6 +184,23 @@ func (s *SessionService) runSendLoop(sendCtx context.Context, hostID string, str
 				"subscriber", subName,
 				"version", rs.GetVersion(),
 				"rule_count", len(rs.GetRules()))
+		case req, ok := <-rrUpdates:
+			if !ok {
+				rrUpdates = nil
+				continue
+			}
+			if req == nil {
+				continue
+			}
+			if err := stream.Send(&pb.ServerMessage{
+				Kind: &pb.ServerMessage_ResponseRequest{ResponseRequest: req},
+			}); err != nil {
+				return
+			}
+			slog.Info("respond: sent",
+				"host_id", hostID,
+				"action_id", req.GetControlId(),
+				"action", req.GetAction().String())
 		}
 	}
 }
@@ -182,6 +225,19 @@ func (s *SessionService) handle(ctx context.Context, hostID string, msg *pb.Clie
 		// WARN so operators reading `journalctl -u slither-server`
 		// see the failed predicates without scraping agent stderr.
 		s.logDiagReport(hostID, k.Diag)
+	case *pb.ClientMessage_ResponseResult:
+		// Phase 4 #75: agent's terminal verdict for one
+		// ResponseRequest. Hub.OnResult resolves to the
+		// response_actions row and transitions the state machine
+		// (the same call writes the audit row inside the same tx).
+		if s.ResponseHub != nil && k.ResponseResult != nil {
+			if err := s.ResponseHub.OnResult(ctx, k.ResponseResult); err != nil {
+				slog.Warn("respond: result handling failed",
+					"host_id", hostID,
+					"action_id", k.ResponseResult.GetControlId(),
+					"err", err)
+			}
+		}
 	case nil:
 		// Empty oneof — protocol violation, but tolerate it.
 	default:

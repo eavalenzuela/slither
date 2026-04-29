@@ -38,6 +38,7 @@ import (
 	"github.com/t3rmit3/slither/server/internal/ingest"
 	"github.com/t3rmit3/slither/server/internal/ioc"
 	"github.com/t3rmit3/slither/server/internal/mtls"
+	"github.com/t3rmit3/slither/server/internal/respond"
 	"github.com/t3rmit3/slither/server/internal/store/ch"
 	"github.com/t3rmit3/slither/server/internal/store/pg"
 	"github.com/t3rmit3/slither/server/internal/telemetry"
@@ -107,10 +108,14 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	detectEngine := detect.New(bus, pgStore, telem, detect.Options{})
 	detectEngine.SetReplayer(chStore)
 
+	// --- Response dispatcher (Phase 4 #75) ---
+	responseHub := respond.NewHub(pgStore, telem)
+
 	// --- gRPC services ---
 	enrollSvc := grpcserv.NewEnrollService(pgStore, ca, telem)
 	sessionSvc := grpcserv.NewSessionService(pgStore, bus, telem)
 	sessionSvc.RuleHub = hub
+	sessionSvc.ResponseHub = responseHub
 
 	enrollSrv := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(mtls.ServerEnrollTLSConfig(serverCert))),
@@ -165,6 +170,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		// listener bind alone is good enough for compose smoke.
 		DefaultEnrollServer: defaultEnrollServer(cfg.Listeners.Enroll),
 		GraphCache:          graphCache,
+		ResponseHub:         responseHub,
 	})
 	consoleSrv := &http.Server{
 		Addr:              cfg.Listeners.Console,
