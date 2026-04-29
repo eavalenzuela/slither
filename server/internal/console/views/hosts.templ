@@ -1,5 +1,7 @@
 package views
 
+import "strconv"
+
 // Hosts is the host inventory list page.
 templ Hosts(d HostsPageData) {
 	@Layout("Hosts") {
@@ -25,6 +27,7 @@ templ Hosts(d HostsPageData) {
 							<th>agent</th>
 							<th>enrolled_at</th>
 							<th>last_seen</th>
+							<th></th>
 							if d.IsAdmin {
 								<th></th>
 							}
@@ -48,6 +51,7 @@ templ Hosts(d HostsPageData) {
 								</td>
 								<td class="muted">{ FormatEnrolledAt(h) }</td>
 								<td class="muted">{ FormatLastSeen(h) }</td>
+								<td class="muted"><a href={ templ.URL("/hosts/" + h.ID + "/process-tree") }>process tree</a></td>
 								if d.IsAdmin {
 									<td>
 										if status != HostStatusRevoked {
@@ -61,6 +65,57 @@ templ Hosts(d HostsPageData) {
 						}
 					</tbody>
 				</table>
+			}
+		</div>
+	}
+}
+
+// ProcessTreeData drives /hosts/{id}/process-tree. SVG is the
+// pre-rendered bytes from graph.Render; embedded inline via templ.Raw
+// so the page is one round-trip and the SVG inherits page styles for
+// link/click targets later.
+type ProcessTreeData struct {
+	Host      string
+	HostID    string
+	Pid       uint32
+	Depth     int
+	SVG       string // already rendered; templ.Raw'd into the page
+	Error     string // user-visible error (e.g., "process not found")
+	Truncated bool
+}
+
+// ProcessTree renders the process-tree mini-graph page. Form lets the
+// operator change pid + depth without leaving the page.
+templ ProcessTree(d ProcessTreeData) {
+	@Layout("Process tree — " + d.Host) {
+		<div class="card">
+			<h2>Process tree</h2>
+			<p class="muted">
+				Walks { strconv.Itoa(d.Depth) }-deep starting from pid { strconv.FormatUint(uint64(d.Pid), 10) } on
+				<code>{ d.Host }</code> using events from the last 24 hours.
+			</p>
+
+			<form method="get" action={ templ.URL("/hosts/" + d.HostID + "/process-tree") } class="filters">
+				<label>
+					pid
+					<input type="number" name="pid" value={ strconv.FormatUint(uint64(d.Pid), 10) } min="1" required/>
+				</label>
+				<label>
+					depth
+					<input type="number" name="depth" value={ strconv.Itoa(d.Depth) } min="1" max="8"/>
+				</label>
+				<button type="submit">Render</button>
+			</form>
+
+			if d.Error != "" {
+				<p class="flash">{ d.Error }</p>
+			} else if d.SVG != "" {
+				if d.Truncated {
+					<p class="muted">Tree truncated at the configured node cap; refine pid or reduce depth to focus.</p>
+				}
+				<div class="alert-flow-graph">
+					@templ.Raw(d.SVG)
+				</div>
 			}
 		</div>
 	}

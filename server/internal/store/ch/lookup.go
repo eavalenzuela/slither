@@ -68,6 +68,89 @@ func (s *Store) GetEventNode(ctx context.Context, eventID string) (EventNode, er
 	return EventNode{}, ErrEventNotFound
 }
 
+// ListProcessChildren returns one row per distinct child PID whose
+// parent_pid matches the given pid on the given host within
+// [observedAfter, observedBefore]. Each child is represented by its
+// earliest exec event (activity_id == 1 when available; falls back to
+// any row when an exec was not captured).
+//
+// Used by the process-tree builder (#65). Limit caps fan-out at each
+// tree level so a single noisy parent doesn't blow the render
+// budget.
+func (s *Store) ListProcessChildren(
+	ctx context.Context,
+	hostID string,
+	parentPID uint32,
+	observedAfter, observedBefore time.Time,
+	limit int,
+) ([]EventNode, error) {
+	if parentPID == 0 {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 64
+	}
+	hostUUID, err := uuid.Parse(hostID)
+	if err != nil {
+		return nil, fmt.Errorf("ch.ListProcessChildren: parse host_id: %w", err)
+	}
+	if observedBefore.IsZero() {
+		observedBefore = time.Now()
+	}
+	if observedAfter.IsZero() {
+		observedAfter = observedBefore.Add(-24 * time.Hour)
+	}
+
+	// argMin(exec_path, observed_at) returns the exec_path from the
+	// earliest row in the group — usually the exec event. Same idea
+	// for parent_pid + process_name. Avoids picking exit-event
+	// metadata when an exec event also exists.
+	stmt := `
+		SELECT
+			toString(any(event_id)) AS event_id,
+			toString(host_id)       AS host_id,
+			pid,
+			argMin(parent_pid, observed_at)  AS parent_pid,
+			argMin(exec_path, observed_at)   AS exec_path,
+			argMin(process_name, observed_at) AS process_name,
+			argMin(cmdline, observed_at)     AS cmdline,
+			min(observed_at)                 AS observed_at
+		FROM ocsf_process_activity_1007
+		WHERE host_id   = ?
+		  AND parent_pid = ?
+		  AND observed_at >= fromUnixTimestamp64Nano(?)
+		  AND observed_at <= fromUnixTimestamp64Nano(?)
+		GROUP BY host_id, pid
+		ORDER BY observed_at ASC
+		LIMIT ?
+	`
+	rows, err := s.conn.Query(ctx, stmt,
+		hostUUID, parentPID,
+		observedAfter.UnixNano(), observedBefore.UnixNano(),
+		limit)
+	if err != nil {
+		return nil, fmt.Errorf("ch.ListProcessChildren: query: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]EventNode, 0, limit)
+	for rows.Next() {
+		n := EventNode{ClassUID: 1007}
+		if err := rows.Scan(
+			&n.EventID, &n.HostID,
+			&n.PID, &n.ParentPID, &n.ExecPath, &n.ProcName, &n.Cmdline,
+			&n.ObservedAt,
+		); err != nil {
+			return nil, fmt.Errorf("ch.ListProcessChildren: scan: %w", err)
+		}
+		out = append(out, n)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ch.ListProcessChildren: iter: %w", err)
+	}
+	return out, nil
+}
+
 // LookupProcessByPID returns the most recent process_activity row for
 // (host_id, pid) at or before observedBefore. Used by the flow-graph
 // builder to chase parent processes (parent_pid lookup) and to find

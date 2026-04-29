@@ -115,6 +115,49 @@ func (s *Store) ListHosts(ctx context.Context) ([]HostRow, error) {
 	return out, rows.Err()
 }
 
+// GetHost returns one hosts row by id. ErrHostNotFound for unknown
+// UUIDs; revoked rows are returned (the caller decides whether to act
+// on them — process-tree #65 surfaces revoked hosts as historical).
+func (s *Store) GetHost(ctx context.Context, hostID string) (HostRow, error) {
+	id, err := parseUUID(hostID)
+	if err != nil {
+		return HostRow{}, fmt.Errorf("pg.GetHost: parse host_id: %w", err)
+	}
+	var (
+		r        HostRow
+		idCol    pgtype.UUID
+		lastSeen pgtype.Timestamptz
+		revoked  pgtype.Timestamptz
+	)
+	err = s.pool.QueryRow(ctx, `
+		SELECT id, hostname, machine_id, os_name, os_version,
+		       kernel_version, arch, COALESCE(agent_version, ''),
+		       cert_serial, enrolled_at, last_seen, revoked_at
+		FROM hosts
+		WHERE id = $1
+	`, id).Scan(
+		&idCol, &r.Hostname, &r.MachineID, &r.OSName, &r.OSVersion,
+		&r.KernelVersion, &r.Arch, &r.AgentVersion,
+		&r.CertSerial, &r.EnrolledAt, &lastSeen, &revoked,
+	)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return HostRow{}, ErrHostNotFound
+	case err != nil:
+		return HostRow{}, fmt.Errorf("pg.GetHost: %w", err)
+	}
+	r.ID = uuidString(idCol)
+	if lastSeen.Valid {
+		t := lastSeen.Time
+		r.LastSeen = &t
+	}
+	if revoked.Valid {
+		t := revoked.Time
+		r.RevokedAt = &t
+	}
+	return r, nil
+}
+
 // RevokeHost flips hosts.revoked_at = now() and audits the action.
 // The next Session-stream authn for this host will fail because
 // HostExists treats revoked_at IS NOT NULL as "not present". Existing

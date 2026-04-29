@@ -67,6 +67,7 @@ type Server struct {
 	defaultEnrollServer string
 	graphCache          *graph.Cache
 	graphBuilder        *detect.FlowGraphBuilder
+	processTreeBuilder  *detect.ProcessTreeBuilder
 }
 
 // New constructs the console router. Panics on misconfiguration — a
@@ -106,6 +107,7 @@ func New(opts Options) *Server {
 	}
 	if opts.GraphCache != nil && opts.ChStore != nil {
 		s.graphBuilder = &detect.FlowGraphBuilder{Lookup: opts.ChStore}
+		s.processTreeBuilder = &detect.ProcessTreeBuilder{Lookup: opts.ChStore}
 	}
 	s.routes()
 	return s
@@ -152,6 +154,9 @@ func (s *Server) routes() {
 			r.Get("/events/{class_uid}/{event_id}", s.eventDetail)
 		}
 		r.Get("/hosts", s.hostsList)
+		if s.processTreeBuilder != nil {
+			r.Get("/hosts/{host_id}/process-tree", s.hostsProcessTree)
+		}
 		r.With(s.RequireRole(pg.RoleAdmin)).
 			Post("/hosts/{host_id}/revoke", s.hostsRevoke)
 
