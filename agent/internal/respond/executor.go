@@ -176,11 +176,19 @@ func (e *Executor) handle(ctx context.Context, req *pb.ResponseRequest) {
 	}
 
 	status, detail, blob := h(ctx, req)
+	// Phase 4 #83/#86: rule_uid + action + target stamps on the result
+	// let the server's OnResult insert a response_actions row for
+	// agent-initiated actions whose control_id it has never seen.
+	// The fields are echoed for server-initiated actions too — pg's
+	// row already carries them, so duplicates are harmless.
 	e.emit(&pb.ResponseResult{
 		ControlId:  req.GetControlId(),
 		Status:     status,
 		Detail:     detail,
 		ResultBlob: blob,
+		RuleUid:    req.GetRuleUid(),
+		Action:     req.GetAction(),
+		Target:     req.GetTarget(),
 	})
 	switch status {
 	case pb.ResponseStatus_RESPONSE_STATUS_DONE:

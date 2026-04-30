@@ -1,4 +1,4 @@
-title: Response targeting a field the selection doesn't reference
+title: Response with garbage target_field
 id: invalid-0031
 logsource:
   product: linux
@@ -10,4 +10,4 @@ detection:
 slither:
   response:
     action: kill_process
-    target_field: ProcessID
+    target_field: "1bad-shape!"

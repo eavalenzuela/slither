@@ -189,13 +189,13 @@ func TestOnResultRejectsBadControlID(t *testing.T) {
 		telem:  telemetry.NewCounters(),
 		queues: make(map[string]chan *pb.ResponseRequest),
 	}
-	if err := h.OnResult(context.Background(), nil); err == nil {
+	if err := h.OnResult(context.Background(), "", nil); err == nil {
 		t.Fatal("nil result should error")
 	}
-	if err := h.OnResult(context.Background(), &pb.ResponseResult{}); err == nil {
+	if err := h.OnResult(context.Background(), "host-x", &pb.ResponseResult{}); err == nil {
 		t.Fatal("empty control_id should error")
 	}
-	if err := h.OnResult(context.Background(), &pb.ResponseResult{ControlId: "not-a-uuid"}); err == nil {
+	if err := h.OnResult(context.Background(), "host-x", &pb.ResponseResult{ControlId: "not-a-uuid"}); err == nil {
 		t.Fatal("non-uuid control_id should error")
 	}
 }

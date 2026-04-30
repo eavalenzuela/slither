@@ -172,11 +172,19 @@ func compileSigma(src []byte) (*Rule, *sigmaYAML, error) {
 // Validation rules:
 //
 //   - action must be one of the six ADR-0034 classes.
-//   - target_field must appear in at least one selection's predicates
-//     so the agent's auto-respond engine (#83) can resolve it from
-//     the firing event's fields. Catches typos at compile time.
+//   - target_field must be non-empty and identifier-shaped. Earlier
+//     iterations required target_field to appear in a selection
+//     predicate, but kill_process commonly matches on Image (which
+//     binary fired) while targeting ProcessId (which PID to kill) —
+//     a strict selection-membership check made that valid pattern
+//     uncompilable. The agent's AutoResponder gracefully stamps
+//     would_have_executed=true when target_field doesn't resolve at
+//     runtime, so a typo here degrades into a detect-only firing
+//     rather than a silent miss — soft enough to drop the
+//     selection-membership constraint.
 //   - immediate is a bare bool; no extra validation.
 func compileResponseIntent(rule *Rule, in *responseYAML) (*ResponseIntent, error) {
+	_ = rule // kept for future per-category field-taxonomy validation
 	action := ResponseAction(strings.TrimSpace(in.Action))
 	if action == "" {
 		return nil, fmt.Errorf("slither.response.action required")
@@ -196,8 +204,8 @@ func compileResponseIntent(rule *Rule, in *responseYAML) (*ResponseIntent, error
 	if target == "" {
 		return nil, fmt.Errorf("slither.response.target_field required")
 	}
-	if !ruleReferencesField(rule, target) {
-		return nil, fmt.Errorf("slither.response.target_field %q is not referenced by any selection in this rule", target)
+	if !isIdentifierShape(target) {
+		return nil, fmt.Errorf("slither.response.target_field %q must be identifier-shaped (alphanumeric, underscore, or dot)", target)
 	}
 	return &ResponseIntent{
 		Action:      action,
@@ -206,9 +214,32 @@ func compileResponseIntent(rule *Rule, in *responseYAML) (*ResponseIntent, error
 	}, nil
 }
 
+// isIdentifierShape reports whether s is a plausible OCSF field name:
+// non-empty, first char is a letter or underscore, rest are letters,
+// digits, underscores, or dots (for nested fields like "process.uid").
+func isIdentifierShape(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r == '_':
+			continue
+		case (r >= '0' && r <= '9' || r == '.') && i > 0:
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // ruleReferencesField reports whether any selection's branch carries
 // a predicate on the named field. Case-sensitive — Sigma field names
 // are; if authors disagree, the typo'd name still fails the check.
+//
+//nolint:unused // Retained for future per-category taxonomy validation.
 func ruleReferencesField(rule *Rule, field string) bool {
 	if rule == nil {
 		return false

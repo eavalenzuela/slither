@@ -42,7 +42,7 @@ type RuleHub interface {
 // row and transitions the row.
 type ResponseHub interface {
 	Subscribe(hostID string) (<-chan *pb.ResponseRequest, func())
-	OnResult(ctx context.Context, result *pb.ResponseResult) error
+	OnResult(ctx context.Context, hostID string, result *pb.ResponseResult) error
 }
 
 // PolicyHub is the per-host response-policy push (Phase 4 #84). The
@@ -262,7 +262,7 @@ func (s *SessionService) handle(ctx context.Context, hostID string, msg *pb.Clie
 		// response_actions row and transitions the state machine
 		// (the same call writes the audit row inside the same tx).
 		if s.ResponseHub != nil && k.ResponseResult != nil {
-			if err := s.ResponseHub.OnResult(ctx, k.ResponseResult); err != nil {
+			if err := s.ResponseHub.OnResult(ctx, hostID, k.ResponseResult); err != nil {
 				slog.Warn("respond: result handling failed",
 					"host_id", hostID,
 					"action_id", k.ResponseResult.GetControlId(),

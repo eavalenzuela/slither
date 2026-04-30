@@ -75,6 +75,13 @@ message ResponseRequest {
   // already reverses ISOLATE_HOST natively; parent_action_id only
   // wires the audit chain for those.
   string parent_action_id = 6;
+  // rule_uid is populated for agent-initiated rule-driven actions
+  // (Phase 4 #83). Stays empty for server-initiated requests; the
+  // server's response_actions row already carries the uid in pg.
+  // The agent's executor echoes this on ResponseResult.rule_uid so
+  // the server's OnResult can insert a fresh row for an unknown
+  // control_id without ambiguity.
+  string rule_uid = 7;
 }
 
 enum ResponseAction {
@@ -105,6 +112,15 @@ message ResponseResult {
   // result_blob carries the COLLECT_ARTIFACTS tarball and is empty
   // for every other action.
   bytes result_blob = 5;
+  // Phase 4 #83 fields populated only by agent-initiated (rule-
+  // driven) actions. The server's dispatcher knows nothing about
+  // these — control_id is fresh on the agent — so the server's
+  // OnResult inserts a response_actions row with rule_uid set and
+  // status starting at `running` when it sees a result whose
+  // control_id has no matching row. operator_id stays NULL.
+  string rule_uid = 6;
+  ResponseAction action = 7;
+  string target = 8;
 }
 
 enum ResponseStatus {

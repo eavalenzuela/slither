@@ -371,10 +371,11 @@ func (h *Hub) Subscribe(hostID string) (queue <-chan *pb.ResponseRequest, unsubs
 // (which the dispatcher set to row.ID at enqueue time) and
 // transitions to done/failed.
 //
-// actorID is the operator who issued the action, if any — used by
-// the audit row inside TransitionResponseAction. Empty for rule-
-// driven actions.
-func (h *Hub) OnResult(ctx context.Context, result *pb.ResponseResult) error {
+// hostID is the trusted Session host (set from the verified peer
+// cert); used when the result is from an agent-initiated rule-driven
+// action whose row doesn't exist yet — we insert a fresh row scoped
+// to that host so the audit chain captures the firing.
+func (h *Hub) OnResult(ctx context.Context, hostID string, result *pb.ResponseResult) error {
 	if result == nil {
 		return errors.New("respond.Hub.OnResult: nil result")
 	}
@@ -382,10 +383,10 @@ func (h *Hub) OnResult(ctx context.Context, result *pb.ResponseResult) error {
 	if actionID == "" {
 		return errors.New("respond.Hub.OnResult: empty control_id")
 	}
-	// Validate that control_id is a UUID — the dispatcher always
-	// sets it to row.ID. A non-UUID control_id is a misuse from a
-	// future ad-hoc test client; reject loudly rather than poison
-	// the response_actions table.
+	// Validate that control_id is a UUID — both the server dispatcher
+	// (operator-driven) and the agent's AutoResponder
+	// (rule-driven, Phase 4 #83) generate UUIDs. A non-UUID is a
+	// protocol violation from a future ad-hoc test client.
 	if _, err := uuid.Parse(actionID); err != nil {
 		return fmt.Errorf("respond.Hub.OnResult: control_id not a uuid: %w", err)
 	}
@@ -395,9 +396,37 @@ func (h *Hub) OnResult(ctx context.Context, result *pb.ResponseResult) error {
 		to = pg.ResponseStatusFailed
 	}
 
-	// The agent transitions running -> done/failed; pg's state
-	// machine refuses pending -> done so we walk via running.
+	// Look up the row by control_id. The dispatcher always sets
+	// control_id = row.ID at enqueue time, so server-driven actions
+	// resolve. Agent-initiated rule-driven actions (#83) have no
+	// pre-existing row — when the lookup fails AND the result carries
+	// the rule_uid + action + target stamps, insert a fresh row so the
+	// audit chain captures the firing.
 	current, err := h.store.GetResponseAction(ctx, actionID)
+	if errors.Is(err, pg.ErrResponseActionNotFound) && result.GetRuleUid() != "" {
+		ruleAction := protoToResponseAction(result.GetAction())
+		if ruleAction == "" {
+			return fmt.Errorf("respond.Hub.OnResult: agent-initiated result %s has unknown action enum %s",
+				actionID, result.GetAction())
+		}
+		inserted, ierr := h.store.InsertResponseAction(ctx, pg.ResponseActionInsert{
+			HostID:        hostID,
+			Action:        ruleAction,
+			Target:        result.GetTarget(),
+			RuleUID:       result.GetRuleUid(),
+			InitialStatus: pg.ResponseStatusRunning,
+			ReasonCode:    "agent auto-respond",
+		})
+		if ierr != nil {
+			return fmt.Errorf("respond.Hub.OnResult: insert agent-initiated row: %w", ierr)
+		}
+		// Override the row ID so subsequent transitions land on the
+		// just-inserted row. The agent's control_id stays correlated
+		// via reason_code; pg's row id is server-canonical.
+		actionID = inserted.ID
+		current = inserted
+		err = nil
+	}
 	if err != nil {
 		return fmt.Errorf("respond.Hub.OnResult: lookup %s: %w", actionID, err)
 	}
@@ -469,6 +498,27 @@ func (h *Hub) enqueue(hostID string, req *pb.ResponseRequest) bool {
 	default:
 		return false
 	}
+}
+
+// protoToResponseAction is the inverse of responseActionToProto.
+// Returns "" for UNSPECIFIED + any unknown enum value so callers can
+// reject loudly rather than insert a row with a bogus action class.
+func protoToResponseAction(a pb.ResponseAction) pg.ResponseAction {
+	switch a {
+	case pb.ResponseAction_RESPONSE_ACTION_KILL_PROCESS:
+		return pg.ResponseActionKillProcess
+	case pb.ResponseAction_RESPONSE_ACTION_KILL_PROCESS_TREE:
+		return pg.ResponseActionKillTree
+	case pb.ResponseAction_RESPONSE_ACTION_QUARANTINE_FILE:
+		return pg.ResponseActionQuarantineFile
+	case pb.ResponseAction_RESPONSE_ACTION_ISOLATE_HOST:
+		return pg.ResponseActionIsolateHost
+	case pb.ResponseAction_RESPONSE_ACTION_UNISOLATE_HOST:
+		return pg.ResponseActionUnisolateHost
+	case pb.ResponseAction_RESPONSE_ACTION_COLLECT_ARTIFACTS:
+		return pg.ResponseActionCollectArtifacts
+	}
+	return ""
 }
 
 // responseActionToProto maps the pg-side string enum to the proto

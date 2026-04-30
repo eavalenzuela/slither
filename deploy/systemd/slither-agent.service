@@ -28,8 +28,17 @@ Group=root
 #                        across user namespaces.
 #   CAP_DAC_READ_SEARCH — open executables for hashing regardless of DAC
 #                        permissions (hashing worker pool).
-CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
-AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+#   CAP_KILL           — Phase 4: signal arbitrary processes for the
+#                        kill_process / kill_process_tree response handlers.
+#                        Refusal of pid 1, agent self, and ancestors is
+#                        belt-and-braces inside the handler regardless.
+#   CAP_NET_ADMIN      — Phase 4: install/remove the slither-isolation
+#                        iptables chain for isolate_host / unisolate_host.
+#   CAP_DAC_OVERRIDE   — Phase 4: read + remove arbitrary files for
+#                        quarantine_file (paths owned by users other than
+#                        the agent's effective uid).
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_PTRACE CAP_DAC_READ_SEARCH CAP_KILL CAP_NET_ADMIN CAP_DAC_OVERRIDE
+AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_SYS_PTRACE CAP_DAC_READ_SEARCH CAP_KILL CAP_NET_ADMIN CAP_DAC_OVERRIDE
 
 # NoNewPrivileges stays off as a belt-and-braces default. Historically some
 # 5.x kernels refused bpf(BPF_PROG_LOAD) from a task with no_new_privs set

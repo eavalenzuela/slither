@@ -95,7 +95,7 @@ func TestCompileRejectsInvalid(t *testing.T) {
 		{"near-without-timeframe.yml", "near` requires top-level timeframe"},
 		{"bad-near-syntax.yml", "binary form"},
 		{"response-bad-action.yml", "not recognised"},
-		{"response-missing-target-field.yml", "is not referenced by any selection"},
+		{"response-bad-target-field.yml", "identifier-shaped"},
 		{"response-empty-action.yml", "action required"},
 	}
 	for _, c := range cases {

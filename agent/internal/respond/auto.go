@@ -97,11 +97,11 @@ func (a *AutoResponder) OnFinding(ctx context.Context, intent *ruleast.ResponseI
 	req := &pb.ResponseRequest{
 		ControlId: uuid.NewString(),
 		// OperatorId is intentionally empty — rule-driven actions
-		// carry rule_uid via the server's correlation path (#75 sets
-		// the response_actions row's rule_uid from the finding's
-		// rule.uid + the request's control_id).
-		Action: actionToProto(intent.Action),
-		Target: target,
+		// carry rule_uid so the server's OnResult inserts a fresh
+		// response_actions row keyed off rule_uid + action + target.
+		Action:  actionToProto(intent.Action),
+		Target:  target,
+		RuleUid: finding.RuleInfo.UID,
 	}
 	if a.executor == nil || !a.executor.Submit(ctx, req) {
 		// Queue-full path: executor.Submit already emitted a synthetic
