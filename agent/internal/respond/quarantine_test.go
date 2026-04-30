@@ -269,3 +269,61 @@ func TestRestoreFromQuarantine_DetectsTamperedContents(t *testing.T) {
 		t.Errorf("err = %v, want sha256 mismatch", err)
 	}
 }
+
+// Phase 4 #85: handler dispatches to RestoreFromQuarantine when
+// ResponseRequest.parent_action_id is set. End-to-end: quarantine →
+// reversal request with parent_id → file is byte-equal at original path.
+func TestQuarantineHandler_ReversalViaParentActionID(t *testing.T) {
+	withTempQuarantineRoot(t)
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "revertme.bin")
+	want := []byte("revert-roundtrip-bytes")
+	if err := os.WriteFile(target, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h := QuarantineFileHandler()
+	const parentID = "88888888-8888-8888-8888-888888888888"
+	status, detail, _ := h(context.Background(), &pb.ResponseRequest{
+		ControlId: parentID,
+		Target:    target,
+	})
+	if status != pb.ResponseStatus_RESPONSE_STATUS_DONE {
+		t.Fatalf("quarantine status = %s, detail = %q, want DONE", status, detail)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("original still present after quarantine: %v", err)
+	}
+
+	// Reversal request: parent_action_id points at the just-staged
+	// quarantine; control_id is a fresh action UUID.
+	rev := QuarantineFileHandler()
+	revStatus, revDetail, _ := rev(context.Background(), &pb.ResponseRequest{
+		ControlId:      "99999999-9999-9999-9999-999999999999",
+		ParentActionId: parentID,
+	})
+	if revStatus != pb.ResponseStatus_RESPONSE_STATUS_DONE {
+		t.Fatalf("reversal status = %s, detail = %q, want DONE", revStatus, revDetail)
+	}
+
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read restored target: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("restored contents = %x, want %x", got, want)
+	}
+}
+
+func TestQuarantineHandler_ReversalUnknownParentFails(t *testing.T) {
+	withTempQuarantineRoot(t)
+	h := QuarantineFileHandler()
+	status, detail, _ := h(context.Background(), &pb.ResponseRequest{
+		ControlId:      "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+		ParentActionId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+	})
+	if status != pb.ResponseStatus_RESPONSE_STATUS_FAILED {
+		t.Fatalf("status = %s, detail = %q, want FAILED", status, detail)
+	}
+}

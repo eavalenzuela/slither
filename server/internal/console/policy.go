@@ -116,16 +116,32 @@ func (s *Server) responseActionAudit(w http.ResponseWriter, r *http.Request) {
 	// practice and avoids a new pg helper for one call site.
 	hostHistory, _ := s.store.ListResponseActions(r.Context(), row.HostID, 200)
 	related := make([]pg.ResponseActionRow, 0, 4)
+	hasChildRevert := false
 	for _, h := range hostHistory {
 		if h.ParentAction == row.ID || h.ID == row.ParentAction {
 			related = append(related, h)
 		}
+		// A non-terminal-failed child with parent_action=row.ID means
+		// a revert is already in flight or completed; suppress the
+		// button so the operator doesn't accidentally double-revert.
+		if h.ParentAction == row.ID && h.Status != pg.ResponseStatusFailed {
+			hasChildRevert = true
+		}
+	}
+
+	canRevert := false
+	if row.Status == pg.ResponseStatusDone && !hasChildRevert {
+		switch row.Action {
+		case pg.ResponseActionQuarantineFile, pg.ResponseActionIsolateHost:
+			canRevert = true
+		}
 	}
 
 	render(w, r, views.ResponseActionAudit(views.ResponseActionAuditData{
-		Action:  row,
-		Audit:   auditRows,
-		Related: related,
+		Action:    row,
+		Audit:     auditRows,
+		Related:   related,
+		CanRevert: canRevert,
 	}))
 }
 
@@ -196,4 +212,45 @@ func (s *Server) alertRespond(w http.ResponseWriter, r *http.Request) {
 	s.sm.Put(r.Context(), "flash",
 		"Dispatched "+string(action)+" (action "+row.ID[:8]+"); see history for status.")
 	http.Redirect(w, r, "/alerts/"+id, http.StatusSeeOther)
+}
+
+// responseActionRevert handles POST /responses/{action_id}/revert.
+// Phase 4 #85. Wraps Hub.Revert with the same flash + redirect shape
+// as alertRespond. Wrapped in RequireRole(analyst, admin) at route
+// registration; per-action policy is enforced inside Hub.Revert.
+func (s *Server) responseActionRevert(w http.ResponseWriter, r *http.Request) {
+	if s.responseHub == nil {
+		http.Error(w, "response dispatcher not configured", http.StatusServiceUnavailable)
+		return
+	}
+	id := chi.URLParam(r, "action_id")
+	if id == "" {
+		http.Error(w, "missing action_id", http.StatusBadRequest)
+		return
+	}
+
+	row, err := s.responseHub.Revert(r.Context(), id, s.userID(r))
+	switch {
+	case errors.Is(err, respond.ErrNotReversible):
+		s.sm.Put(r.Context(), "flash", "This action class is not reversible.")
+		http.Redirect(w, r, "/responses/"+id+"/audit", http.StatusSeeOther)
+		return
+	case errors.Is(err, respond.ErrParentNotDone):
+		s.sm.Put(r.Context(), "flash",
+			"Only completed actions (status=done) can be reverted.")
+		http.Redirect(w, r, "/responses/"+id+"/audit", http.StatusSeeOther)
+		return
+	case errors.Is(err, respond.ErrPolicyDenied):
+		s.sm.Put(r.Context(), "flash",
+			"Revert denied by host policy. An admin can promote the host on its policy page.")
+		http.Redirect(w, r, "/responses/"+id+"/audit", http.StatusSeeOther)
+		return
+	case err != nil:
+		http.Error(w, "revert failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.sm.Put(r.Context(), "flash",
+		"Revert dispatched (action "+row.ID[:8]+"); see history for status.")
+	http.Redirect(w, r, "/responses/"+row.ID+"/audit", http.StatusSeeOther)
 }

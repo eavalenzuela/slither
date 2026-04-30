@@ -205,6 +205,139 @@ func (h *Hub) Dispatch(ctx context.Context, in DispatchInput) (pg.ResponseAction
 	return row, nil
 }
 
+// ErrNotReversible is returned by Revert when the parent's action
+// class can't be reversed via the agent (e.g. KILL_PROCESS — once
+// killed, a process can't be unkilled).
+var ErrNotReversible = errors.New("respond.Hub.Revert: action class is not reversible")
+
+// ErrParentNotDone is returned by Revert when the parent isn't in
+// status=done. ADR-0034: only completed actions can be reverted; a
+// failed/denied/already-reverted action stays in its terminal state.
+var ErrParentNotDone = errors.New("respond.Hub.Revert: parent action is not in status=done")
+
+// reverseActionFor maps a forward action class to its reversal. Two
+// of the six classes are reversible:
+//
+//   - QUARANTINE_FILE → reverse via QUARANTINE_FILE + parent_action_id
+//     (agent's handler dispatches to RestoreFromQuarantine).
+//   - ISOLATE_HOST    → reverse via UNISOLATE_HOST.
+//
+// Everything else returns ErrNotReversible.
+func reverseActionFor(a pg.ResponseAction) (pg.ResponseAction, error) {
+	switch a {
+	case pg.ResponseActionQuarantineFile:
+		return pg.ResponseActionQuarantineFile, nil
+	case pg.ResponseActionIsolateHost:
+		return pg.ResponseActionUnisolateHost, nil
+	}
+	return "", fmt.Errorf("%w: %s", ErrNotReversible, a)
+}
+
+// Revert is the operator-driven reversal entry point. Given the ID of
+// a completed parent action, it:
+//
+//  1. Validates the parent exists and is in status=done.
+//  2. Validates the parent's action class is reversible.
+//  3. Validates the host's policy still permits the (parent's) action
+//     class — un-isolate uses AllowIsolate per ADR-0034, un-quarantine
+//     uses AllowQuarantine.
+//  4. Inserts a new response_actions row with parent_action set + the
+//     reverse action class.
+//  5. Enqueues a ResponseRequest carrying parent_action_id so the
+//     agent's handler reads the parent's sidecar / state to perform
+//     the inverse.
+//
+// pg.TransitionResponseAction flips the parent to `reverted` when
+// this child reaches done; that flow is already wired in the store.
+//
+// Returns the child row + ErrPolicyDenied wrapped if the host's
+// policy refused (the row is still written with status=denied_by_policy
+// so the audit chain captures the attempt).
+func (h *Hub) Revert(ctx context.Context, parentID, operatorID string) (pg.ResponseActionRow, error) {
+	if parentID == "" {
+		return pg.ResponseActionRow{}, errors.New("respond.Hub.Revert: parent_id required")
+	}
+	if operatorID == "" {
+		return pg.ResponseActionRow{}, errors.New("respond.Hub.Revert: operator_id required")
+	}
+
+	parent, err := h.store.GetResponseAction(ctx, parentID)
+	if err != nil {
+		return pg.ResponseActionRow{}, fmt.Errorf("respond.Hub.Revert: load parent: %w", err)
+	}
+	if parent.Status != pg.ResponseStatusDone {
+		return pg.ResponseActionRow{}, fmt.Errorf("%w: parent status=%s", ErrParentNotDone, parent.Status)
+	}
+	revAction, err := reverseActionFor(parent.Action)
+	if err != nil {
+		return pg.ResponseActionRow{}, err
+	}
+
+	policy, err := h.store.GetHostPolicy(ctx, parent.HostID)
+	if err != nil {
+		return pg.ResponseActionRow{}, fmt.Errorf("respond.Hub.Revert: load policy: %w", err)
+	}
+	// Permission check uses the *parent's* action class — un-isolate
+	// inherits isolate, un-quarantine inherits quarantine. ADR-0034
+	// reverse-inheritance rule.
+	if !policy.PermitsAction(parent.Action) {
+		row, ierr := h.store.InsertResponseAction(ctx, pg.ResponseActionInsert{
+			HostID:       parent.HostID,
+			AlertID:      parent.AlertID,
+			Action:       revAction,
+			Target:       parent.Target,
+			OperatorID:   operatorID,
+			ParentAction: parent.ID,
+			ReasonCode:   "revert " + parent.ID,
+		})
+		if ierr != nil {
+			return pg.ResponseActionRow{}, fmt.Errorf("respond.Hub.Revert: insert (denied path): %w", ierr)
+		}
+		denied, terr := h.store.TransitionResponseAction(ctx, pg.ResponseActionTransition{
+			ActionID: row.ID,
+			To:       pg.ResponseStatusDeniedByPolicy,
+			Detail:   "host policy does not permit revert of " + string(parent.Action),
+			ActorID:  operatorID,
+		})
+		if terr != nil {
+			return pg.ResponseActionRow{}, fmt.Errorf("respond.Hub.Revert: deny: %w", terr)
+		}
+		return denied, fmt.Errorf("%w: revert action=%s", ErrPolicyDenied, revAction)
+	}
+
+	row, err := h.store.InsertResponseAction(ctx, pg.ResponseActionInsert{
+		HostID:       parent.HostID,
+		AlertID:      parent.AlertID,
+		Action:       revAction,
+		Target:       parent.Target,
+		OperatorID:   operatorID,
+		ParentAction: parent.ID,
+		ReasonCode:   "revert " + parent.ID,
+	})
+	if err != nil {
+		return pg.ResponseActionRow{}, fmt.Errorf("respond.Hub.Revert: insert: %w", err)
+	}
+
+	req := &pb.ResponseRequest{
+		ControlId:      row.ID,
+		OperatorId:     operatorID,
+		Action:         responseActionToProto(revAction),
+		Target:         parent.Target,
+		ParentActionId: parent.ID,
+	}
+	if !h.enqueue(parent.HostID, req) {
+		h.telem.IncResponseDropped()
+		slog.Warn("respond: revert dropped (host queue full)",
+			"host_id", parent.HostID, "action_id", row.ID, "parent_id", parent.ID)
+		return row, nil
+	}
+	h.telem.IncResponseDispatched()
+	slog.Info("respond: reverted",
+		"host_id", parent.HostID, "action_id", row.ID,
+		"parent_id", parent.ID, "reverse_action", revAction)
+	return row, nil
+}
+
 // Subscribe is called by the SessionService send goroutine on Session
 // open. Returns the per-host channel + an unsubscribe function. A
 // session reconnecting to a host with queued (but undispatched)

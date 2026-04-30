@@ -197,6 +197,13 @@ func (s *Server) routes() {
 		// page per action_id.
 		r.Get("/responses/{action_id}/audit", s.responseActionAudit)
 
+		// Phase 4 #85: revert a completed response action. Hub.Revert
+		// validates reversibility + host policy + parent state; the
+		// route gate just keeps it analyst+ to mirror the dispatch
+		// path's role policy.
+		r.With(s.RequireRole(pg.RoleAnalyst, pg.RoleAdmin)).
+			Post("/responses/{action_id}/revert", s.responseActionRevert)
+
 		// Enrolment-token UX (#45) — admin-only across the board.
 		r.With(s.RequireRole(pg.RoleAdmin)).Group(func(r chi.Router) {
 			r.Get("/enrolment-tokens", s.enrolmentTokensList)

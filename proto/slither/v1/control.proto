@@ -68,6 +68,13 @@ message ResponseRequest {
   ResponseAction action = 3;
   string target = 4;            // pid, path, host_id depending on action
   google.protobuf.Timestamp deadline = 5;
+  // parent_action_id is set on reversal requests (Phase 4 #85). When
+  // present, the agent's handler reads the parent's sidecar/state to
+  // perform the inverse: a QUARANTINE_FILE with a parent_action_id
+  // means "restore the file to its original path". UNISOLATE_HOST
+  // already reverses ISOLATE_HOST natively; parent_action_id only
+  // wires the audit chain for those.
+  string parent_action_id = 6;
 }
 
 enum ResponseAction {

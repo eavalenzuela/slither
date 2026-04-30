@@ -14,6 +14,11 @@ type ResponseActionAuditData struct {
 	Action  pg.ResponseActionRow
 	Audit   []pg.AuditRow
 	Related []pg.ResponseActionRow
+
+	// CanRevert is true when the action is reversible (quarantine /
+	// isolate) AND status=done AND no existing child has reverted it.
+	// Computed by the handler so the template stays declarative.
+	CanRevert bool
 }
 
 // ResponseActionAudit renders the forensics chain for one action.
@@ -50,6 +55,16 @@ templ ResponseActionAudit(d ResponseActionAuditData) {
 					<dt>reverts</dt><dd><a href={ templ.URL("/responses/" + d.Action.ParentAction + "/audit") }>{ d.Action.ParentAction }</a></dd>
 				}
 			</dl>
+			if d.CanRevert {
+				<form method="post" action={ templ.URL("/responses/" + d.Action.ID + "/revert") }
+				      data-typed-confirm={ "Type REVERT to revert this " + ResponseActionLabel(d.Action.Action) + " action." }
+				      data-typed-confirm-keyword="REVERT">
+					<button class="btn-revert" type="submit">Revert this action</button>
+					<span class="muted">
+						Quarantine reversal restores the original file from the staged sidecar. Isolate reversal flushes the slither-isolation iptables chain.
+					</span>
+				</form>
+			}
 			<p><a class="muted" href={ templ.URL("/alerts/" + d.Action.AlertID) }>← back to alert detail</a></p>
 		</div>
 

@@ -147,6 +147,42 @@ func TestPersistArtefact_CreatesParentDir(t *testing.T) {
 	}
 }
 
+func TestReverseActionFor_FullSurface(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in   pg.ResponseAction
+		want pg.ResponseAction
+		err  bool
+	}{
+		{pg.ResponseActionQuarantineFile, pg.ResponseActionQuarantineFile, false},
+		{pg.ResponseActionIsolateHost, pg.ResponseActionUnisolateHost, false},
+		// Non-reversible classes.
+		{pg.ResponseActionKillProcess, "", true},
+		{pg.ResponseActionKillTree, "", true},
+		{pg.ResponseActionUnisolateHost, "", true},
+		{pg.ResponseActionCollectArtifacts, "", true},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(string(c.in), func(t *testing.T) {
+			t.Parallel()
+			got, err := reverseActionFor(c.in)
+			if c.err {
+				if err == nil {
+					t.Errorf("reverseActionFor(%q) err = nil, want non-nil", c.in)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("reverseActionFor(%q) err = %v, want nil", c.in, err)
+			}
+			if got != c.want {
+				t.Errorf("reverseActionFor(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
 func TestOnResultRejectsBadControlID(t *testing.T) {
 	t.Parallel()
 	h := &Hub{

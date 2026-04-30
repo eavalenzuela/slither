@@ -75,8 +75,21 @@ type QuarantineManifest struct {
 
 // QuarantineFileHandler returns the quarantine handler. Wired by
 // WireQuarantineHandlers at startup.
+//
+// Reversal: when req.ParentActionId is set, the handler treats the
+// request as "restore the file quarantined by ParentActionId" and
+// dispatches to RestoreFromQuarantine. The parent's manifest carries
+// the original path + sha256 + mode + mtime so the inverse is exact.
+// Phase 4 #85.
 func QuarantineFileHandler() Handler {
 	return func(_ context.Context, req *pb.ResponseRequest) (pb.ResponseStatus, string, []byte) {
+		if parent := strings.TrimSpace(req.GetParentActionId()); parent != "" {
+			if err := RestoreFromQuarantine(parent); err != nil {
+				return pb.ResponseStatus_RESPONSE_STATUS_FAILED, err.Error(), nil
+			}
+			return pb.ResponseStatus_RESPONSE_STATUS_DONE,
+				fmt.Sprintf("restored quarantine from action %s", parent), nil
+		}
 		raw := strings.TrimSpace(req.GetTarget())
 		if raw == "" {
 			return pb.ResponseStatus_RESPONSE_STATUS_FAILED, "target path required", nil
