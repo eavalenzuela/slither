@@ -215,6 +215,9 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 		// slither-isolation chain; mgmt subnet from req.Target or
 		// autoderived from /proc/net/route.
 		respond.WireIsolationHandlers(executor)
+		// Phase 4 #81: collect_artifacts. /proc snapshot + process
+		// tree + recent journal as a tar.gz blob on ResponseResult.
+		respond.WireCollectHandlers(executor)
 		submitResponse = func(req *pb.ResponseRequest) {
 			// Submit is non-blocking; recv goroutine never stalls.
 			// Handlers inherit the agent-process context so a Run

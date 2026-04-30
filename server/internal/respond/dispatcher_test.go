@@ -1,7 +1,10 @@
 package respond
 
 import (
+	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -104,6 +107,45 @@ func TestSubscribe_DuplicateClosesPrevious(t *testing.T) {
 // test (dispatcher_integration_test.go). The unit suite above
 // covers the in-process surfaces (enqueue / Subscribe /
 // responseActionToProto) that don't need pg.
+
+func TestPersistArtefact_WritesToDisk(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	h := &Hub{
+		telem:       telemetry.NewCounters(),
+		queues:      make(map[string]chan *pb.ResponseRequest),
+		artefactDir: dir,
+	}
+	const actionID = "11111111-1111-1111-1111-111111111111"
+	blob := []byte("fake-tarball")
+	if err := h.persistArtefact(actionID, blob); err != nil {
+		t.Fatalf("persistArtefact: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, actionID+".tgz"))
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !bytes.Equal(got, blob) {
+		t.Errorf("contents = %q, want round-trip", got)
+	}
+}
+
+func TestPersistArtefact_CreatesParentDir(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	nested := filepath.Join(root, "nested", "artefacts")
+	h := &Hub{
+		telem:       telemetry.NewCounters(),
+		queues:      make(map[string]chan *pb.ResponseRequest),
+		artefactDir: nested,
+	}
+	if err := h.persistArtefact("22222222-2222-2222-2222-222222222222", []byte("x")); err != nil {
+		t.Fatalf("persistArtefact: %v", err)
+	}
+	if _, err := os.Stat(nested); err != nil {
+		t.Errorf("nested dir not created: %v", err)
+	}
+}
 
 func TestOnResultRejectsBadControlID(t *testing.T) {
 	t.Parallel()

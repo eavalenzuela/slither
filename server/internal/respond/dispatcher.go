@@ -34,6 +34,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -58,13 +60,32 @@ type Hub struct {
 	store *pg.Store
 	telem *telemetry.Counters
 
+	// artefactDir is the on-disk path collect_artifacts blobs are
+	// persisted under. Empty disables disk persistence (the blob
+	// still lands in the response_actions row's result_blob column).
+	// Set via NewHubWithOptions; main wires it to /var/lib/slither/artefacts.
+	artefactDir string
+
 	mu     sync.Mutex
 	queues map[string]chan *pb.ResponseRequest // host_id -> pending dispatch channel
 }
 
-// NewHub constructs a Hub. store is required; telem may be nil and
-// gets a fresh counters value.
+// HubOptions configures Hub. artefactDir, when non-empty, is the
+// directory collect_artifacts result blobs land under as
+// <action_id>.tgz. Phase 4 #81.
+type HubOptions struct {
+	ArtefactDir string
+}
+
+// NewHub constructs a Hub with no artefact-dir persistence. Existing
+// callers (Phase 3 fleet) keep the original signature.
 func NewHub(store *pg.Store, telem *telemetry.Counters) *Hub {
+	return NewHubWithOptions(store, telem, HubOptions{})
+}
+
+// NewHubWithOptions is the artefact-dir-aware constructor. Phase 4
+// #81 wires this in main with ArtefactDir set to the compose volume.
+func NewHubWithOptions(store *pg.Store, telem *telemetry.Counters, opts HubOptions) *Hub {
 	if store == nil {
 		panic("respond.NewHub: nil store")
 	}
@@ -72,9 +93,10 @@ func NewHub(store *pg.Store, telem *telemetry.Counters) *Hub {
 		telem = telemetry.NewCounters()
 	}
 	return &Hub{
-		store:  store,
-		telem:  telem,
-		queues: make(map[string]chan *pb.ResponseRequest),
+		store:       store,
+		telem:       telem,
+		artefactDir: opts.ArtefactDir,
+		queues:      make(map[string]chan *pb.ResponseRequest),
 	}
 }
 
@@ -264,7 +286,37 @@ func (h *Hub) OnResult(ctx context.Context, result *pb.ResponseResult) error {
 	}); err != nil {
 		return fmt.Errorf("respond.Hub.OnResult: terminal: %w", err)
 	}
+	// Phase 4 #81: collect_artifacts blobs also land on disk under
+	// the configured artefact dir so an analyst can `tar tf` them
+	// without round-tripping through pg. The pg copy stays
+	// authoritative; the disk copy is a convenience.
+	if h.artefactDir != "" &&
+		current.Action == pg.ResponseActionCollectArtifacts &&
+		to == pg.ResponseStatusDone &&
+		len(result.GetResultBlob()) > 0 {
+		if perr := h.persistArtefact(actionID, result.GetResultBlob()); perr != nil {
+			// Disk persistence is best-effort: the audit row + pg blob
+			// are already committed. Log and move on so a wedged disk
+			// can't fail the action retroactively.
+			slog.Warn("respond: persist artefact to disk failed",
+				"action_id", actionID, "err", perr)
+		}
+	}
 	h.telem.IncResponseCompleted()
+	return nil
+}
+
+// persistArtefact writes the result_blob to <artefactDir>/<action_id>.tgz.
+// 0o600 keeps it inert to other UIDs sharing the host (the volume in
+// compose is bind-mounted with the slither user only).
+func (h *Hub) persistArtefact(actionID string, blob []byte) error {
+	if mkErr := os.MkdirAll(h.artefactDir, 0o750); mkErr != nil {
+		return fmt.Errorf("mkdir artefact dir: %w", mkErr)
+	}
+	path := filepath.Join(h.artefactDir, actionID+".tgz")
+	if wErr := os.WriteFile(path, blob, 0o600); wErr != nil {
+		return fmt.Errorf("write %s: %w", path, wErr)
+	}
 	return nil
 }
 

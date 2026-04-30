@@ -77,6 +77,11 @@ type Console struct {
 	// cache (Phase 3 #64). Empty falls back to /var/lib/slither/graphs
 	// — matches the systemd unit's StateDirectory pattern.
 	GraphsDir string `yaml:"graphs_dir"`
+	// ArtefactsDir is the on-disk root for collect_artifacts result
+	// blobs (Phase 4 #81). Empty falls back to
+	// /var/lib/slither/artefacts — same StateDirectory pattern as
+	// GraphsDir. Bundles land as <action_id>.tgz.
+	ArtefactsDir string `yaml:"artefacts_dir"`
 }
 
 // ErrInvalidConfig wraps every user-visible config error. Callers use

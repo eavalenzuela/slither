@@ -108,8 +108,10 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	detectEngine := detect.New(bus, pgStore, telem, detect.Options{})
 	detectEngine.SetReplayer(chStore)
 
-	// --- Response dispatcher (Phase 4 #75) ---
-	responseHub := respond.NewHub(pgStore, telem)
+	// --- Response dispatcher (Phase 4 #75 + #81 artefact dir) ---
+	responseHub := respond.NewHubWithOptions(pgStore, telem, respond.HubOptions{
+		ArtefactDir: artefactsDir(cfg.Console.ArtefactsDir),
+	})
 
 	// --- gRPC services ---
 	enrollSvc := grpcserv.NewEnrollService(pgStore, ca, telem)
@@ -339,4 +341,13 @@ func graphsDir(configured string) string {
 		return configured
 	}
 	return "/var/lib/slither/graphs"
+}
+
+// artefactsDir is the collect_artifacts disk-spool counterpart to
+// graphsDir. Phase 4 #81. Same StateDirectory convention.
+func artefactsDir(configured string) string {
+	if configured != "" {
+		return configured
+	}
+	return "/var/lib/slither/artefacts"
 }

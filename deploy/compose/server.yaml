@@ -34,3 +34,5 @@ console:
   # nonroot uid before the server starts so the named volume mount
   # is writable from the distroless container.
   graphs_dir: /var/lib/slither/graphs
+  # collect_artifacts spool (#81). Same chown pattern as graphs_dir.
+  artefacts_dir: /var/lib/slither/artefacts

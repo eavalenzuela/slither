@@ -78,12 +78,14 @@ services:
       SLITHER_STORAGE_CLICKHOUSE_DSN: "clickhouse://slither:slither-dev@clickhouse:9000/slither"
       PKI_DIR: /pki
       GRAPHS_DIR: /graphs
+      ARTEFACTS_DIR: /artefacts
       # Comment this out to let bootstrap-admin generate a random
       # password and print it to stdout.
       SLITHER_BOOTSTRAP_PASSWORD: "slither-admin-dev"
     volumes:
       - pki:/pki
       - graphs:/graphs
+      - artefacts:/artefacts
     restart: "no"
 
   server:
@@ -107,6 +109,7 @@ services:
       - pki:/etc/slither/pki:ro
       - ./server.yaml:/etc/slither/server.yaml:ro
       - graphs:/var/lib/slither/graphs
+      - artefacts:/var/lib/slither/artefacts
     healthcheck:
       test: ["CMD", "/usr/local/bin/slither-server", "--version"]
       interval: 10s
@@ -118,3 +121,4 @@ volumes:
   ch-data:
   pki:
   graphs:
+  artefacts:

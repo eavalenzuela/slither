@@ -31,3 +31,6 @@ mtls:
 
 console:
   session_key_file: /var/lib/slither/session.key
+  # Optional. Defaults are /var/lib/slither/{graphs,artefacts}.
+  # graphs_dir: /var/lib/slither/graphs
+  # artefacts_dir: /var/lib/slither/artefacts

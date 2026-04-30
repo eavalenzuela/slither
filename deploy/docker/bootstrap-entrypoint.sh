@@ -12,6 +12,7 @@ set -euo pipefail
 
 PKI_DIR="${PKI_DIR:-/pki}"
 GRAPHS_DIR="${GRAPHS_DIR:-/graphs}"
+ARTEFACTS_DIR="${ARTEFACTS_DIR:-/artefacts}"
 PG_DSN="${SLITHER_STORAGE_POSTGRES_DSN:?SLITHER_STORAGE_POSTGRES_DSN required}"
 CH_DSN="${SLITHER_STORAGE_CLICKHOUSE_DSN:?SLITHER_STORAGE_CLICKHOUSE_DSN required}"
 
@@ -21,6 +22,11 @@ CH_DSN="${SLITHER_STORAGE_CLICKHOUSE_DSN:?SLITHER_STORAGE_CLICKHOUSE_DSN require
 if [ -d "$GRAPHS_DIR" ]; then
     chmod 0755 "$GRAPHS_DIR"
     chown -R 65532:65532 "$GRAPHS_DIR" 2>/dev/null || true
+fi
+# Same pattern for the collect_artifacts spool (#81).
+if [ -d "$ARTEFACTS_DIR" ]; then
+    chmod 0755 "$ARTEFACTS_DIR"
+    chown -R 65532:65532 "$ARTEFACTS_DIR" 2>/dev/null || true
 fi
 
 # gen-ca.sh expects to be invoked from a repo root and writes into
