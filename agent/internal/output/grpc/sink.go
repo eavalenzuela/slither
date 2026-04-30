@@ -58,6 +58,12 @@ type Options struct {
 	// recorder. The callback must be non-blocking — the sink's
 	// recv goroutine cannot stall on a wedged executor.
 	OnResponseRequest func(*pb.ResponseRequest)
+
+	// OnHostPolicy, when non-nil, is called for every server-pushed
+	// HostPolicy (Phase 4 #84). Production wires this to the agent's
+	// auto-respond cache (atomic.Pointer behind a PolicyProvider).
+	// Must be non-blocking.
+	OnHostPolicy func(*pb.HostPolicy)
 }
 
 // Sink is the gRPC Session-stream output. Implements
@@ -317,10 +323,8 @@ func (s *Sink) runSession(ctx context.Context, client pb.AgentServiceClient) err
 }
 
 // handleServerMessage dispatches one ServerMessage. RuleSet pushes
-// fan into the configured OnRuleSet callback; ResponseRequest pushes
-// fan into OnResponseRequest (Phase 4 #77). Other kinds are
-// observational today (HostPolicy lands with #84, HuntQuery in
-// Phase 6).
+// fan into OnRuleSet; ResponseRequest into OnResponseRequest;
+// HostPolicy into OnHostPolicy (Phase 4 #84). HuntQuery is Phase 6.
 func (s *Sink) handleServerMessage(msg *pb.ServerMessage) {
 	if msg == nil {
 		return
@@ -333,6 +337,10 @@ func (s *Sink) handleServerMessage(msg *pb.ServerMessage) {
 	case *pb.ServerMessage_ResponseRequest:
 		if s.opts.OnResponseRequest != nil && k.ResponseRequest != nil {
 			s.opts.OnResponseRequest(k.ResponseRequest)
+		}
+	case *pb.ServerMessage_HostPolicy:
+		if s.opts.OnHostPolicy != nil && k.HostPolicy != nil {
+			s.opts.OnHostPolicy(k.HostPolicy)
 		}
 	}
 }

@@ -113,11 +113,15 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		ArtefactDir: artefactsDir(cfg.Console.ArtefactsDir),
 	})
 
+	// --- Per-host response policy push (Phase 4 #84) ---
+	policyHub := control.NewPolicyHub(pgStore, telem)
+
 	// --- gRPC services ---
 	enrollSvc := grpcserv.NewEnrollService(pgStore, ca, telem)
 	sessionSvc := grpcserv.NewSessionService(pgStore, bus, telem)
 	sessionSvc.RuleHub = hub
 	sessionSvc.ResponseHub = responseHub
+	sessionSvc.PolicyHub = policyHub
 
 	enrollSrv := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(mtls.ServerEnrollTLSConfig(serverCert))),
@@ -202,6 +206,16 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		defer wg.Done()
 		if err := control.Run(ctx, hub, pgStore, control.RunnerOptions{}); err != nil {
 			errs <- fmt.Errorf("control runner: %w", err)
+		}
+	}()
+
+	// Phase 4 #84: per-host policy hub runner. Initial Refresh +
+	// debounced NOTIFY-driven re-pushes.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := control.RunPolicyHub(ctx, policyHub, pgStore, control.RunnerOptions{}); err != nil {
+			errs <- fmt.Errorf("policy runner: %w", err)
 		}
 	}()
 

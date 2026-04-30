@@ -167,6 +167,11 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 			emit           func([]string)
 			submitResponse func(*pb.ResponseRequest)
 		)
+		// Phase 4 #84: agent-side policy cache. Receives the latest
+		// pb.HostPolicy from the server's session push and exposes a
+		// Provider() the AutoResponder consults from the engine's hot
+		// path. Empty cache = nil pointer = detect-only baseline.
+		policyCache := respond.NewPolicyCache()
 		sink, err := grpcsink.New(grpcsink.Options{
 			ServerAddr:        g.ServerAddr,
 			CAPath:            g.CAPath,
@@ -190,6 +195,11 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 				if submitResponse != nil {
 					submitResponse(req)
 				}
+			},
+			// Phase 4 #84: server-pushed HostPolicy snapshots land in
+			// the cache the AutoResponder reads from.
+			OnHostPolicy: func(p *pb.HostPolicy) {
+				policyCache.Set(p)
 			},
 		}, telem)
 		if err != nil {
@@ -221,11 +231,9 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 		// Phase 4 #83: edge auto-respond bridge. Engine calls into
 		// the AutoResponder when a rule with a `slither.response`
 		// intent fires; the responder consults the cached HostPolicy
-		// and either submits to the executor or stamps the finding's
-		// would_have_executed marker. PolicyProvider stays nil here
-		// — #84 wires the real NOTIFY-driven cache. nil → detect-only
-		// baseline, which is the safe default for the gap.
-		eng.SetAutoRespondHook(respond.NewAutoResponder(executor, nil))
+		// (Phase 4 #84) and either submits to the executor or stamps
+		// the finding's would_have_executed marker.
+		eng.SetAutoRespondHook(respond.NewAutoResponder(executor, policyCache.Provider()))
 		submitResponse = func(req *pb.ResponseRequest) {
 			// Submit is non-blocking; recv goroutine never stalls.
 			// Handlers inherit the agent-process context so a Run

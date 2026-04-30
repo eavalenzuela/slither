@@ -45,6 +45,14 @@ type ResponseHub interface {
 	OnResult(ctx context.Context, result *pb.ResponseResult) error
 }
 
+// PolicyHub is the per-host response-policy push (Phase 4 #84). The
+// session's send goroutine subscribes for hostID; the hub delivers the
+// current snapshot synchronously and any subsequent NOTIFY-driven
+// refreshes onto the same channel.
+type PolicyHub interface {
+	Subscribe(hostID string) (<-chan *pb.HostPolicy, func())
+}
+
 // SessionService implements AgentService.Session. It embeds
 // UnimplementedAgentServiceServer so it satisfies AgentServiceServer
 // with Enroll left unimplemented — the two halves of AgentService run
@@ -59,6 +67,7 @@ type SessionService struct {
 	Telem       *telemetry.Counters
 	RuleHub     RuleHub     // optional; nil disables rule push
 	ResponseHub ResponseHub // optional; nil disables response dispatch
+	PolicyHub   PolicyHub   // optional; nil disables host-policy push
 
 	// PeerHostIDExtractor is overridable for tests that route through
 	// bufconn without real client certs. Production leaves it nil and
@@ -114,7 +123,7 @@ func (s *SessionService) Session(stream pb.AgentService_SessionServer) error {
 	// by cancelling sendCtx on its own return.
 	sendCtx, cancelSend := context.WithCancel(ctx)
 	var sendWG sync.WaitGroup
-	if s.RuleHub != nil || s.ResponseHub != nil {
+	if s.RuleHub != nil || s.ResponseHub != nil || s.PolicyHub != nil {
 		sendWG.Add(1)
 		go func() {
 			defer sendWG.Done()
@@ -161,6 +170,13 @@ func (s *SessionService) runSendLoop(sendCtx context.Context, hostID string, str
 		defer rrUnsubscribe()
 	}
 
+	var hpUpdates <-chan *pb.HostPolicy
+	var hpUnsubscribe func()
+	if s.PolicyHub != nil {
+		hpUpdates, hpUnsubscribe = s.PolicyHub.Subscribe(hostID)
+		defer hpUnsubscribe()
+	}
+
 	for {
 		select {
 		case <-sendCtx.Done():
@@ -201,6 +217,21 @@ func (s *SessionService) runSendLoop(sendCtx context.Context, hostID string, str
 				"host_id", hostID,
 				"action_id", req.GetControlId(),
 				"action", req.GetAction().String())
+		case hp, ok := <-hpUpdates:
+			if !ok {
+				hpUpdates = nil
+				continue
+			}
+			if hp == nil {
+				continue
+			}
+			if err := stream.Send(&pb.ServerMessage{
+				Kind: &pb.ServerMessage_HostPolicy{HostPolicy: hp},
+			}); err != nil {
+				return
+			}
+			slog.Debug("policy: sent",
+				"host_id", hostID, "version", hp.GetVersion())
 		}
 	}
 }
