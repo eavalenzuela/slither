@@ -61,7 +61,7 @@ func compileRuleSet(rs *pb.RuleSet, telem *telemetry.Counters, iocStore *ioc.Sto
 		compileOpts = append(compileOpts, ruleast.WithIOCRegistry(iocStore))
 	}
 
-	parsed := make([]*ruleast.Rule, 0, len(rs.GetRules()))
+	parsed := make([]*ruleast.EdgeArtefact, 0, len(rs.GetRules()))
 	for _, er := range rs.GetRules() {
 		v := ruleast.ASTVersion(er.GetAstVersion())
 		if v != ruleast.ASTVersionV1 && v != ruleast.ASTVersionV2 {
@@ -87,13 +87,13 @@ func compileRuleSet(rs *pb.RuleSet, telem *telemetry.Counters, iocStore *ioc.Sto
 			// Refresh() on the server will repair the wire payload.
 			continue
 		}
-		parsed = append(parsed, artefact.Rule)
+		parsed = append(parsed, artefact)
 	}
 	var matcher ruleast.IOCEnv
 	if iocStore != nil {
 		matcher = iocStore
 	}
-	out, err := ruleengine.CompileRules(parsed, telem, matcher)
+	out, err := ruleengine.CompileArtefacts(parsed, telem, matcher)
 	if err != nil {
 		return nil, warnings, fmt.Errorf("compileRuleSet: wrap: %w", err)
 	}

@@ -18,6 +18,52 @@ import (
 // through ruleast.Compile.
 const stateCapDefault uint32 = 1024
 
+// CompileArtefacts is the response-intent-aware sibling of CompileRules.
+// Each EdgeArtefact carries an optional ResponseIntent; the resulting
+// CompiledRule remembers the intent so the engine can hand it to the
+// AutoRespondHook on a match. Phase 4 #83.
+//
+// Rules whose artefact is nil are skipped silently (the upstream
+// compiler classified them server-only). Other failures map 1:1 to
+// CompileRules.
+func CompileArtefacts(arts []*ruleast.EdgeArtefact, telem *telemetry.Counters, ioc ruleast.IOCEnv) ([]CompiledRule, error) {
+	rules := make([]*ruleast.Rule, 0, len(arts))
+	intents := make([]*ruleast.ResponseIntent, 0, len(arts))
+	for _, a := range arts {
+		if a == nil || a.Rule == nil {
+			continue
+		}
+		rules = append(rules, a.Rule)
+		intents = append(intents, a.Response)
+	}
+	out, err := CompileRules(rules, telem, ioc)
+	if err != nil {
+		return nil, err
+	}
+	// CompileRules preserves order. Stamp intents back onto the
+	// concrete sigmaCompiledRule type (the only implementation today).
+	if len(out) != len(intents) {
+		// CompileRules dropped a nil — re-walk to align indices.
+		j := 0
+		for i, r := range rules {
+			if i >= len(out) {
+				break
+			}
+			if scr, ok := out[j].(*sigmaCompiledRule); ok && scr.r == r {
+				scr.response = intents[i]
+				j++
+			}
+		}
+		return out, nil
+	}
+	for i, r := range out {
+		if scr, ok := r.(*sigmaCompiledRule); ok {
+			scr.response = intents[i]
+		}
+	}
+	return out, nil
+}
+
 // CompileRules wraps a set of already-parsed ruleast rules in CompiledRule
 // adapters indexed by OCSF class. A rule whose category has no OCSF mapping
 // fails compilation loudly — we don't want silent rule-drop at startup.
@@ -67,11 +113,21 @@ type sigmaCompiledRule struct {
 	state  *ruleState     // nil for stateless rules
 	ioc    ruleast.IOCEnv // nil for rules without `|ioc` predicates
 	now    func() time.Time
+
+	// response is the optional auto-respond intent compiled from the
+	// rule's `slither.response` block. nil for rules without it.
+	// Phase 4 #83 — engine reads this when a rule fires and forwards
+	// the intent to its AutoRespondHook.
+	response *ruleast.ResponseIntent
 }
 
 func (s *sigmaCompiledRule) ID() string                { return s.r.ID }
 func (s *sigmaCompiledRule) AppliesTo() []ocsf.ClassID { return []ocsf.ClassID{s.class} }
 func (s *sigmaCompiledRule) Cost() int                 { return s.r.Cost() }
+func (s *sigmaCompiledRule) Response() *ruleast.ResponseIntent {
+	return s.response
+}
+func (s *sigmaCompiledRule) Category() ruleast.Category { return s.r.Category }
 
 func (s *sigmaCompiledRule) Match(e ocsf.Event) bool {
 	if e.ClassID() != s.class {

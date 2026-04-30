@@ -16,6 +16,7 @@ import (
 
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
 	"github.com/t3rmit3/slither/pkg/ocsf"
+	"github.com/t3rmit3/slither/pkg/ruleast"
 )
 
 // ErrDetectionQueueFull is returned by Run when the output channel refuses a
@@ -32,6 +33,11 @@ type Engine interface {
 	Output() <-chan ocsf.Event
 	// ReplaceRules atomically swaps the compiled rule set.
 	ReplaceRules(rules []CompiledRule)
+	// SetAutoRespondHook installs the optional Phase 4 #83 hook.
+	// Engine calls hook.OnFinding when a rule with a response intent
+	// fires; the hook decides (based on cached HostPolicy) whether
+	// to actually run the local executor.
+	SetAutoRespondHook(h AutoRespondHook)
 }
 
 // CompiledRule is a rule that has been compiled by pkg/ruleast and classified
@@ -45,6 +51,15 @@ type CompiledRule interface {
 	Match(e ocsf.Event) bool
 	// Cost is a predicate-count heuristic used for ordering.
 	Cost() int
+}
+
+// AutoRespondHook is the engine→executor bridge for Phase 4 #83.
+// Implementations decide based on the firing rule's intent + the
+// agent's cached HostPolicy whether to actually invoke the local
+// Executor. The hook may mutate finding.AutoResponse* fields before
+// the finding ships to the sink.
+type AutoRespondHook interface {
+	OnFinding(ctx context.Context, intent *ruleast.ResponseIntent, trigger ocsf.Event, finding *ocsf.DetectionFinding, category ruleast.Category)
 }
 
 // detectionBlockWait bounds how long Run waits for a DetectionFinding send
@@ -62,6 +77,15 @@ const detectionBlockWait = 200 * time.Millisecond
 // heartbeat cadence so operators see one rhythm.
 const janitorInterval = 30 * time.Second
 
+type engine struct {
+	index    map[ocsf.ClassID][]CompiledRule
+	telem    *telemetry.Counters
+	out      chan ocsf.Event
+	now      func() time.Time
+	replace  chan map[ocsf.ClassID][]CompiledRule
+	autoHook AutoRespondHook
+}
+
 // New returns an Engine loaded with the given compiled rules.
 func New(rules []CompiledRule, telem *telemetry.Counters) Engine {
 	return &engine{
@@ -73,12 +97,12 @@ func New(rules []CompiledRule, telem *telemetry.Counters) Engine {
 	}
 }
 
-type engine struct {
-	index   map[ocsf.ClassID][]CompiledRule
-	telem   *telemetry.Counters
-	out     chan ocsf.Event
-	now     func() time.Time
-	replace chan map[ocsf.ClassID][]CompiledRule
+// SetAutoRespondHook installs the optional Phase 4 #83 hook. Calling
+// with nil disables auto-respond. Concurrent with rule evaluation: a
+// rule firing during the swap reads whichever pointer was current at
+// finding time.
+func (e *engine) SetAutoRespondHook(h AutoRespondHook) {
+	e.autoHook = h
 }
 
 // ReplaceRules swaps in a freshly-compiled rule set. The Run loop applies
@@ -198,12 +222,40 @@ func (e *engine) processEvent(ctx context.Context, ev ocsf.Event) error {
 		if finding == nil {
 			continue
 		}
+		// Phase 4 #83: invoke the auto-respond hook before shipping
+		// the finding so x_auto_response_executed /
+		// x_auto_response_would_have_executed land on the same
+		// payload the server logs as the alert.
+		if e.autoHook != nil {
+			if intent, cat, ok := responseIntentOf(r); ok {
+				e.autoHook.OnFinding(ctx, intent, ev, finding, cat)
+			}
+		}
 		if err := e.emitDetection(ctx, finding); err != nil {
 			return err
 		}
 		e.telem.IncDetections()
 	}
 	return nil
+}
+
+// responseIntentOf extracts the rule's response intent + category if
+// the underlying type exposes them (sigmaCompiledRule does). External
+// CompiledRule implementations without these accessors skip the hook.
+func responseIntentOf(r CompiledRule) (*ruleast.ResponseIntent, ruleast.Category, bool) {
+	type withResponse interface {
+		Response() *ruleast.ResponseIntent
+		Category() ruleast.Category
+	}
+	wr, ok := r.(withResponse)
+	if !ok {
+		return nil, "", false
+	}
+	intent := wr.Response()
+	if intent == nil {
+		return nil, "", false
+	}
+	return intent, wr.Category(), true
 }
 
 // isFollowup reports whether ev carries the "followup" metadata label. The

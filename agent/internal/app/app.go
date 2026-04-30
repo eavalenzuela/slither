@@ -218,6 +218,14 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 		// Phase 4 #81: collect_artifacts. /proc snapshot + process
 		// tree + recent journal as a tar.gz blob on ResponseResult.
 		respond.WireCollectHandlers(executor)
+		// Phase 4 #83: edge auto-respond bridge. Engine calls into
+		// the AutoResponder when a rule with a `slither.response`
+		// intent fires; the responder consults the cached HostPolicy
+		// and either submits to the executor or stamps the finding's
+		// would_have_executed marker. PolicyProvider stays nil here
+		// — #84 wires the real NOTIFY-driven cache. nil → detect-only
+		// baseline, which is the safe default for the gap.
+		eng.SetAutoRespondHook(respond.NewAutoResponder(executor, nil))
 		submitResponse = func(req *pb.ResponseRequest) {
 			// Submit is non-blocking; recv goroutine never stalls.
 			// Handlers inherit the agent-process context so a Run

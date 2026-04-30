@@ -22,6 +22,26 @@ type DetectionFinding struct {
 	// event_id values of the events that caused this finding. Server uses these
 	// to build the detection flow graph.
 	TriggeringEventIDs []string `json:"x_triggering_event_ids,omitempty"`
+
+	// Phase 4 #83: edge auto-respond markers. Populated only for
+	// findings whose rule carries a `slither.response` block.
+	//
+	// AutoResponseAction is the action class the rule asked the agent
+	// to take (kill_process, quarantine_file, …). Empty string when
+	// the rule has no response block.
+	//
+	// AutoResponseExecuted is true when the agent actually invoked
+	// the local Executor for this finding. False alongside an empty
+	// action means the rule had no response block at all.
+	//
+	// AutoResponseWouldHaveExecuted is true when the host policy
+	// blocked the action — the rule is in detect-only mode for this
+	// host. The console surfaces this so analysts can see "this rule
+	// would have killed the shell if you'd flipped allow_kill_process
+	// on this host group."
+	AutoResponseAction            string `json:"x_auto_response_action,omitempty"`
+	AutoResponseExecuted          bool   `json:"x_auto_response_executed,omitempty"`
+	AutoResponseWouldHaveExecuted bool   `json:"x_auto_response_would_have_executed,omitempty"`
 }
 
 type FindingActivityID uint8
