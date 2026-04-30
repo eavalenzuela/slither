@@ -1,0 +1,21 @@
+title: Bash reverse shell with auto-kill response
+id: 8b7c4d00-0001-4000-8000-000000000030
+description: Detect /dev/tcp redirection and auto-kill the spawning shell.
+level: high
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith:
+      - /bash
+      - /sh
+    CommandLine|contains:
+      - /dev/tcp/
+      - /dev/udp/
+  condition: selection
+slither:
+  response:
+    action: kill_process
+    target_field: Image
+    immediate: true

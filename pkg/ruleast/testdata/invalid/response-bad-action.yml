@@ -1,0 +1,13 @@
+title: Response with unrecognised action
+id: invalid-0030
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: /bash
+  condition: selection
+slither:
+  response:
+    action: format_disk
+    target_field: Image

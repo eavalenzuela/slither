@@ -94,6 +94,9 @@ func TestCompileRejectsInvalid(t *testing.T) {
 		{"force-edge-cross-host.yml", "inputs_not_locally_observable"},
 		{"near-without-timeframe.yml", "near` requires top-level timeframe"},
 		{"bad-near-syntax.yml", "binary form"},
+		{"response-bad-action.yml", "not recognised"},
+		{"response-missing-target-field.yml", "is not referenced by any selection"},
+		{"response-empty-action.yml", "action required"},
 	}
 	for _, c := range cases {
 		c := c
@@ -620,9 +623,23 @@ func compileGolden(art *EdgeArtefact, plan *ServerPlan, class Classification) ma
 		if art.Lookback {
 			out["lookback"] = true
 		}
+		if art.Response != nil {
+			out["response"] = responseGolden(art.Response)
+		}
 	}
 	if plan != nil {
 		out["server_plan"] = serverPlanGolden(plan)
+	}
+	return out
+}
+
+func responseGolden(r *ResponseIntent) map[string]any {
+	out := map[string]any{
+		"action":       string(r.Action),
+		"target_field": r.TargetField,
+	}
+	if r.Immediate {
+		out["immediate"] = true
 	}
 	return out
 }
@@ -649,6 +666,9 @@ func serverPlanGolden(p *ServerPlan) map[string]any {
 	}
 	if p.CrossHost {
 		out["cross_host"] = true
+	}
+	if p.Response != nil {
+		out["response"] = responseGolden(p.Response)
 	}
 	return out
 }

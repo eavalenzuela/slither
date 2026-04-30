@@ -1,0 +1,13 @@
+title: Response targeting a field the selection doesn't reference
+id: invalid-0031
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: /bash
+  condition: selection
+slither:
+  response:
+    action: kill_process
+    target_field: ProcessID

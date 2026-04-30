@@ -44,6 +44,25 @@ type sigmaYAML struct {
 	// the agent cannot supply. Implies ServerOnly classification (ADR-
 	// 0018 predicate 1). force_edge with cross_host fails compile.
 	CrossHost bool `yaml:"cross_host"`
+
+	// Phase 4 #82: optional auto-respond intent. Nil-pointer means
+	// "no response block" — the historical detect-only behaviour.
+	// `slither.response` is the YAML key by ADR-0034.
+	Slither *slitherYAML `yaml:"slither"`
+}
+
+// slitherYAML is the namespaced container for slither-specific
+// extensions on a Sigma rule. Today it only carries `response`; future
+// per-rule knobs (rate-limits, suppression windows) land here so the
+// `slither.*` namespace stays a single decode struct.
+type slitherYAML struct {
+	Response *responseYAML `yaml:"response"`
+}
+
+type responseYAML struct {
+	Action      string `yaml:"action"`
+	TargetField string `yaml:"target_field"`
+	Immediate   bool   `yaml:"immediate"`
 }
 
 type logSourceYAML struct {
@@ -135,7 +154,75 @@ func compileSigma(src []byte) (*Rule, *sigmaYAML, error) {
 		Aggregation: agg,
 		cost:        cond.Cost(),
 	}
+
+	// Phase 4 #82: validate the optional response block now that
+	// selections are compiled — target_field is checked against the
+	// fields actually referenced by the rule's predicates.
+	if doc.Slither != nil && doc.Slither.Response != nil {
+		if _, err := compileResponseIntent(r, doc.Slither.Response); err != nil {
+			return nil, nil, compileErr(doc.ID, "ruleast", err)
+		}
+	}
 	return r, &doc, nil
+}
+
+// compileResponseIntent validates a Sigma rule's `slither.response`
+// block + returns the canonical ResponseIntent. Phase 4 #82.
+//
+// Validation rules:
+//
+//   - action must be one of the six ADR-0034 classes.
+//   - target_field must appear in at least one selection's predicates
+//     so the agent's auto-respond engine (#83) can resolve it from
+//     the firing event's fields. Catches typos at compile time.
+//   - immediate is a bare bool; no extra validation.
+func compileResponseIntent(rule *Rule, in *responseYAML) (*ResponseIntent, error) {
+	action := ResponseAction(strings.TrimSpace(in.Action))
+	if action == "" {
+		return nil, fmt.Errorf("slither.response.action required")
+	}
+	known := false
+	for _, a := range allResponseActions {
+		if a == action {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return nil, fmt.Errorf("slither.response.action %q not recognised; valid: %v",
+			action, allResponseActions)
+	}
+	target := strings.TrimSpace(in.TargetField)
+	if target == "" {
+		return nil, fmt.Errorf("slither.response.target_field required")
+	}
+	if !ruleReferencesField(rule, target) {
+		return nil, fmt.Errorf("slither.response.target_field %q is not referenced by any selection in this rule", target)
+	}
+	return &ResponseIntent{
+		Action:      action,
+		TargetField: target,
+		Immediate:   in.Immediate,
+	}, nil
+}
+
+// ruleReferencesField reports whether any selection's branch carries
+// a predicate on the named field. Case-sensitive — Sigma field names
+// are; if authors disagree, the typo'd name still fails the check.
+func ruleReferencesField(rule *Rule, field string) bool {
+	if rule == nil {
+		return false
+	}
+	for _, sel := range rule.Selections {
+		for _, branch := range sel.Branches {
+			for i := range branch {
+				if branch[i].Field == field {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // parseTimeframe converts Sigma's timeframe scalar into seconds. The

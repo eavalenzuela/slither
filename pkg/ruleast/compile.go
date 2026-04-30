@@ -28,7 +28,29 @@ func Compile(src []byte, opts ...CompileOption) (*EdgeArtefact, *ServerPlan, Cla
 	if err != nil {
 		return nil, nil, "", err
 	}
-	return classify(rule, doc.ForceEdge, doc.Lookback, doc.CrossHost, iocVerdict)
+	// compileSigma already validated the response block; rebuild the
+	// canonical form here so we can stamp it on the artefact/plan
+	// without a second compileSigma round-trip.
+	var intent *ResponseIntent
+	if doc.Slither != nil && doc.Slither.Response != nil {
+		intent, err = compileResponseIntent(rule, doc.Slither.Response)
+		if err != nil {
+			return nil, nil, "", compileErr(rule.ID, "ruleast", err)
+		}
+	}
+	art, plan, class, err := classify(rule, doc.ForceEdge, doc.Lookback, doc.CrossHost, iocVerdict)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if intent != nil {
+		if art != nil {
+			art.Response = intent
+		}
+		if plan != nil {
+			plan.Response = intent
+		}
+	}
+	return art, plan, class, nil
 }
 
 // ParseRule is Compile minus the classification gate: it returns the

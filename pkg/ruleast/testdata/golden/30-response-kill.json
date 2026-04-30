@@ -1,0 +1,40 @@
+{
+  "classification": "edge_only",
+  "response": {
+    "action": "kill_process",
+    "immediate": true,
+    "target_field": "Image"
+  },
+  "rule": {
+    "category": "process_creation",
+    "condition": "selection",
+    "cost": 2,
+    "description": "Detect /dev/tcp redirection and auto-kill the spawning shell.",
+    "id": "8b7c4d00-0001-4000-8000-000000000030",
+    "level": "high",
+    "selections": [
+      {
+        "fields": [
+          {
+            "field": "CommandLine",
+            "op": "contains",
+            "values": [
+              "/dev/tcp/",
+              "/dev/udp/"
+            ]
+          },
+          {
+            "field": "Image",
+            "op": "endswith",
+            "values": [
+              "/bash",
+              "/sh"
+            ]
+          }
+        ],
+        "name": "selection"
+      }
+    ],
+    "title": "Bash reverse shell with auto-kill response"
+  }
+}

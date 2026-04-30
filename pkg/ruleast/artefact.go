@@ -89,6 +89,12 @@ type EdgeArtefact struct {
 	// agent's IOC store (#67) preloads these feeds before the rule
 	// is enabled so an IOC predicate never silently misses.
 	IOCFeeds []string
+
+	// Response is the optional auto-respond intent compiled from the
+	// rule's top-level `slither.response` block. nil when the rule
+	// has no response block. Phase 4 #82 lands this field; Phase 4
+	// #83 wires the agent's edge auto-respond engine that consumes it.
+	Response *ResponseIntent
 }
 
 // IsStateful reports whether the artefact carries non-zero state
@@ -99,6 +105,55 @@ func (a *EdgeArtefact) IsStateful() bool {
 		return false
 	}
 	return a.StateWindowSecs > 0 || a.StateCap > 0
+}
+
+// ResponseAction names a per-rule auto-respond intent. The vocabulary
+// is frozen by ADR-0034 (six action classes); names round-trip
+// verbatim with the proto enum's snake_case form so authors see the
+// same string in the YAML, the audit row, and the wire request.
+type ResponseAction string
+
+const (
+	ResponseActionKillProcess      ResponseAction = "kill_process"
+	ResponseActionKillProcessTree  ResponseAction = "kill_process_tree"
+	ResponseActionQuarantineFile   ResponseAction = "quarantine_file"
+	ResponseActionIsolateHost      ResponseAction = "isolate_host"
+	ResponseActionUnisolateHost    ResponseAction = "unisolate_host"
+	ResponseActionCollectArtifacts ResponseAction = "collect_artifacts"
+)
+
+// allResponseActions backs the validation switch + the linker error
+// surface — adding a new action class to this list (and ADR-0034 +
+// the proto enum) wires it through the compiler in one go.
+var allResponseActions = []ResponseAction{
+	ResponseActionKillProcess,
+	ResponseActionKillProcessTree,
+	ResponseActionQuarantineFile,
+	ResponseActionIsolateHost,
+	ResponseActionUnisolateHost,
+	ResponseActionCollectArtifacts,
+}
+
+// ResponseIntent is the compiled form of a Sigma rule's optional
+// `slither.response` block (Phase 4 #82). The agent's edge auto-
+// respond engine (#83) reads this off the EdgeArtefact when the
+// rule fires; the server-side dispatcher reads it off the
+// ServerPlan when stateful/correlated rules fire.
+//
+// TargetField names the OCSF/event field whose value the action's
+// Target should be drawn from. The compiler validates that the
+// field appears in at least one of the rule's selection predicates
+// — a typo'd target_field at compile time beats a silent miss at
+// runtime when the field never resolves.
+type ResponseIntent struct {
+	Action      ResponseAction `json:"action"`
+	TargetField string         `json:"target_field"`
+	// Immediate signals the agent should run the action without
+	// waiting for the server to dispatch a ResponseRequest. False
+	// (default) means the rule still emits a DetectionFinding +
+	// the operator (or server auto-respond pipeline) decides. ADR-
+	// 0021 governs the "immediate" opt-in.
+	Immediate bool `json:"immediate,omitempty"`
 }
 
 // ServerPlan is the in-process form of a rule destined for the server
@@ -144,6 +199,12 @@ type ServerPlan struct {
 	// detection engine #58 reads this directly when rebuilding plans
 	// after a feed reload; empty for rules that don't use `|ioc`.
 	IOCFeeds []string `json:"ioc_feeds,omitempty"`
+
+	// Response is the auto-respond intent for server-side firings
+	// (mirrors EdgeArtefact.Response). The server dispatcher (#75)
+	// reads this when a server-only rule fires and routes the
+	// resulting ResponseRequest with rule_uid set. Phase 4 #82.
+	Response *ResponseIntent `json:"response,omitempty"`
 }
 
 // TemporalJoin is the wire form of a Sigma `near` join.
