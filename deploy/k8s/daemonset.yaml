@@ -1,0 +1,149 @@
+# Phase 5 #93 — Slither agent as a Kubernetes DaemonSet.
+#
+# Capability-only privilege grant — NEVER `securityContext.privileged: true`.
+# The narrow set below matches the systemd unit's CapabilityBoundingSet
+# (deploy/systemd/slither-agent.service); both surfaces grant the same
+# kernel privileges via different operator paths.
+#
+# Runs in the `slither` namespace (apply deploy/k8s/namespace.yaml first
+# or kustomize this in). Operator must:
+#   1. Create the agent's enrolled cert as a Secret named
+#      `slither-agent-cert` (per-host certs aren't a fit for a DaemonSet —
+#      the recommended pattern is to disable Phase 1 #34's enrollment
+#      flow for k8s and instead use a workload-identity-issued cert
+#      via cert-manager. Bridging that into Phase 4's cert_serial
+#      uniqueness is a Phase 6 task; for v1, pre-mint a single shared
+#      cert and accept that it represents "the slither fleet" as one
+#      logical agent on the server side.)
+#   2. Create the agent config as a ConfigMap named `slither-agent-config`
+#      with key `agent.yaml`.
+#   3. Apply this DaemonSet.
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: slither-agent
+  namespace: slither
+  labels:
+    app.kubernetes.io/name: slither-agent
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/part-of: slither
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: slither-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: slither-agent
+        app.kubernetes.io/component: agent
+        app.kubernetes.io/part-of: slither
+    spec:
+      # Tolerate every taint so the agent runs on control-plane,
+      # GPU, spot, and other tainted nodes — visibility coverage
+      # matters more than scheduling cleanliness here.
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+      # hostPID is required so /proc enrichment can resolve PIDs
+      # outside the container's pid namespace. hostNetwork is NOT
+      # required — the agent's network collector reads via BPF, not
+      # the host netns directly.
+      hostPID: true
+      # Ensure the agent runs even when node pressure is high; it's
+      # the audit trail for whatever's causing the pressure.
+      priorityClassName: system-node-critical
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: slither-agent
+          # Pinned tag here (operators bump via kustomize / helm).
+          # The release pipeline pushes both ghcr.io/t3rmit3/slither/agent:vX.Y.Z
+          # and the immutable digest reference; consumers should pin
+          # the digest in production.
+          image: ghcr.io/t3rmit3/slither/agent:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config
+            - /etc/slither/agent.yaml
+          securityContext:
+            # No privileged: true. Capabilities are the contract.
+            privileged: false
+            # Drop the default container caps; add only what BPF +
+            # process enrichment + the Phase 4 response handlers need.
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - BPF                 # load + attach eBPF programs (>=5.8)
+                - PERFMON             # tracepoint perf_event_open
+                - SYS_PTRACE          # /proc/<pid>/exe + cmdline cross-ns
+                - DAC_READ_SEARCH     # hash arbitrary executables
+                - DAC_OVERRIDE        # quarantine_file (Phase 4 #79)
+                - KILL                # kill_process / kill_tree (Phase 4 #78)
+                - NET_ADMIN           # isolate_host iptables (Phase 4 #80)
+            # Match the systemd unit's NoNewPrivileges=no posture —
+            # some kernels refuse BPF_PROG_LOAD with no_new_privs set.
+            allowPrivilegeEscalation: true
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              # Matches the systemd unit's TasksMax/LimitNOFILE rough
+              # envelope; operators tune via kustomize.
+              cpu: 1000m
+              memory: 512Mi
+          volumeMounts:
+            - name: btf
+              mountPath: /sys/kernel/btf
+              readOnly: true
+            - name: bpffs
+              mountPath: /sys/fs/bpf
+              # NOT readOnly — agent pins programs here.
+            - name: proc-host
+              mountPath: /host/proc
+              readOnly: true
+            - name: state
+              mountPath: /var/lib/slither
+            - name: config
+              mountPath: /etc/slither
+              readOnly: true
+            - name: cert
+              mountPath: /etc/slither/certs
+              readOnly: true
+      volumes:
+        - name: btf
+          hostPath:
+            path: /sys/kernel/btf
+            type: Directory
+        - name: bpffs
+          hostPath:
+            path: /sys/fs/bpf
+            type: DirectoryOrCreate
+        - name: proc-host
+          hostPath:
+            path: /proc
+            type: Directory
+        # Per-node ephemeral state. Quarantine + offline buffer
+        # (Phase 5 #96) live here; loss on node replacement is OK.
+        # Operators wanting durable state across node replacement
+        # should switch this to a per-node PVC via a VolumeClaimTemplate
+        # — not the daemonset default since DaemonSets don't natively
+        # support VCT pre-1.33.
+        - name: state
+          hostPath:
+            path: /var/lib/slither
+            type: DirectoryOrCreate
+        - name: config
+          configMap:
+            name: slither-agent-config
+            items:
+              - key: agent.yaml
+                path: agent.yaml
+        - name: cert
+          secret:
+            secretName: slither-agent-cert
+            defaultMode: 0400

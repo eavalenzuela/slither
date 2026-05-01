@@ -118,6 +118,86 @@ jobs:
           done
           ls -la dist/*.deb dist/*.rpm
 
+      - name: Set up QEMU (multi-arch builds)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push OCI images (Phase 5 #93)
+        id: oci
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        # buildx builds linux/amd64 + linux/arm64 in one shot and
+        # produces a multi-arch manifest list. Tags include the
+        # version + the immutable :latest pointer; production
+        # consumers should pin the digest from the build output.
+        # Tag-version is normalised to a docker-friendly form
+        # (no leading 'v', dots preserved).
+        run: |
+          DOCKER_VERSION="${VERSION#v}"
+          REPO_LOWER="${GITHUB_REPOSITORY,,}"
+
+          for image in agent server; do
+            tag_version="ghcr.io/$REPO_LOWER/$image:$DOCKER_VERSION"
+            tag_latest="ghcr.io/$REPO_LOWER/$image:latest"
+
+            push_arg=""
+            if [[ "${{ github.ref }}" == refs/tags/v* && "${{ inputs.dry_run }}" != "true" ]]; then
+              push_arg="--push"
+              # Capture the resulting digest so cosign can sign by
+              # @sha256:... and verifiers gate on the immutable ref.
+            else
+              push_arg="--load"
+              # On --load, buildx emits a single-arch local image only;
+              # multi-arch is push-only. Dry runs build amd64 to prove
+              # the Dockerfile.
+            fi
+
+            docker buildx build \
+              --file "deploy/docker/$image.Dockerfile" \
+              --build-arg "VERSION=$VERSION" \
+              ${push_arg:+--platform linux/amd64,linux/arm64} \
+              ${push_arg:--platform linux/amd64} \
+              --tag "$tag_version" \
+              --tag "$tag_latest" \
+              $push_arg \
+              .
+          done
+          # Surface the version tag for downstream cosign + SBOM steps.
+          {
+            echo "agent_tag=ghcr.io/$REPO_LOWER/agent:$DOCKER_VERSION"
+            echo "server_tag=ghcr.io/$REPO_LOWER/server:$DOCKER_VERSION"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Sign OCI images (cosign keyless)
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && inputs.dry_run != 'true' }}
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        # cosign sign attaches a signature to the manifest digest in
+        # the registry's signature index. Verifiers run
+        # `cosign verify --certificate-identity-regexp ...` against
+        # the same identity anchor as the blob signatures.
+        run: |
+          cosign sign --yes "${{ steps.oci.outputs.agent_tag }}"
+          cosign sign --yes "${{ steps.oci.outputs.server_tag }}"
+
+      - name: SBOM for OCI images
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && inputs.dry_run != 'true' }}
+        # Phase 5 #90 — same SPDX + CycloneDX shape as the binary
+        # artefacts. syft accepts an OCI ref directly.
+        run: |
+          mkdir -p dist
+          scripts/sbom.sh "${{ steps.oci.outputs.agent_tag }}"  dist/
+          scripts/sbom.sh "${{ steps.oci.outputs.server_tag }}" dist/
+
       - name: Generate SBOMs (SPDX-JSON + CycloneDX-JSON)
         # Phase 5 #90 — both formats per ADR-0035 so consumers in
         # either ecosystem (SPDX, CycloneDX) get a verifiable BOM.

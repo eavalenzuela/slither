@@ -1,0 +1,13 @@
+# Phase 5 #93 — Namespace for the slither stack. Apply this first.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: slither
+  labels:
+    app.kubernetes.io/part-of: slither
+    # Pod-security baseline is the right floor for the agent: it
+    # opts in to capabilities + hostPath but never `privileged: true`.
+    # Operators who run only the server (no agent daemonset) can
+    # tighten this to "restricted".
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: baseline
