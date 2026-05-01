@@ -100,7 +100,22 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	}
 	eng := ruleengine.New(rules, telem)
 
-	sink, err := newSink(ctx, cfg, telem, eng, iocStore)
+	// Phase 5 #95 — open the tamper-evident audit chain. Best-effort:
+	// a chain that won't open (e.g. /var/lib/slither not writable in
+	// some constrained container shape) logs a warning and the agent
+	// continues without local-side tamper evidence. The server-side
+	// audit_log + CH detection-finding store remain authoritative.
+	chain, chainErr := selfprotect.OpenChain("/var/lib/slither/log.chain")
+	if chainErr != nil {
+		slog.Warn("selfprotect: audit chain unavailable; continuing without local tamper-evidence",
+			"err", chainErr)
+		chain = nil
+	} else {
+		defer chain.Close()
+	}
+	eng.SetAuditChain(chain)
+
+	sink, err := newSink(ctx, cfg, telem, eng, iocStore, chain)
 	if err != nil {
 		return fmt.Errorf("app: output sink: %w", err)
 	}
@@ -197,7 +212,7 @@ func isCancelled(err error, ctx context.Context) bool {
 // flow in #36) — a missing or empty file is a startup error, not a
 // silent degradation. eng is wired in so the sink's ServerMessage
 // receiver can apply server-pushed RuleSets via Engine.ReplaceRules.
-func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engine, iocStore *ioc.Store) (output.Sink, error) {
+func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engine, iocStore *ioc.Store, chain *selfprotect.ChainWriter) (output.Sink, error) {
 	switch cfg.Output.Kind {
 	case "stdout", "":
 		return output.NewStdoutJSONL(os.Stdout), nil
@@ -250,8 +265,9 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 		// a recorded telem source. Default-stub handlers return
 		// FAILED + "not implemented"; #78-#81 SetHandler real ones.
 		executor := respond.New(respond.Options{
-			Results: sink.Results(),
-			Telem:   telem,
+			Results:    sink.Results(),
+			Telem:      telem,
+			AuditChain: chain, // Phase 5 #95 — nil-safe.
 		})
 		// Phase 4 #78: wire the real kill_process / kill_tree
 		// handlers. Linux-only via build tag in respond/kill.go;

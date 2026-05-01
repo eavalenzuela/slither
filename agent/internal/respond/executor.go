@@ -49,6 +49,7 @@ type Executor struct {
 
 	results chan<- *pb.ResponseResult
 	telem   *telemetry.Counters
+	chain   ChainAppender
 
 	// sem caps in-flight handlers; Submit returns false when full.
 	// Capacity matches Options.Concurrency and is set at construction
@@ -64,6 +65,20 @@ type Options struct {
 	Concurrency int
 	// Telem may be nil; gets a fresh counters value when zero.
 	Telem *telemetry.Counters
+	// AuditChain, when non-nil, receives one record per terminal
+	// ResponseResult. Phase 5 #95 — local tamper-evidence trail.
+	// Append errors are logged via the package's slog facade rather
+	// than tearing down the executor; the chain is best-effort
+	// alongside the live audit_log on the server.
+	AuditChain ChainAppender
+}
+
+// ChainAppender is the executor's view of selfprotect.ChainWriter.
+// Decoupled here so the package can stay test-friendly (a stub
+// counter satisfies the interface) and so a future remote-chain
+// implementation can plug in without touching this package.
+type ChainAppender interface {
+	Append(kind string, summary any) error
 }
 
 // New constructs an Executor with the per-action surface ADR-0034
@@ -83,6 +98,7 @@ func New(opts Options) *Executor {
 		handlers: make(map[pb.ResponseAction]Handler),
 		results:  opts.Results,
 		telem:    opts.Telem,
+		chain:    opts.AuditChain,
 		sem:      make(chan struct{}, opts.Concurrency),
 	}
 	// Default every action to a clearly-failing handler so an early
@@ -196,6 +212,34 @@ func (e *Executor) handle(ctx context.Context, req *pb.ResponseRequest) {
 	case pb.ResponseStatus_RESPONSE_STATUS_FAILED:
 		e.telem.IncResponseExecFailed()
 	}
+	// Phase 5 #95 — append a tamper-evident audit row for this
+	// terminal transition. Best-effort: chain append errors don't
+	// surface to the caller (the response itself already shipped).
+	// result_blob is excluded from the chain summary to keep the
+	// chain file size bounded — operators have the full blob in
+	// the server's response_actions.result_blob column.
+	if e.chain != nil {
+		_ = e.chain.Append("response_action", map[string]any{
+			"control_id": req.GetControlId(),
+			"rule_uid":   req.GetRuleUid(),
+			"action":     req.GetAction().String(),
+			"target":     req.GetTarget(),
+			"status":     status.String(),
+			"detail":     truncateChainDetail(detail),
+		})
+	}
+}
+
+// truncateChainDetail caps a detail string at 256 bytes so a
+// pathological handler returning a kilobyte of stack trace doesn't
+// bloat the chain file. Callers wanting full detail consult the
+// server-side audit_log row.
+func truncateChainDetail(s string) string {
+	const max = 256
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…[truncated]"
 }
 
 // emit pushes a result onto the outbound channel without blocking.

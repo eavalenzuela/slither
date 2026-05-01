@@ -81,6 +81,98 @@ func TestExecutor_SetHandlerOverride(t *testing.T) {
 	}
 }
 
+// chainCollector is a test double for the Phase 5 #95 ChainAppender.
+// Records every Append call so tests can assert what the executor
+// emitted to the audit chain.
+type chainCollector struct {
+	mu    sync.Mutex
+	calls []chainCall
+}
+
+type chainCall struct {
+	kind    string
+	summary any
+}
+
+func (c *chainCollector) Append(kind string, summary any) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls = append(c.calls, chainCall{kind: kind, summary: summary})
+	return nil
+}
+
+func (c *chainCollector) Calls() []chainCall {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]chainCall(nil), c.calls...)
+}
+
+// Phase 5 #95: every terminal handler invocation must produce one
+// chain.Append("response_action", …) entry. Done + Failed both count.
+func TestExecutor_AppendsToAuditChainOnTerminal(t *testing.T) {
+	t.Parallel()
+	results := make(chan *pb.ResponseResult, 4)
+	chain := &chainCollector{}
+	e := New(Options{Results: results, Telem: telemetry.NewCounters(), AuditChain: chain})
+
+	e.SetHandler(pb.ResponseAction_RESPONSE_ACTION_KILL_PROCESS,
+		func(_ context.Context, req *pb.ResponseRequest) (pb.ResponseStatus, string, []byte) {
+			return pb.ResponseStatus_RESPONSE_STATUS_DONE, "killed " + req.GetTarget(), nil
+		})
+
+	for i := 0; i < 3; i++ {
+		if !e.Submit(context.Background(), &pb.ResponseRequest{
+			ControlId: "k",
+			Action:    pb.ResponseAction_RESPONSE_ACTION_KILL_PROCESS,
+			Target:    "1234",
+		}) {
+			t.Fatalf("Submit %d false", i)
+		}
+		drainOne(t, results)
+	}
+
+	calls := chain.Calls()
+	if len(calls) != 3 {
+		t.Fatalf("chain calls = %d, want 3", len(calls))
+	}
+	for i, c := range calls {
+		if c.kind != "response_action" {
+			t.Errorf("call %d kind = %q, want response_action", i, c.kind)
+		}
+		// summary must be a map carrying status + target.
+		m, ok := c.summary.(map[string]any)
+		if !ok {
+			t.Fatalf("call %d summary type = %T, want map[string]any", i, c.summary)
+		}
+		if got := m["status"]; got != "RESPONSE_STATUS_DONE" {
+			t.Errorf("call %d status = %v, want RESPONSE_STATUS_DONE", i, got)
+		}
+		if got := m["target"]; got != "1234" {
+			t.Errorf("call %d target = %v, want 1234", i, got)
+		}
+	}
+}
+
+// Nil chain must not crash the executor — it's optional.
+func TestExecutor_NilChainNoOp(t *testing.T) {
+	t.Parallel()
+	results := make(chan *pb.ResponseResult, 1)
+	e := New(Options{Results: results, Telem: telemetry.NewCounters(), AuditChain: nil})
+	e.SetHandler(pb.ResponseAction_RESPONSE_ACTION_KILL_PROCESS,
+		func(_ context.Context, _ *pb.ResponseRequest) (pb.ResponseStatus, string, []byte) {
+			return pb.ResponseStatus_RESPONSE_STATUS_DONE, "ok", nil
+		})
+	if !e.Submit(context.Background(), &pb.ResponseRequest{
+		ControlId: "k",
+		Action:    pb.ResponseAction_RESPONSE_ACTION_KILL_PROCESS,
+	}) {
+		t.Fatal("Submit returned false")
+	}
+	drainOne(t, results)
+	// Nothing to assert beyond "no panic, no crash" — the absence of
+	// a chain shouldn't change the result-emission path at all.
+}
+
 func TestExecutor_QueueFullEmitsFailed(t *testing.T) {
 	t.Parallel()
 	results := make(chan *pb.ResponseResult, 16)

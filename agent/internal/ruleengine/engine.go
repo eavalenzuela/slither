@@ -38,6 +38,9 @@ type Engine interface {
 	// fires; the hook decides (based on cached HostPolicy) whether
 	// to actually run the local executor.
 	SetAutoRespondHook(h AutoRespondHook)
+	// SetAuditChain installs the Phase 5 #95 tamper-evident chain.
+	// Nil disables the chain.
+	SetAuditChain(c ChainAppender)
 }
 
 // CompiledRule is a rule that has been compiled by pkg/ruleast and classified
@@ -62,6 +65,20 @@ type AutoRespondHook interface {
 	OnFinding(ctx context.Context, intent *ruleast.ResponseIntent, trigger ocsf.Event, finding *ocsf.DetectionFinding, category ruleast.Category)
 }
 
+// ChainAppender is the engine's view of selfprotect.ChainWriter.
+// Engine appends one record per emitted detection finding for Phase
+// 5 #95 tamper-evident audit. Mirrors the respond.ChainAppender
+// shape so a single ChainWriter satisfies both consumers.
+type ChainAppender interface {
+	Append(kind string, summary any) error
+}
+
+// SetAuditChain installs the optional Phase 5 #95 audit chain.
+// Calling with nil disables the chain. Safe to call before Run.
+func (e *engine) SetAuditChain(c ChainAppender) {
+	e.chain = c
+}
+
 // detectionBlockWait bounds how long Run waits for a DetectionFinding send
 // before declaring the sink broken. 200 ms is long enough to absorb a jittery
 // downstream flush, short enough that the diagnostic fires before operators
@@ -84,6 +101,7 @@ type engine struct {
 	now      func() time.Time
 	replace  chan map[ocsf.ClassID][]CompiledRule
 	autoHook AutoRespondHook
+	chain    ChainAppender
 }
 
 // New returns an Engine loaded with the given compiled rules.
@@ -235,6 +253,23 @@ func (e *engine) processEvent(ctx context.Context, ev ocsf.Event) error {
 			return err
 		}
 		e.telem.IncDetections()
+
+		// Phase 5 #95 — append a tamper-evident audit row. Best-
+		// effort: chain errors don't tear down the engine. Summary
+		// captures rule + host + finding identity (severity_id +
+		// finding_uid via OCSF spec) so verify-logs's output ties
+		// back to specific findings without dragging the whole
+		// payload into the chain.
+		if e.chain != nil {
+			_ = e.chain.Append("detection_finding", map[string]any{
+				"rule_uid":        finding.RuleInfo.UID,
+				"finding_uid":     finding.Finding.UID,
+				"severity":        finding.Severity,
+				"auto_response":   finding.AutoResponseAction,
+				"executed":        finding.AutoResponseExecuted,
+				"would_have_exec": finding.AutoResponseWouldHaveExecuted,
+			})
+		}
 	}
 	return nil
 }

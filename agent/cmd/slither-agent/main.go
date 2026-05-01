@@ -21,6 +21,7 @@ import (
 	"github.com/t3rmit3/slither/agent/internal/app"
 	"github.com/t3rmit3/slither/agent/internal/config"
 	"github.com/t3rmit3/slither/agent/internal/enroll"
+	"github.com/t3rmit3/slither/agent/internal/selfprotect"
 	"github.com/t3rmit3/slither/pkg/version"
 )
 
@@ -41,6 +42,8 @@ func dispatch(args []string) error {
 			return runCmd(args[1:])
 		case "enroll":
 			return enrollCmd(args[1:])
+		case "verify-logs":
+			return verifyLogsCmd(args[1:])
 		case "-h", "--help", "help":
 			printUsage()
 			return nil
@@ -53,8 +56,9 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, `usage: slither-agent <command> [flags]
 
 Commands:
-  run      Run the agent (default)
-  enroll   Enrol this host with the slither server`)
+  run          Run the agent (default)
+  enroll       Enrol this host with the slither server
+  verify-logs  Walk the tamper-evident chain at /var/lib/slither/log.chain`)
 }
 
 func runCmd(args []string) error {
@@ -119,6 +123,39 @@ func enrollCmd(args []string) error {
 	fmt.Fprintf(os.Stderr, "  cert:    %s\n", res.CertPath)
 	fmt.Fprintf(os.Stderr, "  ca:      %s\n", res.CAPath)
 	fmt.Fprintf(os.Stderr, "  host_id: %s\n", res.HostIDPath)
+	return nil
+}
+
+// verifyLogsCmd walks /var/lib/slither/log.chain (or --path) and
+// reports the chain's integrity. Phase 5 #95.
+//
+//	exit 0 — chain valid; prints "ok: walked N records"
+//	exit 1 — chain break detected; prints "chain break at seq=N: <reason>"
+//	exit 2 — operational failure (file unreadable, etc.)
+func verifyLogsCmd(args []string) error {
+	fs := flag.NewFlagSet("verify-logs", flag.ExitOnError)
+	path := fs.String("path", "/var/lib/slither/log.chain", "Path to the chain file")
+	since := fs.Duration("since", 0, "Only count records newer than now-DURATION (chain validation always runs from seq=0)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	var sinceTime time.Time
+	if *since > 0 {
+		sinceTime = time.Now().Add(-*since)
+	}
+
+	walked, err := selfprotect.VerifyChain(*path, sinceTime)
+	if err != nil {
+		var cb *selfprotect.ChainBreakError
+		if errors.As(err, &cb) {
+			fmt.Fprintf(os.Stderr, "%s\n", cb.Error())
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "verify-logs: %v\n", err)
+		os.Exit(2)
+	}
+	fmt.Printf("ok: walked %d records\n", walked)
 	return nil
 }
 
