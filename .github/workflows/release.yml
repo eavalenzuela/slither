@@ -29,12 +29,23 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          # Phase 5 #89 — track the workspace's pinned toolchain so
+          # release builds match `make verify-reproducible`.
+          go-version-file: go.work
+          cache: true
+          cache-dependency-path: |
+            agent/go.sum
+            server/go.sum
+            pkg/go.sum
+            tools/go.sum
 
       - name: Install system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm libbpf-dev
+          # Phase 5 #89 — same clang/llvm pin as ci.yml.
+          sudo apt-get install -y clang-14 llvm-14 libbpf-dev
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 100
+          sudo update-alternatives --install /usr/bin/llc   llc   /usr/bin/llc-14   100
 
       - name: Install Go tools
         run: make tools
@@ -57,6 +68,11 @@ jobs:
       - name: Build binaries (linux/amd64 + linux/arm64)
         env:
           VERSION: ${{ steps.ver.outputs.version }}
+        # Phase 5 #89 build flags inline. Cross-compile loop deviates
+        # from `make build` only in setting GOOS/GOARCH per iteration;
+        # the rest (-trimpath -buildvcs=true -mod=readonly + -ldflags)
+        # mirrors GO_BUILD_FLAGS so release artefacts inherit the same
+        # reproducibility properties verify-reproducible asserts.
         run: |
           mkdir -p dist
           for arch in amd64 arm64; do
@@ -64,7 +80,7 @@ jobs:
               dir="dist/slither-$bin-linux-$arch"
               mkdir -p "$dir"
               (cd $bin && GOOS=linux GOARCH=$arch CGO_ENABLED=0 \
-                go build -trimpath \
+                go build -trimpath -buildvcs=true -mod=readonly \
                   -ldflags="-s -w -X github.com/t3rmit3/slither/pkg/version.Version=$VERSION" \
                   -o "../$dir/slither-$bin" ./cmd/slither-$bin)
               cp LICENSE README.md "$dir/"
@@ -72,17 +88,28 @@ jobs:
             done
           done
 
-      - name: Generate SBOMs
+      - name: Generate SBOMs (SPDX-JSON + CycloneDX-JSON)
+        # Phase 5 #90 — both formats per ADR-0035 so consumers in
+        # either ecosystem (SPDX, CycloneDX) get a verifiable BOM.
+        # scripts/sbom.sh wraps `syft` with consistent output naming
+        # and is also reusable from #92 (deb/rpm) + #93 (OCI).
         run: |
           for tar in dist/*.tar.gz; do
-            syft "$tar" -o spdx-json > "$tar.sbom.json"
+            scripts/sbom.sh "$tar" "$(dirname "$tar")"
           done
+          ls -la dist/*.sbom.json* dist/*.cyclonedx.json 2>/dev/null || true
 
       - name: Sign artifacts (keyless)
+        # Phase 5 #91 — cosign keyless via GitHub OIDC over every
+        # release artefact (binaries, SBOMs in both formats). The
+        # certificate identity proves the signature came from this
+        # workflow at this commit; verifiers gate on it via
+        # `cosign verify-blob --certificate-identity-regexp`.
         env:
           COSIGN_EXPERIMENTAL: "1"
         run: |
-          for f in dist/*.tar.gz dist/*.sbom.json; do
+          for f in dist/*.tar.gz dist/*.spdx.json dist/*.cyclonedx.json; do
+            [ -e "$f" ] || continue
             cosign sign-blob --yes "$f" --output-signature "$f.sig" --output-certificate "$f.pem"
           done
 
@@ -93,7 +120,8 @@ jobs:
           generate_release_notes: true
           files: |
             dist/*.tar.gz
-            dist/*.sbom.json
+            dist/*.spdx.json
+            dist/*.cyclonedx.json
             dist/*.sig
             dist/*.pem
 
