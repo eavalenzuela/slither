@@ -25,6 +25,18 @@ endif
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X github.com/t3rmit3/slither/pkg/version.Version=$(VERSION)
 
+# Phase 5 #89 — flags applied to every release build target. Combined,
+# they make `make build` byte-reproducible at a given commit:
+#   -trimpath        strips on-disk paths from the binary
+#   -buildvcs=true   embeds VCS commit + dirty flag (deterministic per
+#                    commit; CI clean trees produce identical binaries)
+#   -mod=readonly    refuses to mutate go.mod/go.sum during build, so
+#                    a stale go.sum can't silently bump deps
+# CGO_ENABLED=0 keeps the agent + server binaries free of glibc/libc
+# linkage drift (Phase 1 #25). The verify-reproducible target asserts
+# the byte-for-byte invariant by building twice and diffing.
+GO_BUILD_FLAGS := -trimpath -buildvcs=true -mod=readonly -ldflags='$(LDFLAGS)'
+
 GO_MODULES := pkg agent server
 
 # ----------------------------------------------------------------------------
@@ -103,17 +115,48 @@ build: build-agent build-server build-db ## Build all binaries
 .PHONY: build-agent
 build-agent: ## Build slither-agent → bin/
 	@mkdir -p $(BIN)
-	@cd agent && CGO_ENABLED=0 go build -trimpath -ldflags='$(LDFLAGS)' -o $(BIN)/slither-agent ./cmd/slither-agent
+	@cd agent && CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(BIN)/slither-agent ./cmd/slither-agent
 
 .PHONY: build-server
 build-server: ## Build slither-server → bin/
 	@mkdir -p $(BIN)
-	@cd server && CGO_ENABLED=0 go build -trimpath -ldflags='$(LDFLAGS)' -o $(BIN)/slither-server ./cmd/slither-server
+	@cd server && CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(BIN)/slither-server ./cmd/slither-server
 
 .PHONY: build-db
 build-db: ## Build slither-db (Postgres migration harness) → bin/
 	@mkdir -p $(BIN)
-	@cd server && CGO_ENABLED=0 go build -trimpath -ldflags='$(LDFLAGS)' -o $(BIN)/slither-db ./cmd/slither-db
+	@cd server && CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(BIN)/slither-db ./cmd/slither-db
+
+.PHONY: verify-reproducible
+verify-reproducible: ## Phase 5 #89 — build twice, assert bin/* are byte-identical
+	@set -e; \
+	tmp=$$(mktemp -d); \
+	echo "▶ first build"; \
+	$(MAKE) --no-print-directory build >/dev/null; \
+	for f in $(BIN)/slither-agent $(BIN)/slither-server $(BIN)/slither-db; do \
+		cp "$$f" "$$tmp/$$(basename $$f).1"; \
+	done; \
+	echo "▶ second build"; \
+	rm -f $(BIN)/slither-agent $(BIN)/slither-server $(BIN)/slither-db; \
+	$(MAKE) --no-print-directory build >/dev/null; \
+	fail=0; \
+	for f in $(BIN)/slither-agent $(BIN)/slither-server $(BIN)/slither-db; do \
+		base=$$(basename $$f); \
+		s1=$$(sha256sum "$$tmp/$$base.1" | cut -d' ' -f1); \
+		s2=$$(sha256sum "$$f" | cut -d' ' -f1); \
+		if [ "$$s1" = "$$s2" ]; then \
+			echo "  ✓ $$base $$s1"; \
+		else \
+			echo "  ✗ $$base differs: $$s1 vs $$s2"; \
+			fail=1; \
+		fi; \
+	done; \
+	rm -rf "$$tmp"; \
+	if [ $$fail -ne 0 ]; then \
+		echo "ERROR: build is not reproducible. Investigate the differing binary."; \
+		exit 1; \
+	fi; \
+	echo "✓ all binaries reproducible"
 
 # ----------------------------------------------------------------------------
 # Test

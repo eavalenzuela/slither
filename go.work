@@ -1,5 +1,12 @@
 go 1.25.0
 
+// Phase 5 #89 — pin the exact Go toolchain so reproducible builds
+// don't drift across patch versions of 1.25 (CI's `go-version: "1.25"`
+// resolves to the latest patch, which differs over time). The
+// toolchain directive forces `go build` to download + use this exact
+// release when the host's go differs.
+toolchain go1.25.0
+
 use (
 	./agent
 	./pkg
