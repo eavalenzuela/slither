@@ -56,6 +56,8 @@ See `docs/dev-setup.md` for the full dev-host bootstrap.
 
 ## 1. Build (or copy) the binary
 
+### 1.1 Build from source
+
 From a dev host:
 
 ```bash
@@ -67,6 +69,63 @@ Then copy onto the target:
 ```bash
 sudo install -Dm0755 bin/slither-agent /usr/local/bin/slither-agent
 ```
+
+### 1.2 Or download + verify a signed release tarball
+
+Tagged releases produce per-arch tarballs (`slither-agent-linux-amd64.tar.gz`,
+`slither-agent-linux-arm64.tar.gz`) cosign-signed via GitHub OIDC at the
+release-pipeline commit (Phase 5 #91). Each artefact ships with three
+sibling files:
+
+- `<artefact>.sig` — the cosign signature blob
+- `<artefact>.pem` — the issuing certificate (Sigstore Fulcio)
+- `<artefact>.spdx.json` + `<artefact>.cyclonedx.json` — SBOMs (Phase 5 #90)
+
+Verify the tarball before unpacking:
+
+```bash
+# install cosign once: https://docs.sigstore.dev/cosign/installation/
+cosign verify-blob \
+    --certificate-identity-regexp "^https://github.com/t3rmit3/slither/.github/workflows/release.yml@refs/tags/v" \
+    --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+    --signature slither-agent-linux-amd64.tar.gz.sig \
+    --certificate slither-agent-linux-amd64.tar.gz.pem \
+    slither-agent-linux-amd64.tar.gz
+```
+
+A successful verification prints `Verified OK`. The
+`--certificate-identity-regexp` anchor pins the signature to **this
+repository's release workflow** at a `refs/tags/v*` ref, so any
+artefact signed elsewhere (a fork, a pull-request build, an attacker
+re-signing under a different identity) fails verification.
+
+If your packaging policy requires a separately-pinned identity,
+substitute the literal workflow URL for the regexp anchor and the
+exact tag — both are visible in the certificate via `cosign verify-blob`
+with `--output json`.
+
+The same procedure verifies the SBOM blobs:
+
+```bash
+cosign verify-blob \
+    --certificate-identity-regexp "^https://github.com/t3rmit3/slither/.github/workflows/release.yml@refs/tags/v" \
+    --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+    --signature slither-agent-linux-amd64.tar.gz.spdx.json.sig \
+    --certificate slither-agent-linux-amd64.tar.gz.spdx.json.pem \
+    slither-agent-linux-amd64.tar.gz.spdx.json
+```
+
+After verification, unpack and install:
+
+```bash
+tar xzf slither-agent-linux-amd64.tar.gz
+sudo install -Dm0755 slither-agent-linux-amd64/slither-agent /usr/local/bin/slither-agent
+```
+
+> **Skipping verification means you trust the transport** — whoever
+> served you the tarball, the network in between, and any caching
+> mirror. Verification is the cheapest defense in this stack;
+> `cosign verify-blob` runs in well under a second.
 
 ## 2. Enrol this host (server deployments only)
 
