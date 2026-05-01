@@ -16,6 +16,7 @@ import (
 	"github.com/t3rmit3/slither/agent/internal/enricher"
 	"github.com/t3rmit3/slither/agent/internal/ioc"
 	"github.com/t3rmit3/slither/agent/internal/output"
+	"github.com/t3rmit3/slither/agent/internal/selfprotect"
 
 	grpcsink "github.com/t3rmit3/slither/agent/internal/output/grpc"
 	"github.com/t3rmit3/slither/agent/internal/respond"
@@ -39,6 +40,45 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		return fmt.Errorf("app: nil config")
 	}
 	applog.Init(cfg.Agent.LogLevel)
+
+	// Phase 5 #94 — self-protection bar. Order matters:
+	//   1. CheckNotTraced first — if a tracer is already attached we
+	//      want to fail loud before doing anything else (the agent's
+	//      memory at this point still contains zero secrets, so an
+	//      attached tracer is purely a "you're being monitored"
+	//      signal, not an immediate exfil concern).
+	//   2. SetDumpable next — closes the door on future PTRACE_ATTACH
+	//      and on /proc/<pid> reads from non-owner UIDs.
+	//   3. LockdownStateDirs — defense in depth atop systemd's
+	//      StateDirectory= (irrelevant in containers).
+	// Each call is best-effort + logs on failure rather than aborting
+	// startup. CheckNotTraced is the one exception: tracer-attached
+	// is a fatal startup condition.
+	if err := selfprotect.CheckNotTraced(); err != nil {
+		// Don't even continue to telemetry init — the audit row is
+		// "agent refused to boot, tracer N had us pinned".
+		return fmt.Errorf("app: %w", err)
+	}
+	if err := selfprotect.SetDumpable(); err != nil {
+		slog.Warn("selfprotect: PR_SET_DUMPABLE failed; continuing without ptrace lockdown",
+			"err", err)
+	}
+	if err := selfprotect.LockdownStateDirs("/var/lib/slither", "/etc/slither", "/var/log/slither"); err != nil {
+		slog.Warn("selfprotect: state-dir lockdown failed; continuing",
+			"err", err)
+	}
+	// Lowering CAP_BPF + CAP_PERFMON from ambient affects only what
+	// forked subprocesses inherit on exec(2) — the agent itself keeps
+	// permitted+effective caps for the lifetime of the process. We
+	// can call this before BPF load because ambient isn't consulted
+	// during bpf(2) calls; it's purely an exec-time inheritance knob.
+	// Phase 5 #100's quarantine subprocess gets a strictly narrower
+	// effective cap set than this lower-bound, so this is defense in
+	// depth for that path (and any future fork+exec we add).
+	if err := selfprotect.DropAmbientPostInit(); err != nil {
+		slog.Warn("selfprotect: ambient cap drop failed; continuing",
+			"err", err)
+	}
 
 	telem := telemetry.NewCounters()
 
