@@ -56,6 +56,15 @@ jobs:
       - name: Install syft (SBOM)
         uses: anchore/sbom-action/download-syft@v0
 
+      - name: Install nfpm (Phase 5 #92)
+        # Pin to a known release; install to a path that's already on
+        # $PATH for subsequent steps. nfpm builds both .deb and .rpm
+        # formats from one config (deploy/nfpm/nfpm.yaml).
+        run: |
+          curl -sSL "https://github.com/goreleaser/nfpm/releases/download/v2.41.3/nfpm_2.41.3_amd64.deb" -o /tmp/nfpm.deb
+          sudo dpkg -i /tmp/nfpm.deb
+          nfpm --version
+
       - name: Determine version
         id: ver
         run: |
@@ -88,16 +97,40 @@ jobs:
             done
           done
 
+      - name: Build deb + rpm packages (Phase 5 #92)
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        # nfpm 2.41 substitutes ${VERSION}/${ARCH} in the top-level
+        # name/arch/version fields, but NOT inside contents[].src.
+        # We pre-process via envsubst into a per-arch config so the
+        # contents glob resolves cleanly. Strip the leading 'v' from
+        # VERSION because deb/rpm version fields must be number-leading;
+        # git tags ship as v1.2.3, packages as slither-agent_1.2.3_*.
+        run: |
+          PKG_VERSION="${VERSION#v}"
+          for arch in amd64 arm64; do
+            export ARCH="$arch"
+            export VERSION="$PKG_VERSION"
+            export BIN="dist/slither-agent-linux-$arch/slither-agent"
+            envsubst '$ARCH $VERSION $BIN' < deploy/nfpm/nfpm.yaml > "dist/nfpm-$arch.yaml"
+            nfpm package --packager deb --config "dist/nfpm-$arch.yaml" --target dist/
+            nfpm package --packager rpm --config "dist/nfpm-$arch.yaml" --target dist/
+          done
+          ls -la dist/*.deb dist/*.rpm
+
       - name: Generate SBOMs (SPDX-JSON + CycloneDX-JSON)
         # Phase 5 #90 — both formats per ADR-0035 so consumers in
         # either ecosystem (SPDX, CycloneDX) get a verifiable BOM.
         # scripts/sbom.sh wraps `syft` with consistent output naming
-        # and is also reusable from #92 (deb/rpm) + #93 (OCI).
+        # and is also reusable from #93 (OCI). Phase 5 #92 — extended
+        # to cover .deb + .rpm so packaged installs carry the same BOM
+        # surface tarball downloads do.
         run: |
-          for tar in dist/*.tar.gz; do
-            scripts/sbom.sh "$tar" "$(dirname "$tar")"
+          for artefact in dist/*.tar.gz dist/*.deb dist/*.rpm; do
+            [ -e "$artefact" ] || continue
+            scripts/sbom.sh "$artefact" "$(dirname "$artefact")"
           done
-          ls -la dist/*.sbom.json* dist/*.cyclonedx.json 2>/dev/null || true
+          ls -la dist/*.spdx.json dist/*.cyclonedx.json 2>/dev/null || true
 
       - name: Sign artifacts (keyless)
         # Phase 5 #91 — cosign keyless via GitHub OIDC over every
@@ -108,7 +141,10 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "1"
         run: |
-          for f in dist/*.tar.gz dist/*.spdx.json dist/*.cyclonedx.json; do
+          # Phase 5 #92 extends the sign loop to .deb + .rpm so the
+          # packaged surface inherits the same OIDC-anchored signature
+          # the tarballs already carry.
+          for f in dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.spdx.json dist/*.cyclonedx.json; do
             [ -e "$f" ] || continue
             cosign sign-blob --yes "$f" --output-signature "$f.sig" --output-certificate "$f.pem"
           done
@@ -120,6 +156,8 @@ jobs:
           generate_release_notes: true
           files: |
             dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
             dist/*.spdx.json
             dist/*.cyclonedx.json
             dist/*.sig

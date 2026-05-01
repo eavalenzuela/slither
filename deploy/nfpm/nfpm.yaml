@@ -1,0 +1,114 @@
+# Phase 5 #92 — nfpm config that builds .deb + .rpm in a single
+# `nfpm package` invocation per format.
+#
+# Build pipeline (release.yml):
+#   for arch in amd64 arm64; do
+#     export VERSION=... ARCH=$arch BIN=dist/.../slither-agent
+#     nfpm pkg --packager deb --config deploy/nfpm/nfpm.yaml --target dist/
+#     nfpm pkg --packager rpm --config deploy/nfpm/nfpm.yaml --target dist/
+#   done
+#
+# Variable substitutions ($VERSION, $ARCH, $BIN) are evaluated by
+# nfpm itself — no shell expansion in this file. arm64/amd64 dispatch
+# is per-invocation, not per-section.
+
+name: slither-agent
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: net
+priority: optional
+maintainer: "t3rmit3 <eavalenzuela7@gmail.com>"
+description: |
+  Linux EDR agent — eBPF-based process/file/network telemetry with a
+  Sigma rule engine, OCSF event emission, and capability-bounded
+  response actions. Connects to a slither-server over mTLS.
+vendor: "slither"
+homepage: "https://github.com/t3rmit3/slither"
+license: "Apache-2.0"
+
+# Package contents. dst paths are absolute on the target host; src
+# paths are resolved relative to the nfpm working directory (the repo
+# root in our pipeline).
+contents:
+  # Binary. /usr/local/bin/ matches the path the systemd unit's
+  # ExecStart references; switching to /usr/bin/ would force a unit
+  # rewrite + a migration step on existing fleets, which #92 explicitly
+  # avoids.
+  - src: ${BIN}
+    dst: /usr/local/bin/slither-agent
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
+  # Systemd unit — capability-bounded, hardened (Phase 1 #25 +
+  # Phase 4 #86 fix that added CAP_KILL/CAP_NET_ADMIN/CAP_DAC_OVERRIDE).
+  - src: deploy/systemd/slither-agent.service
+    dst: /etc/systemd/system/slither-agent.service
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+  # sysctl drop-in. Closes #86 Gap A — Debian's perf_event_paranoid
+  # default of 3 rejects tracepoint perf_event_open even with
+  # CAP_PERFMON. Postinst runs `sysctl --system` so the value takes
+  # effect without a reboot.
+  - src: deploy/sysctl.d/99-slither.conf
+    dst: /etc/sysctl.d/99-slither.conf
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+  # Sample config. Marked as a config file so package upgrades don't
+  # clobber operator edits — though the canonical config is
+  # /etc/slither/agent.yaml, which the operator hand-creates from this
+  # sample. The .sample suffix keeps that contract honest.
+  - src: deploy/config/agent.yaml.sample
+    dst: /etc/slither/agent.yaml.sample
+    type: config|noreplace
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+  # Empty state + log directories with the same modes the systemd
+  # unit's StateDirectory= / LogsDirectory= would create. Pre-creating
+  # them via the package keeps file_info ownership predictable across
+  # systemd versions.
+  - dst: /var/lib/slither
+    type: dir
+    file_info:
+      mode: 0700
+      owner: root
+      group: root
+  - dst: /var/log/slither
+    type: dir
+    file_info:
+      mode: 0700
+      owner: root
+      group: root
+
+# Distro-specific knobs. dnf/yum require a license tag; deb wants
+# pre/post hooks under a specific structure nfpm handles itself.
+deb:
+  fields:
+    Bugs: "https://github.com/t3rmit3/slither/issues"
+  triggers:
+    interest_noawait:
+      - /etc/sysctl.d
+rpm:
+  group: System Environment/Daemons
+
+# Lifecycle scripts. nfpm wires these into the per-format
+# preinst/postinst/prerm/postrm hook system automatically.
+scripts:
+  postinstall: deploy/nfpm/postinstall.sh
+  preremove: deploy/nfpm/preremove.sh
+  postremove: deploy/nfpm/postremove.sh
+
+# No conflicts/replaces yet — first packaged release is greenfield.
+# When 1.x ships, add a `replaces:` for any pre-1.0 dev packages that
+# might exist on operator hosts.
