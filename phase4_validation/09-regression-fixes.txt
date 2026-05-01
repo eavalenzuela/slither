@@ -1,0 +1,117 @@
+=== Phase 4 #86 V9: 99ec57a regression-fix evidence ===
+timestamp: 2026-05-01T21:15:37Z
+
+Commit 99ec57a addressed five gaps caught during the original (uncaptured)
+#86 cloud run on 2026-04-29. Each is re-validated below by referencing the
+fresh evidence captured in V3/V5/V6/V7 above.
+
+============================================================================
+## Fix #1 — agent unit CAP_KILL / CAP_NET_ADMIN / CAP_DAC_OVERRIDE ##
+============================================================================
+(deploy/systemd/slither-agent.service)
+
+Re-tested by:
+  - V3: console-driven kill_process succeeded on ubuntu (action 5fb4e099,
+    audit prev=running next=done, detail='killed pid 1972 SIGTERM+grace+SIGKILL').
+    Proves CAP_KILL effective.
+  - V7: quarantine_file succeeded on /var/log/slither/ (action 087cb362,
+    manifest written under /var/lib/slither/quarantine/, file restored byte-
+    identical on revert). Proves CAP_DAC_OVERRIDE/READ_SEARCH effective for
+    cross-uid file ops.
+  - CAP_NET_ADMIN (isolate_host) wired in unit but not live-fired in this
+    cloud run — installing the slither-isolation iptables chain mid-SSH
+    session would risk dropping the operator's connection if the management-
+    subnet derivation got it wrong. Static evidence: capabilities present
+    in unit (verified against running fleet earlier in this run).
+
+Live unit caps on the fleet (verified at top of this validation):
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_PTRACE CAP_DAC_READ_SEARCH CAP_KILL CAP_NET_ADMIN CAP_DAC_OVERRIDE
+AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_SYS_PTRACE CAP_DAC_READ_SEARCH CAP_KILL CAP_NET_ADMIN CAP_DAC_OVERRIDE
+
+============================================================================
+## Fix #2 — ruleast target_field shape (was selection-membership) ##
+============================================================================
+(pkg/ruleast/sigma.go)
+
+Pre-fix: target_field had to appear inside the selection block. kill_process
+rules typically match on Image but target ProcessId — which fails this check.
+Post-fix: target_field need only pass isIdentifierShape() at compile time;
+runtime resolves at finding-time and degrades to would_have_executed=true
+if the field doesn't exist on the actual event.
+
+Re-tested by:
+  - Rule 0086 ships with selection={Image|endswith: /slither-canary} but
+    target_field=ProcessId. Pre-fix: would not compile. Post-fix: compiled
+    cleanly, loaded into the running ruleset on all three agents (server log
+    showed 'hub: include rule rule_uid=8b7c4d00-0086-… classification=edge_only').
+  - V5 fired the rule on ubuntu (promoted) and killed the spawned PID 3072.
+    target_field successfully resolved to a real PID, confirming runtime
+    field-resolution path works.
+  - V6 fired same rule on debian (detect-only) and stamped the finding with
+    x_auto_response_would_have_executed=true (visible in CH ocsf table raw
+    JSON). The graceful-degradation contract holds.
+
+Existing fixture for the negative-shape case:
+-rw-rw-r-- 1 t3rmit3 t3rmit3 267 Apr 29 17:37 /home/t3rmit3/gits/slither/pkg/ruleast/testdata/invalid/response-bad-target-field.yml
+title: Response with garbage target_field
+id: invalid-0031
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: /bash
+  condition: selection
+slither:
+  response:
+    action: kill_process
+    target_field: "1bad-shape!"
+
+============================================================================
+## Fix #3 — executor echoes rule_uid/action/target on ResponseResult ##
+============================================================================
+(agent/internal/respond/executor.go)
+
+Re-tested by V5 — the two rule-driven kill rows on ubuntu have rule_uid
+populated (server only knows rule_uid by reading it back off the agent's
+ResponseResult, since the agent inserts the row not the operator):
+    id    |    action    | target | status |        rule        | auto 
+----------+--------------+--------+--------+--------------------+------
+ e538ee2f | kill_process | 3072   | done   | 8b7c4d00-0086-4000 | t
+ 3545f206 | kill_process | 3072   | done   | 8b7c4d00-0086-4000 | t
+(2 rows)
+
+
+============================================================================
+## Fix #4 — AutoResponder populates RuleUid in ResponseRequest ##
+============================================================================
+(agent/internal/respond/auto.go)
+
+Same evidence as Fix #3 — the rule_uid round-trips agent → server → DB,
+which it can only do if the AutoResponder set it before invoking the executor.
+Pre-fix: AutoResponder created a synthetic ResponseRequest without rule_uid
+and the server's Hub.OnResult had no way to attribute the result to a rule
+→ ErrResponseActionNotFound and the row was lost.
+
+============================================================================
+## Fix #5 — server inserts response_action row on ErrResponseActionNotFound + rule_uid ##
+============================================================================
+(server/internal/respond/dispatcher.go, server/internal/grpcserv/session.go)
+
+Re-tested by V5: the auto-respond rows were never created by an operator —
+they only exist because the server's Hub.OnResult, on receiving a
+ResponseResult with rule_uid set, hit the ErrResponseActionNotFound branch
+and inserted a fresh row scoped to the trusted peer-cert hostID with
+status=running, then transitioned to done. The audit_log chain (V8) shows
+actor_type=system for these (vs user for operator-driven), confirming the
+server-side insertion path.
+
+Audit row from V8 demonstrating system-actor server-side insertion path:
+ actor_type |           action           |    id    | next |  prev   
+------------+----------------------------+----------+------+---------
+ system     | response.action.transition | e538ee2f | done | running
+ system     | response.action.transition | 3545f206 | done | running
+(2 rows)
+
+
+=== V9 done ===

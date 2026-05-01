@@ -1,0 +1,28 @@
+=== Phase 4 #86 fleet state — V1 (heartbeats) + V2 (policy matrix) ===
+timestamp: 2026-05-01T21:16:57Z
+
+## V1 — agent enrollment + heartbeats
+                  hostname                   | os_name |        kernel_version        |           last_seen           |    staleness    
+---------------------------------------------+---------+------------------------------+-------------------------------+-----------------
+ ip-172-31-19-7                              | ubuntu  | 6.17.0-1012-aws              | 2026-05-01 21:16:35.797189+00 | 00:00:22.791672
+ ip-172-31-26-27                             | debian  | 6.12.74+deb13+1-cloud-amd64  | 2026-05-01 21:16:34.130283+00 | 00:00:24.458578
+ ip-172-31-31-200.us-west-2.compute.internal | rhel    | 6.12.0-55.66.1.el10_0.x86_64 | 2026-05-01 21:16:45.484124+00 | 00:00:13.104737
+(3 rows)
+
+
+## V2 — host_response_policies (1 promoted, 2 implicit detect-only via missing row)
+    hostname    | kill | killtree | quar | iso | coll |          updated_at           
+----------------+------+----------+------+-----+------+-------------------------------
+ ip-172-31-19-7 | t    | t        | t    | t   | t    | 2026-04-30 00:32:03.356758+00
+(1 row)
+
+
+## hosts WITHOUT a policy row (default-deny per ADR-0034) — debian + rhel
+                  hostname                   
+---------------------------------------------
+ ip-172-31-26-27
+ ip-172-31-31-200.us-west-2.compute.internal
+(2 rows)
+
+
+=== fleet-state done ===

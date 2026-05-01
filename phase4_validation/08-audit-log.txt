@@ -1,0 +1,46 @@
+=== Phase 4 #86 V8: audit_log chain for response_actions (corrected) ===
+timestamp: 2026-05-01T21:14:15Z
+
+--- counts of audit rows by target_kind (whole DB) ---
+   target_kind    | count 
+------------------+-------
+ enrollment_token |   160
+ host             |     3
+ ioc_feed         |     2
+ response_action  |    28
+                  |   182
+(5 rows)
+
+
+--- full response_action audit chain since this validation run started (21:00 UTC) ---
+ actor_type |           action           |    id    |                                                                                                                         detail                                                                                                                          |          created_at           
+------------+----------------------------+----------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------
+ user       | response.action.transition | 5fb4e099 | {"detail": "", "next_status": "running", "prev_status": "pending", "result_blob_size": 0}                                                                                                                                                               | 2026-05-01 21:01:21.54585+00
+ user       | response.action.transition | 5fb4e099 | {"detail": "killed pid 1972 (SIGTERM + grace + SIGKILL on stragglers)", "next_status": "done", "prev_status": "running", "result_blob_size": 0}                                                                                                         | 2026-05-01 21:01:21.549038+00
+ user       | response.action.transition | 35555b57 | {"detail": "host policy does not permit kill_process", "next_status": "denied_by_policy", "prev_status": "pending", "result_blob_size": 0}                                                                                                              | 2026-05-01 21:03:18.271369+00
+ system     | response.action.transition | e538ee2f | {"detail": "killed pid 3072 (SIGTERM + grace + SIGKILL on stragglers)", "next_status": "done", "prev_status": "running", "result_blob_size": 0}                                                                                                         | 2026-05-01 21:06:42.156171+00
+ system     | response.action.transition | 3545f206 | {"detail": "killed pid 3072 (SIGTERM + grace + SIGKILL on stragglers)", "next_status": "done", "prev_status": "running", "result_blob_size": 0}                                                                                                         | 2026-05-01 21:06:42.159574+00
+ user       | response.action.transition | 4196d07e | {"detail": "", "next_status": "running", "prev_status": "pending", "result_blob_size": 0}                                                                                                                                                               | 2026-05-01 21:10:36.989883+00
+ user       | response.action.transition | 4196d07e | {"detail": "open target: open /tmp/phase4-quarantine-victim.txt: no such file or directory", "next_status": "failed", "prev_status": "running", "result_blob_size": 0}                                                                                  | 2026-05-01 21:10:36.990962+00
+ user       | response.action.transition | 087cb362 | {"detail": "", "next_status": "running", "prev_status": "pending", "result_blob_size": 0}                                                                                                                                                               | 2026-05-01 21:12:29.27194+00
+ user       | response.action.transition | 087cb362 | {"detail": "quarantined /var/log/slither/phase4-quarantine-victim.txt (56 bytes, sha256=77d0826b9dae3f25) to /var/lib/slither/quarantine/087cb362-ec55-4f0d-8fbc-81c5281be045", "next_status": "done", "prev_status": "running", "result_blob_size": 0} | 2026-05-01 21:12:29.275534+00
+ user       | response.action.transition | c4b8aa71 | {"detail": "", "next_status": "running", "prev_status": "pending", "result_blob_size": 0}                                                                                                                                                               | 2026-05-01 21:12:31.212097+00
+ user       | response.action.reverted   | 087cb362 | {"next_status": "reverted", "prev_status": "done", "reverted_by": "c4b8aa71-c119-4a85-b70a-10a5ca7e4fc0"}                                                                                                                                               | 2026-05-01 21:12:31.213629+00
+ user       | response.action.transition | c4b8aa71 | {"detail": "restored quarantine from action 087cb362-ec55-4f0d-8fbc-81c5281be045", "next_status": "done", "prev_status": "running", "result_blob_size": 0}                                                                                              | 2026-05-01 21:12:31.213629+00
+(12 rows)
+
+
+--- summary by action_id ---
+ action_short | rows |           chain           
+--------------+------+---------------------------
+ 5fb4e099     |    2 | running → done
+ 35555b57     |    1 | denied_by_policy
+ e538ee2f     |    1 | done
+ 3545f206     |    1 | done
+ 4196d07e     |    2 | running → failed
+ 087cb362     |    3 | running → done → reverted
+ c4b8aa71     |    2 | running → done
+(7 rows)
+
+
+=== V8 done ===

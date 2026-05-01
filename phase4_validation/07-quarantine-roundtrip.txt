@@ -1,0 +1,149 @@
+=== Phase 4 #86 V7: quarantine_file round-trip + parent_action chain (ubuntu) ===
+timestamp: 2026-05-01T21:10:33Z
+
+victim path: /tmp/phase4-quarantine-victim.txt
+
+--- step 1: create victim file with known content on ubuntu ---
+pre-quarantine:
+-rw-r--r-- 1 root root 53 May  1 21:10 /tmp/phase4-quarantine-victim.txt
+sha256:
+384dc767b6ef647a1eb502ae58c31e8998101f2aa993f9a6bb0cca26485ee140  /tmp/phase4-quarantine-victim.txt
+captured pre_sha=384dc767b6ef647a1eb502ae58c31e8998101f2aa993f9a6bb0cca26485ee140
+
+carrier alert_id: d0520f92-a71d-442d-98bb-3e3f0aa74616
+
+--- step 2: POST /alerts/{id}/respond action=quarantine_file ---
+quarantine POST:
+http=303
+
+flash:
+Dispatched quarantine_file (action 4196d07e); see history for status.
+
+--- step 3: poll response_actions for the new quarantine row (max 15s) ---
+[t+1] 4196d07e-059d-4906-9cd3-441c2d088653|failed
+quarantine action_id: 4196d07e-059d-4906-9cd3-441c2d088653
+
+--- step 4: verify victim moved on ubuntu + sidecar exists ---
+original path (should be missing):
+-rw-r--r-- 1 root root 53 May  1 21:10 /tmp/phase4-quarantine-victim.txt
+
+quarantine state dir:
+total 20
+drwx------ 5 root root 4096 May  1 21:10 .
+drwxr-xr-x 3 root root 4096 Apr 30 00:53 ..
+drwx------ 2 root root 4096 May  1 21:10 4196d07e-059d-4906-9cd3-441c2d088653
+drwx------ 2 root root 4096 Apr 30 00:53 4870f8ea-e089-42a2-92d7-be79af17a900
+drwx------ 2 root root 4096 Apr 30 00:54 bdae0afb-3bfc-432a-9123-4ade190718ab
+
+sidecar files:
+/var/lib/slither/quarantine/bdae0afb-3bfc-432a-9123-4ade190718ab/manifest.json
+--- /var/lib/slither/quarantine/bdae0afb-3bfc-432a-9123-4ade190718ab/manifest.json ---
+{
+  "action_id": "bdae0afb-3bfc-432a-9123-4ade190718ab",
+  "original_path": "/opt/quarantine-victim.txt",
+  "original_size": 29,
+  "original_mtime": "2026-04-30T00:54:29.153104042Z",
+  "original_mode": 420,
+  "original_uid": 0,
+  "original_gid": 0,
+  "sha256": "b0e53a671f7611d3e64509a6b997238658fbdcd09a5c32e2deb474460a16c849",
+  "quarantined_at": "2026-04-30T00:54:30.005967437Z",
+  "hostname": "ip-172-31-19-7"
+}
+
+--- step 5: POST /responses/{action_id}/revert ---
+revert POST:
+http=303
+
+--- step 6: poll for child (revert) row (max 15s) ---
+[t+1] 
+[t+2] 
+[t+3] 
+[t+4] 
+[t+5] 
+[t+6] 
+[t+7] 
+[t+8] 
+[t+9] 
+[t+10] 
+revert action_id: 
+
+--- step 7: verify file restored byte-identical ---
+-rw-r--r-- 1 root root 53 May  1 21:10 /tmp/phase4-quarantine-victim.txt
+pre_sha:  384dc767b6ef647a1eb502ae58c31e8998101f2aa993f9a6bb0cca26485ee140
+post_sha: 384dc767b6ef647a1eb502ae58c31e8998101f2aa993f9a6bb0cca26485ee140
+RESTORE_OK byte-identical
+
+--- step 8: parent + child rows linked + parent flipped to reverted ---
+ERROR:  invalid input syntax for type uuid: ""
+LINE 1: ...ERE id IN ('4196d07e-059d-4906-9cd3-441c2d088653','') ORDER ...
+                                                             ^
+
+--- step 9: cleanup victim ---
+cleanup_ok
+
+=== V7 done ===
+
+############################################
+## V7 retry with agent-visible path /var/log/slither/ ##
+############################################
+timestamp: 2026-05-01T21:12:26Z
+
+victim path: /var/log/slither/phase4-quarantine-victim.txt
+--- step 1: create victim ---
+-rw-r--r-- 1 root root 56 May  1 21:12 /var/log/slither/phase4-quarantine-victim.txt
+77d0826b9dae3f257c9b4c02e290aa3dd824bdc4cf1ccc992bd26f02bbebd252  /var/log/slither/phase4-quarantine-victim.txt
+pre_sha=77d0826b9dae3f257c9b4c02e290aa3dd824bdc4cf1ccc992bd26f02bbebd252
+
+carrier alert_id: b326a06b-7a77-4538-b2c0-64584ce55491
+
+--- step 2: POST quarantine ---
+http=303
+Dispatched quarantine_file (action 087cb362); see history for status.
+
+--- step 3: poll quarantine row ---
+[t+1] 087cb362-ec55-4f0d-8fbc-81c5281be045|done|quarantined /var/log/slither/phase4-quarantine-victim.txt (56 bytes, sha256=77d0826b9dae3f25) to /var/lib/slither/quarantine/087cb362-ec55-4f0d-8fbc-81c5281be045
+quarantine action_id: 087cb362-ec55-4f0d-8fbc-81c5281be045
+
+--- step 4: verify file moved + sidecar present ---
+original path (should be missing):
+ls: cannot access '/var/log/slither/phase4-quarantine-victim.txt': No such file or directory
+
+manifest for this action:
+{
+  "action_id": "087cb362-ec55-4f0d-8fbc-81c5281be045",
+  "original_path": "/var/log/slither/phase4-quarantine-victim.txt",
+  "original_size": 56,
+  "original_mtime": "2026-05-01T21:12:27.184175629Z",
+  "original_mode": 420,
+  "original_uid": 0,
+  "original_gid": 0,
+  "sha256": "77d0826b9dae3f257c9b4c02e290aa3dd824bdc4cf1ccc992bd26f02bbebd252",
+  "quarantined_at": "2026-05-01T21:12:29.26724124Z",
+  "hostname": "ip-172-31-19-7"
+}
+
+--- step 5: POST revert ---
+http=303
+
+--- step 6: poll revert child row ---
+[t+1] c4b8aa71-c119-4a85-b70a-10a5ca7e4fc0|done|restored quarantine from action 087cb362-ec55-4f0d-8fbc-81c5281be045
+revert action_id: c4b8aa71-c119-4a85-b70a-10a5ca7e4fc0
+
+--- step 7: byte-identical restore ---
+-rw-r--r-- 1 root root 56 May  1 21:12 /var/log/slither/phase4-quarantine-victim.txt
+pre_sha:  77d0826b9dae3f257c9b4c02e290aa3dd824bdc4cf1ccc992bd26f02bbebd252
+post_sha: 77d0826b9dae3f257c9b4c02e290aa3dd824bdc4cf1ccc992bd26f02bbebd252
+RESTORE_OK_BYTE_IDENTICAL
+
+--- step 8: parent → reverted, child → done, parent_action linked ---
+    id    |     action      |  status  |  parent  |          created_at           |         completed_at          
+----------+-----------------+----------+----------+-------------------------------+-------------------------------
+ 087cb362 | quarantine_file | reverted | -        | 2026-05-01 21:12:29.264677+00 | 2026-05-01 21:12:29.275534+00
+ c4b8aa71 | quarantine_file | done     | 087cb362 | 2026-05-01 21:12:31.208874+00 | 2026-05-01 21:12:31.213629+00
+(2 rows)
+
+
+--- step 9: cleanup ---
+cleanup_ok
+=== V7 retry done ===

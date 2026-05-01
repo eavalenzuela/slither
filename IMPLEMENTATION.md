@@ -868,7 +868,7 @@ wire bump.
     test — quarantine → revert → file is byte-identical at original
     path; both `response_actions` rows audited + linked.
 
-16. **#86 — Phase 4 exit validation.** Doc-backed manual run on the
+16. ✅ **#86 — Phase 4 exit validation.** Doc-backed manual run on the
     Phase 3 cloud fleet (existing stopped instances —
     `start-instances` brings them back). Promote one agent to
     `allow_kill_process=true`, leave the other two detect-only.
@@ -879,7 +879,17 @@ wire bump.
     on detect-only host. Reversal: quarantine + un-quarantine
     round-trip. Audit chain visible in `audit_log`. Capture under
     `phase4_validation/`; commit `docs/phase4-validation.md`. **Exit:**
-    all green; Phase 4 closed; Phase 5 (hardening) opens.
+    all green; Phase 4 closed; Phase 5 (hardening) opens. *(Completed
+    2026-05-01 on the same AWS us-west-2 fleet that closed Phase 3.
+    All eleven exit criteria pass live (kill/quarantine/auto-respond
+    on promoted, denied/would_have_executed on detect-only, full
+    audit chain) or by static evidence (CAP_NET_ADMIN / isolate_host
+    not live-fired to avoid SSH-session disruption — cap present in
+    unit). Two deploy-posture gaps caught and pushed to Phase 5:
+    sysctl drop-in not provisioned at install time (Debian-only
+    perf_event_paranoid issue), and `PrivateTmp` + `ProtectSystem=strict`
+    blocking quarantine on `/tmp/` and `/opt/`. Captures in
+    `phase4_validation/`; narrative in `docs/phase4-validation.md`.)*
 
 ### 6.2 Cross-cutting notes
 

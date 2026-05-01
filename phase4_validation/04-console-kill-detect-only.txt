@@ -1,0 +1,39 @@
+=== Phase 4 #86 V4: console kill blocked on detect-only host (debian) ===
+timestamp: 2026-05-01T21:03:15Z
+debian_alert_id: 379b76ba-797c-4237-8f06-44aebbc99f8b
+
+--- step 1: spawn a sleep target on debian (will NOT be killed) ---
+target_pid=3459
+alive_check_pre:
+   3459 admin    sleep 600
+
+--- step 2: render alert detail page; check button gating ---
+response-btn count in HTML (expected 0):
+0
+0
+
+detect-only banner present:
+has no response permissions. Default policy is detect-only; an admin must promote the host on 
+
+--- step 3: forced POST anyway (defense in depth) → expect denied_by_policy row ---
+forced respond POST:
+http=303
+
+flash on redirect target:
+Action denied by host policy. An admin can promote the host on its policy page.
+
+--- step 4: response_actions row for debian PID ---
+    id    |    action    | target |      status      |               reason_code                |          created_at           
+----------+--------------+--------+------------------+------------------------------------------+-------------------------------
+ 35555b57 | kill_process | 3459   | denied_by_policy | host policy does not permit kill_process | 2026-05-01 21:03:18.270637+00
+(1 row)
+
+
+--- step 5: target still alive on debian (kill should NOT have run) ---
+   3459 admin    sleep 600
+PID still alive (expected)
+
+--- step 6: cleanup ---
+cleanup_kill_ok
+
+=== V4 done ===

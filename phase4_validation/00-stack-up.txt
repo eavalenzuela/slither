@@ -1,0 +1,61 @@
+=== Phase 4 #86 stack-up capture ===
+timestamp: 2026-05-01T21:16:52Z
+
+--- AWS fleet (us-west-2) ---
+-------------------------------------------------------------------------------------------------------------
+|                                             DescribeInstances                                             |
++------------+----------------------+----------------+---------------------------+----------+---------------+
+|     AZ     |         ID           |      IP        |           Name            |  State   |     Type      |
++------------+----------------------+----------------+---------------------------+----------+---------------+
+|  us-west-2b|  i-03b468e20e802f163 |  44.252.82.87  |  slither-p3-agent-debian  |  running |  c7i.xlarge   |
+|  us-west-2b|  i-0338aaeebcbd42433 |  44.255.183.50 |  slither-p3-agent-ubuntu  |  running |  c7i.xlarge   |
+|  us-west-2b|  i-0fddb743cda81e679 |  54.70.241.200 |  slither-p3-agent-rhel    |  running |  c7i.xlarge   |
+|  us-west-2b|  i-04a784fe98ecdb974 |  44.248.2.102  |  slither-p3-server        |  running |  c7i.2xlarge  |
++------------+----------------------+----------------+---------------------------+----------+---------------+
+
+--- per-host distro/kernel/perf_event_paranoid + agent version ---
+--- server ---
+OS: "Debian GNU/Linux 13 (trixie)"
+Kernel: 6.12.74+deb13+1-cloud-amd64
+perf_event_paranoid: 3
+agent binary: n/a
+--- agent-debian ---
+OS: "Debian GNU/Linux 13 (trixie)"
+Kernel: 6.12.74+deb13+1-cloud-amd64
+perf_event_paranoid: 2
+agent binary: slither-agent 99ec57a (99ec57ade3fc+dirty)
+--- agent-ubuntu ---
+OS: "Ubuntu 24.04.4 LTS"
+Kernel: 6.17.0-1012-aws
+perf_event_paranoid: 2
+agent binary: slither-agent 99ec57a (99ec57ade3fc+dirty)
+--- agent-rhel ---
+OS: "Red Hat Enterprise Linux 10.0 (Coughlan)"
+Kernel: 6.12.0-55.66.1.el10_0.x86_64
+perf_event_paranoid: 2
+agent binary: slither-agent 99ec57a (99ec57ade3fc+dirty)
+
+--- compose stack health on server ---
+NAME                 STATUS                    PORTS
+slither-clickhouse   Up 36 minutes (healthy)   8123/tcp, 9000/tcp, 9009/tcp
+slither-postgres     Up 36 minutes (healthy)   5432/tcp
+slither-server       Up 26 minutes (healthy)   0.0.0.0:8080->8080/tcp, 0.0.0.0:9443-9444->9443-9444/tcp
+
+--- bootstrap idempotency ---
+▶ deploy/pki/ca.crt already exists — skipping. Pass --force to regenerate.
+[bootstrap] applying postgres migrations…
+2026/05/01 20:50:05 goose: no migrations to run. current version: 16
+[bootstrap] applying clickhouse migrations…
+2026/05/01 20:50:05 goose: no migrations to run. current version: 5
+[bootstrap] seeding admin user…
+slither-db: admin user already present, leaving as is
+[bootstrap] done
+
+--- ruleset on server (post-redeploy) ---
+time=2026-05-01T20:50:06.459Z level=INFO msg="slither-server: listeners up" enroll=[::]:9444 grpc=[::]:9443 console=:8080
+time=2026-05-01T20:50:06.469Z level=INFO msg="policy hub: refreshed" host_count=3 subscribers=0 version=1
+time=2026-05-01T20:50:06.484Z level=INFO msg="hub: refreshed" rule_count=11 skipped=4 version=1 subscribers=0
+time=2026-05-01T20:50:36.471Z level=INFO msg="policy hub: refreshed" host_count=3 subscribers=0 version=2
+time=2026-05-01T20:50:36.505Z level=INFO msg="hub: refreshed" rule_count=11 skipped=4 version=2 subscribers=0
+
+=== stack-up done ===

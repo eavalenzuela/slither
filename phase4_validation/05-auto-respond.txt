@@ -1,0 +1,100 @@
+=== Phase 4 #86 V5 + V6: edge auto-respond on promoted vs detect-only ===
+timestamp: 2026-05-01T21:06:37Z
+rule_uid: 8b7c4d00-0086-4000-8000-000000000086 (slither-canary auto-kill)
+
+############################################
+## V5: ubuntu (promoted) — should be killed ##
+############################################
+
+--- prep: copy sleep to /tmp/slither-canary on ubuntu ---
+-rwxr-xr-x 1 root root 35336 May  1 21:06 /tmp/slither-canary
+
+--- spawn /tmp/slither-canary 600 ---
+ubuntu_target_pid=3072
+spawned at: 2026-05-01T21:06:39.181Z
+
+--- t+4s: ubuntu PID alive? (expected: gone) ---
+bash: line 1: kill: (3072) - No such process
+PID 3072 GONE (expected)
+
+--- ubuntu agent journal ---
+
+############################################
+## V6: debian (detect-only) — should survive ##
+############################################
+
+--- prep: copy sleep to /tmp/slither-canary on debian ---
+-rwxr-xr-x 1 root root 43432 May  1 21:06 /tmp/slither-canary
+
+--- spawn /tmp/slither-canary 60 ---
+debian_target_pid=3540
+spawned at: 2026-05-01T21:06:45.650Z
+
+--- t+4s: debian PID alive? (expected: still alive) ---
+   3540 admin    /tmp/slither-canary 60
+PID still alive (expected)
+
+--- debian agent journal ---
+
+############################################
+## Server-side state ##
+############################################
+
+--- response_actions for these PIDs (rule-driven) ---
+    id    |    hostname    |    action    | target | status |        rule        | auto |          created_at           |         completed_at          
+----------+----------------+--------------+--------+--------+--------------------+------+-------------------------------+-------------------------------
+ 3545f206 | ip-172-31-19-7 | kill_process | 3072   | done   | 8b7c4d00-0086-4000 | t    | 2026-05-01 21:06:42.158422+00 | 2026-05-01 21:06:42.159574+00
+ e538ee2f | ip-172-31-19-7 | kill_process | 3072   | done   | 8b7c4d00-0086-4000 | t    | 2026-05-01 21:06:42.154798+00 | 2026-05-01 21:06:42.156171+00
+(2 rows)
+
+
+--- recent alerts for rule 0086 by host (last 10) ---
+    id    |    hostname     | severity | status |          created_at           
+----------+-----------------+----------+--------+-------------------------------
+ c368eaf5 | ip-172-31-26-27 |        4 | new    | 2026-05-01 21:06:45.620878+00
+ d10ad4d3 | ip-172-31-19-7  |        4 | new    | 2026-05-01 21:06:39.155141+00
+ 656b1a18 | ip-172-31-19-7  |        4 | new    | 2026-05-01 21:06:39.153344+00
+ 379b76ba | ip-172-31-26-27 |        4 | new    | 2026-04-30 00:53:42.700536+00
+ 6ce34c57 | ip-172-31-26-27 |        4 | new    | 2026-04-30 00:52:44.440153+00
+ b59f1296 | ip-172-31-19-7  |        4 | new    | 2026-04-30 00:52:04.071815+00
+ aadd0760 | ip-172-31-19-7  |        4 | new    | 2026-04-30 00:52:04.070101+00
+ 40c722b5 | ip-172-31-19-7  |        4 | new    | 2026-04-30 00:43:56.893375+00
+ f1603143 | ip-172-31-19-7  |        4 | new    | 2026-04-30 00:43:56.88914+00
+(9 rows)
+
+
+--- ClickHouse: any 'would_have_executed' field on findings? ---
+
+--- ClickHouse: latest 5 detections for rule 0086 ---
+Received exception from server (version 24.8.14):
+Code: 60. DB::Exception: Received from localhost:9000. DB::Exception: Unknown table expression identifier 'slither.detections' in scope SELECT host_id, rule_uid, would_have_executed, ts FROM slither.detections WHERE rule_uid = '8b7c4d00-0086-4000-8000-000000000086' ORDER BY ts DESC LIMIT 5. (UNKNOWN_TABLE)
+(query: SELECT host_id, rule_uid, would_have_executed, ts FROM slither.detections WHERE rule_uid='8b7c4d00-0086-4000-8000-000000000086' ORDER BY ts DESC LIMIT 5 FORMAT PrettyCompact)
+
+--- cleanup: kill the surviving debian sleep ---
+cleanup_ok
+
+=== V5+V6 done ===
+
+############################################
+## V6 evidence: x_auto_response_* fields in CH ocsf_detection_finding_2004 ##
+############################################
+
+--- ubuntu (promoted, executed=true) ---
+   ┌─host_id──────────────────────────────┬───────────────────observed_at─┬─auto_action──┬─executed─┬─would_have─┐
+1. │ bcd9c963-60ea-421c-8b2f-71ce29fcf29c │ 2026-05-01 21:06:39.153000000 │ kill_process │        1 │          0 │
+2. │ bcd9c963-60ea-421c-8b2f-71ce29fcf29c │ 2026-05-01 21:06:39.152000000 │ kill_process │        1 │          0 │
+   └──────────────────────────────────────┴───────────────────────────────┴──────────────┴──────────┴────────────┘
+   ┌─host_id──────────────────────────────┬───────────────────observed_at─┬─auto_action──┬─executed─┬─would_have─┐
+3. │ bcd9c963-60ea-421c-8b2f-71ce29fcf29c │ 2026-04-30 00:52:04.070000000 │ kill_process │        1 │          0 │
+   └──────────────────────────────────────┴───────────────────────────────┴──────────────┴──────────┴────────────┘
+
+--- debian (detect-only, would_have_executed=true) ---
+   ┌─host_id──────────────────────────────┬───────────────────observed_at─┬─auto_action──┬─executed─┬─would_have─┐
+1. │ 448b6b7f-0070-4888-9859-464920e2e8e5 │ 2026-05-01 21:06:54.111000000 │ kill_process │        0 │          1 │
+   └──────────────────────────────────────┴───────────────────────────────┴──────────────┴──────────┴────────────┘
+   ┌─host_id──────────────────────────────┬───────────────────observed_at─┬─auto_action──┬─executed─┬─would_have─┐
+2. │ 448b6b7f-0070-4888-9859-464920e2e8e5 │ 2026-05-01 21:06:45.620000000 │ kill_process │        0 │          1 │
+   └──────────────────────────────────────┴───────────────────────────────┴──────────────┴──────────┴────────────┘
+   ┌─host_id──────────────────────────────┬───────────────────observed_at─┬─auto_action──┬─executed─┬─would_have─┐
+3. │ 448b6b7f-0070-4888-9859-464920e2e8e5 │ 2026-04-30 00:53:42.701000000 │ kill_process │        0 │          1 │
+   └──────────────────────────────────────┴───────────────────────────────┴──────────────┴──────────┴────────────┘
