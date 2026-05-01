@@ -15,15 +15,26 @@ config, drop in the systemd unit. `.deb` / `.rpm` land in Phase 5.
 - `stress-ng` — only if you plan to run `make load-test` on the target
   (Phase 1 exit criterion #3). Debian/Ubuntu: `apt-get install stress-ng`;
   RHEL/Rocky: `dnf install stress-ng` (EPEL).
-- On **Debian** (11/12/13): lower `kernel.perf_event_paranoid` to 2 —
-  Debian defaults it to 3, at which level tracepoint `perf_event_open`
-  demands `CAP_SYS_ADMIN` and `CAP_PERFMON` is rejected. RHEL and
-  Ubuntu already default to 2. Use the shipped drop-in:
+- **Required on Debian** (11/12/13), harmless elsewhere: install the
+  `kernel.perf_event_paranoid=2` sysctl drop-in. Debian's kernel
+  patches default this to 3, at which level tracepoint
+  `perf_event_open` demands `CAP_SYS_ADMIN` and `CAP_PERFMON` is
+  rejected — the agent will crash-loop with
+  `attach syscalls/sys_enter_openat: opening tracepoint perf event:
+  permission denied`. RHEL and Ubuntu default to 2 already, so the
+  drop-in just lowers an already-low value. Run **before** enabling
+  the agent unit:
 
   ```bash
   sudo install -m0644 deploy/sysctl.d/99-slither.conf /etc/sysctl.d/99-slither.conf
   sudo sysctl --system
   ```
+
+  This step folds into the deb/rpm postinst once Phase 5 #92 ships
+  packaged distribution; until then it's manual on every fresh host.
+  Phase 4 #86 cloud validation caught this as the most common
+  bring-up gap on rebooted Debian fleets — see
+  `docs/phase4-validation.md` Gap A for the failure shape.
 
 The shipped agent binary is a statically linked Go binary with the BPF
 object embedded via `bpf2go` — no libbpf, no kernel headers, no runtime

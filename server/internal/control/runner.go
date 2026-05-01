@@ -30,7 +30,15 @@ type RunnerOptions struct {
 // Run drives the hub: an initial Refresh, then a Refresh on every
 // debounced NOTIFY plus the fallback ticker. Blocks until ctx is
 // cancelled.
-func Run(ctx context.Context, hub *Hub, watcher RuleWatcher, opts RunnerOptions) error {
+//
+// extraRefreshers, if any, run on the same NOTIFY/debounce/fallback
+// schedule as the hub's own Refresh. Phase 5 #88a uses this to wire
+// detect.Engine.Refresh onto the same `rules_changed` channel without
+// opening a second LISTEN connection or duplicating the loop. Errors
+// from extras are swallowed (a failing detect refresh shouldn't
+// kneecap the hub); structured logging at the call site stays the
+// caller's responsibility.
+func Run(ctx context.Context, hub *Hub, watcher RuleWatcher, opts RunnerOptions, extraRefreshers ...func(context.Context) error) error {
 	if hub == nil {
 		return fmt.Errorf("control.Run: nil hub")
 	}
@@ -41,11 +49,21 @@ func Run(ctx context.Context, hub *Hub, watcher RuleWatcher, opts RunnerOptions)
 		opts.FallbackPoll = 30 * time.Second
 	}
 
+	runExtras := func(ctx context.Context) {
+		for _, fn := range extraRefreshers {
+			if fn == nil {
+				continue
+			}
+			_ = fn(ctx)
+		}
+	}
+
 	// Initial load — failure is surfaced so the caller can decide whether
 	// to keep starting (probably yes; an empty ruleset is still valid).
 	if _, err := hub.Refresh(ctx); err != nil {
 		return fmt.Errorf("control.Run: initial refresh: %w", err)
 	}
+	runExtras(ctx)
 
 	// notify is buffered 1 so the watcher goroutine never blocks on the
 	// debouncer falling behind. Replacement-on-full keeps notifications
@@ -102,10 +120,12 @@ func Run(ctx context.Context, hub *Hub, watcher RuleWatcher, opts RunnerOptions)
 				// startup-time problems only.
 				_ = err
 			}
+			runExtras(ctx)
 		case <-tick.C:
 			if _, err := hub.Refresh(ctx); err != nil {
 				_ = err
 			}
+			runExtras(ctx)
 		}
 	}
 }

@@ -87,6 +87,12 @@ message AgentHealth {
   uint64 ringbuf_overruns_total = 4;
   float cpu_percent = 5;
   uint64 rss_bytes = 6;
+
+  // Phase 5 #88c: agent semver, mirrored from version.Version at
+  // build time. Server populates hosts.agent_version on each
+  // heartbeat so /hosts inventory shows what version each agent
+  // reports. Additive wire bump within slither.v1.
+  string agent_version = 7;
 }
 
 // Ack acknowledges receipt of a control message. Control messages are

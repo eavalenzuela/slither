@@ -176,6 +176,112 @@ func TestAutoResponder_UnresolvableFieldStampsWouldHaveExecuted(t *testing.T) {
 	}
 }
 
+// Phase 5 #88b: duplicate firings of the same rule against the same
+// target inside the dedupe window must not produce a second executor
+// submission. The finding still emits both times (it's an honest
+// observation), but the second observation leaves Executed +
+// WouldHaveExecuted both false — there's nothing to claim, the first
+// fire owns the action.
+func TestAutoResponder_DedupesDuplicateFiresWithinWindow(t *testing.T) {
+	t.Parallel()
+	results := make(chan *pb.ResponseResult, 4)
+	exec := New(Options{Results: results, Telem: telemetry.NewCounters()})
+	captured := make(chan string, 4)
+	exec.SetHandler(pb.ResponseAction_RESPONSE_ACTION_KILL_PROCESS,
+		func(_ context.Context, req *pb.ResponseRequest) (pb.ResponseStatus, string, []byte) {
+			captured <- req.GetTarget()
+			return pb.ResponseStatus_RESPONSE_STATUS_DONE, "ok", nil
+		})
+
+	policy := func() *pb.HostPolicy { return &pb.HostPolicy{AllowKillProcess: true} }
+	ar := NewAutoResponder(exec, policy)
+
+	intent := &ruleast.ResponseIntent{
+		Action:      ruleast.ResponseActionKillProcess,
+		TargetField: "Image",
+	}
+	ev := fakeProcessEvent("/usr/bin/curl", "curl http://x")
+
+	// First fire — submits.
+	first := &ocsf.DetectionFinding{RuleInfo: ocsf.Rule{UID: "rule-uid-A"}}
+	ar.OnFinding(context.Background(), intent, ev, first, ruleast.CategoryProcessCreation)
+	if !first.AutoResponseExecuted {
+		t.Error("first finding: AutoResponseExecuted = false, want true")
+	}
+
+	// Second fire on the same rule + target — should be deduped.
+	second := &ocsf.DetectionFinding{RuleInfo: ocsf.Rule{UID: "rule-uid-A"}}
+	ar.OnFinding(context.Background(), intent, ev, second, ruleast.CategoryProcessCreation)
+	if second.AutoResponseExecuted {
+		t.Error("dedupe: second AutoResponseExecuted = true, want false")
+	}
+	if second.AutoResponseWouldHaveExecuted {
+		t.Error("dedupe: second AutoResponseWouldHaveExecuted = true, want false")
+	}
+
+	// Different rule_uid should NOT dedupe.
+	third := &ocsf.DetectionFinding{RuleInfo: ocsf.Rule{UID: "rule-uid-B"}}
+	ar.OnFinding(context.Background(), intent, ev, third, ruleast.CategoryProcessCreation)
+	if !third.AutoResponseExecuted {
+		t.Error("different rule_uid: AutoResponseExecuted = false, want true (no dedupe)")
+	}
+
+	// Drain — exactly two handler invocations: first + third.
+	got := 0
+	for {
+		select {
+		case <-captured:
+			got++
+		case <-time.After(200 * time.Millisecond):
+			if got != 2 {
+				t.Errorf("handler invocations = %d, want 2", got)
+			}
+			return
+		}
+	}
+}
+
+// Outside the dedupe window the same (rule_uid, target) submits again.
+// Use the AutoResponder's now hook to simulate clock advancement
+// without sleeping.
+func TestAutoResponder_DedupeExpiresAfterWindow(t *testing.T) {
+	t.Parallel()
+	results := make(chan *pb.ResponseResult, 4)
+	exec := New(Options{Results: results, Telem: telemetry.NewCounters()})
+	exec.SetHandler(pb.ResponseAction_RESPONSE_ACTION_KILL_PROCESS,
+		func(_ context.Context, _ *pb.ResponseRequest) (pb.ResponseStatus, string, []byte) {
+			return pb.ResponseStatus_RESPONSE_STATUS_DONE, "ok", nil
+		})
+
+	policy := func() *pb.HostPolicy { return &pb.HostPolicy{AllowKillProcess: true} }
+	ar := NewAutoResponder(exec, policy)
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	clock := t0
+	ar.now = func() time.Time { return clock }
+
+	intent := &ruleast.ResponseIntent{
+		Action:      ruleast.ResponseActionKillProcess,
+		TargetField: "Image",
+	}
+	ev := fakeProcessEvent("/usr/bin/curl", "curl http://x")
+
+	first := &ocsf.DetectionFinding{RuleInfo: ocsf.Rule{UID: "rule-uid-A"}}
+	ar.OnFinding(context.Background(), intent, ev, first, ruleast.CategoryProcessCreation)
+	if !first.AutoResponseExecuted {
+		t.Fatal("first fire didn't execute")
+	}
+
+	// Advance past the dedupe window.
+	clock = t0.Add(dedupeWindow + 100*time.Millisecond)
+
+	second := &ocsf.DetectionFinding{RuleInfo: ocsf.Rule{UID: "rule-uid-A"}}
+	ar.OnFinding(context.Background(), intent, ev, second, ruleast.CategoryProcessCreation)
+	if !second.AutoResponseExecuted {
+		t.Error("post-window fire: AutoResponseExecuted = false, dedupe should have expired")
+	}
+}
+
 func TestAutoResponder_NilSafe(t *testing.T) {
 	t.Parallel()
 	var ar *AutoResponder

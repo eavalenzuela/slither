@@ -204,7 +204,17 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := control.Run(ctx, hub, pgStore, control.RunnerOptions{}); err != nil {
+		// Phase 5 #88a: piggy-back detect.Engine.Refresh on the same
+		// rules_changed NOTIFY the hub uses, so plan-set drift after
+		// rule edits no longer requires a server restart. The
+		// engine.Run goroutine still does its own initial Refresh; the
+		// extras here run after every subsequent debounce/fallback
+		// tick. Refresh swallows its skipped-count.
+		detectRefresh := func(ctx context.Context) error {
+			_, err := detectEngine.Refresh(ctx)
+			return err
+		}
+		if err := control.Run(ctx, hub, pgStore, control.RunnerOptions{}, detectRefresh); err != nil {
 			errs <- fmt.Errorf("control runner: %w", err)
 		}
 	}()

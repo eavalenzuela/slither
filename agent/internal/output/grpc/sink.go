@@ -312,6 +312,15 @@ func (s *Sink) runSession(ctx context.Context, client pb.AgentServiceClient) err
 					Heartbeat: &pb.Heartbeat{
 						HostId: s.hostID,
 						SentAt: timestamppb.Now(),
+						// Phase 5 #88c: stamp agent_version on every
+						// heartbeat so server-side /hosts inventory
+						// reflects what's actually running. AgentHealth
+						// fields beyond AgentVersion stay zero until a
+						// Phase 5 telemetry-snapshot helper lands —
+						// the server only reads AgentVersion today.
+						Health: &pb.AgentHealth{
+							AgentVersion: s.opts.AgentVersion,
+						},
 					},
 				},
 			}); err != nil {

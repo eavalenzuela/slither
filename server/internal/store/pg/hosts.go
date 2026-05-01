@@ -19,13 +19,29 @@ var ErrHostNotFound = errors.New("pg: host not found")
 // the Session handler (#37) on every Heartbeat. Returns ErrHostNotFound
 // if no row matches.
 func (s *Store) UpdateHostLastSeen(ctx context.Context, hostID string) error {
+	return s.UpdateHostHeartbeat(ctx, hostID, "")
+}
+
+// UpdateHostHeartbeat sets hosts.last_seen = now() and, when
+// agentVersion is non-empty, writes hosts.agent_version. Phase 5 #88c
+// — the column has been on the schema since #32 but went unwritten
+// through Phase 4. Empty agentVersion preserves the existing column
+// value rather than nulling it, so older agents that don't populate
+// AgentHealth.AgentVersion don't blank out a previously-recorded
+// version. Returns ErrHostNotFound if no row matches.
+func (s *Store) UpdateHostHeartbeat(ctx context.Context, hostID, agentVersion string) error {
 	id, err := parseUUID(hostID)
 	if err != nil {
-		return fmt.Errorf("pg.UpdateHostLastSeen: parse host_id: %w", err)
+		return fmt.Errorf("pg.UpdateHostHeartbeat: parse host_id: %w", err)
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE hosts SET last_seen = now() WHERE id = $1`, id)
+	const query = `
+		UPDATE hosts
+		SET last_seen = now(),
+		    agent_version = CASE WHEN $2 = '' THEN agent_version ELSE $2 END
+		WHERE id = $1`
+	tag, err := s.pool.Exec(ctx, query, id, agentVersion)
 	if err != nil {
-		return fmt.Errorf("pg.UpdateHostLastSeen: %w", err)
+		return fmt.Errorf("pg.UpdateHostHeartbeat: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrHostNotFound

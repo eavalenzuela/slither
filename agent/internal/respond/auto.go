@@ -24,6 +24,8 @@ package respond
 import (
 	"context"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -32,6 +34,20 @@ import (
 	"github.com/t3rmit3/slither/pkg/ruleeval"
 	pb "github.com/t3rmit3/slither/proto/gen/slither/v1"
 )
+
+// dedupeWindow is the lookback the AutoResponder uses to suppress
+// duplicate executor submissions for the same (rule_uid, target) pair.
+// Phase 4 #86 surfaced the duplicate-fire pattern: a single exec event
+// can match a rule via the immediate-fire path AND emerge again via a
+// post-hashing followup, producing two response_actions rows for the
+// same kill. The finding still emits twice (it's an honest observation
+// of two pipeline stages); only the executor submission is deduped.
+//
+// 2 s is a comfortable upper bound on the gap between the exec event
+// and any hash/enrich-followup arriving at the engine — the captures
+// from V5 showed both findings within the same millisecond, so 2 s is
+// 1000× margin.
+const dedupeWindow = 2 * time.Second
 
 // PolicyProvider returns the latest cached HostPolicy. nil means "no
 // policy seen yet" → detect-only. Implementations are expected to be
@@ -44,13 +60,55 @@ type PolicyProvider func() *pb.HostPolicy
 type AutoResponder struct {
 	executor *Executor
 	policy   PolicyProvider
+
+	// now is overridable for tests; defaults to time.Now.
+	now func() time.Time
+
+	// recent guards executor submissions for the same (rule_uid,
+	// target) pair within dedupeWindow. Lazily swept on every call —
+	// the cardinality is bounded by the number of distinct firing
+	// rules × distinct targets seen in a 2 s window, which is small
+	// in practice.
+	mu     sync.Mutex
+	recent map[string]time.Time
 }
 
 // NewAutoResponder wires the bridge. executor is required; policy may
 // be nil (treated as a permanent detect-only baseline — useful for
 // tests + the gap before #84 wires the real policy cache).
 func NewAutoResponder(executor *Executor, policy PolicyProvider) *AutoResponder {
-	return &AutoResponder{executor: executor, policy: policy}
+	return &AutoResponder{
+		executor: executor,
+		policy:   policy,
+		now:      time.Now,
+		recent:   make(map[string]time.Time),
+	}
+}
+
+// shouldDedupe returns true when (ruleUID, target) was submitted to
+// the executor within dedupeWindow. Side effect: records the current
+// fire so subsequent duplicates are suppressed. Sweeps stale entries
+// inline.
+func (a *AutoResponder) shouldDedupe(ruleUID, target string) bool {
+	if ruleUID == "" || target == "" {
+		return false
+	}
+	key := ruleUID + "|" + target
+	now := a.now()
+	cutoff := now.Add(-dedupeWindow)
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for k, t := range a.recent {
+		if t.Before(cutoff) {
+			delete(a.recent, k)
+		}
+	}
+	if last, ok := a.recent[key]; ok && !last.Before(cutoff) {
+		return true
+	}
+	a.recent[key] = now
+	return false
 }
 
 // OnFinding is the engine hook. Called after the rule has fired and
@@ -91,6 +149,18 @@ func (a *AutoResponder) OnFinding(ctx context.Context, intent *ruleast.ResponseI
 	}
 	if !policyAllows(hp, intent.Action) {
 		finding.AutoResponseWouldHaveExecuted = true
+		return
+	}
+
+	// Phase 5 #88b: dedupe duplicate submissions for the same
+	// (rule_uid, target) within a short window. The finding itself
+	// still emits — it represents an honest observation of the rule
+	// matching the event — but only the first observation drives an
+	// executor submission. Subsequent observations leave the
+	// executed/would_have_executed flags both false, which the
+	// console surfaces as "rule fired again on the same target;
+	// previous response is in flight or done".
+	if a.shouldDedupe(finding.RuleInfo.UID, target) {
 		return
 	}
 

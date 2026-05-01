@@ -246,7 +246,7 @@ func (s *SessionService) handle(ctx context.Context, hostID string, msg *pb.Clie
 		s.publishEvent(hostID, k.Event)
 	case *pb.ClientMessage_Heartbeat:
 		if hb := k.Heartbeat; hb != nil {
-			s.applyHeartbeat(ctx, hostID)
+			s.applyHeartbeat(ctx, hostID, hb.GetHealth().GetAgentVersion())
 		}
 	case *pb.ClientMessage_Ack:
 		// RuleSet acks consumed by future hub work; observational today.
@@ -330,14 +330,16 @@ func parseRuleWarning(w string) (ruleID, reason string, ok bool) {
 	return body[:idx], body[idx+1:], true
 }
 
-// applyHeartbeat bumps hosts.last_seen. A missing row here is logged
-// (via authn-failure counter) but does not tear down the stream — the
-// Session itself was already authn'd; a heartbeat for a since-revoked
-// host should be tracked separately so revocation work in #44 has
-// visibility.
-func (s *SessionService) applyHeartbeat(ctx context.Context, hostID string) {
+// applyHeartbeat bumps hosts.last_seen and writes hosts.agent_version
+// when the agent reported one (Phase 5 #88c). A missing row here is
+// logged (via authn-failure counter) but does not tear down the stream
+// — the Session itself was already authn'd; a heartbeat for a
+// since-revoked host should be tracked separately so revocation work
+// in #44 has visibility. Empty agentVersion preserves the existing
+// column value so older agents don't blank out the recorded version.
+func (s *SessionService) applyHeartbeat(ctx context.Context, hostID, agentVersion string) {
 	s.Telem.IncHeartbeat()
-	if err := s.Store.UpdateHostLastSeen(ctx, hostID); err != nil && !errors.Is(err, pg.ErrHostNotFound) {
+	if err := s.Store.UpdateHostHeartbeat(ctx, hostID, agentVersion); err != nil && !errors.Is(err, pg.ErrHostNotFound) {
 		// Real DB error; counted as authn failure so it surfaces in the
 		// same dashboard as cert/CN problems. Do not return — the agent
 		// will retry on next heartbeat.
