@@ -918,17 +918,329 @@ wire bump.
 when a rule fires on the same key window twice). Budget slack
 there.
 
-## 7. Phase 5 — Hardening (bullet)
+## 7. Phase 5 — Hardening
 
-- Agent self-protection: `PR_SET_DUMPABLE=0`, cap bounding, lockdown on critical files, tamper-evident logs (hash chain flushed before shutdown).
-- Offline buffering: on-disk ringbuffer at `/var/lib/slither/buffer`, replay on reconnect, bounded size with oldest-wins drop.
-- Backpressure: end-to-end from output back to eBPF (raise sampling on low-priority classes when downstream is slow).
-- Reproducible builds: pinned Go toolchain, pinned `llvm`/`clang`, `-trimpath`, `-buildvcs=true`, `-mod=readonly`.
-- Signed releases: cosign keyless via GitHub OIDC.
-- SBOM generation: syft, attached to release.
-- `.deb` + `.rpm` packages (nfpm).
-- Hardening docs, threat model doc (`docs/threat-model.md`).
-- **Re-examine §5.1 #59 stateful cold-start hybrid.** Phase 3 ships opt-in-per-rule (`lookback: true` flag, default off) to keep CH read amplification predictable. Once Phase 4 + Phase 5 hardening produces real production-shaped CH query telemetry, decide whether the hybrid (always-on with a `max_cold_start_lookback` cap, default ~1 h) is worth the complexity vs operator UX win. Decision belongs here, not earlier — premature without telemetry.
+**Goal:** production-readiness. Distribution (signed deb/rpm/OCI),
+self-protection (the agent defends itself from local tampering),
+resilience (no event loss on disconnect, end-to-end backpressure),
+and closure of the deferred technical questions Phase 5 was tagged
+to handle. Zero new operator-facing capability — all of Phase 5 is
+in service of "operator can install this on a fresh host and trust
+what's running."
+
+Phase 4 ended at task #86 (cloud-VM exit validation, closed
+2026-05-01 with the re-validation captured under
+`phase4_validation/`). Phase 5 picks up at #87, mirroring the §3.x
+/ §4.1 / §5.1 / §6.1 numbered-task pattern.
+
+Architectural contract for Phase 5 lives in **ADR-0035**
+(`docs/adr/0035-phase5-scope.md`): zero new feature scope,
+distribution surface (deb + rpm + OCI + signed binaries), kernel
+keyring cert storage (closes §10.2), CH migration harness (closes
+§10.3), six-hour offline buffering with class-priority backpressure,
+quarantine subprocess decoupling for the Gap-B fix, deferred §10.5
+(rule signing) to Phase 6.
+
+### 7.1 Tasks
+
+**Dependency graph at a glance:**
+- **A. Foundation:** #87 (this ADR + breakdown) → #88 (Phase 4 punch list) — sequential
+- **B. Build/release track:** #89 (reproducibility) → {#90 SBOM, #91 signing, #92 deb/rpm, #93 OCI} (parallel after #89)
+- **C. Runtime hardening:** #94 self-protection → #95 tamper-evident logs (#95 sequenced after #94 because both touch the agent's state-dir hardening)
+- **D. Resilience:** #96 (offline buffering), #97 (backpressure) — independent of each other, parallel after #87
+- **E. Server-side closures:** #98 (cert storage), #99 (CH migration harness), #100 (quarantine subprocess) — all independent, parallel after #87
+- **F. Decisions/docs:** #101 (#59 hybrid call), #102 (threat model) — late in the phase
+- **Exit gate:** #103 (subsumes everything; user-execution like #29/#46/#70/#86)
+
+1. **#87 — ADR-0035 + scoping spike (this commit).** Locks: zero
+   new feature scope; distribution surface (deb + rpm + multi-arch
+   OCI + cosign-signed binaries); kernel-keyring cert storage with
+   file fallback (closes §10.2); CH migration harness (closes §10.3);
+   §10.5 rule signing parked Phase 6+; six-hour offline buffer with
+   256 MiB default + class-priority backpressure; quarantine
+   subprocess decoupling for Gap B; threat model as `docs/threat-model.md`
+   only (no separate ADR); §59 cold-start hybrid decision deferred to
+   #101 once Phase 5 fleet telemetry is available. Touches:
+   `docs/adr/0035-phase5-scope.md`, `IMPLEMENTATION.md §7`. **Exit:**
+   ADR accepted; §7.1 task breakdown in place.
+
+2. **#88 — Phase 4 carry-over punch list.** Four operational
+   papercuts batched: (a) `detect.Engine` subscribes to `rules_changed`
+   NOTIFY (re-uses #39's plumbing; engine only loaded plans at
+   startup); (b) auto-respond dedupe — collapse the duplicate
+   `response_actions` row when the immediate-fire path and the
+   detection-emit path both observe the same exec event for the
+   same rule + target_pid (key on `(rule_uid, host_id, target,
+   ±100ms)` and squash); (c) `hosts.agent_version` writeback —
+   server stamps the column from the agent's heartbeat metadata
+   on each `UpdateHostLastSeen` call; (d) `deploy/sysctl.d/99-slither.conf`
+   manual-install step documented in `docs/install.md` as a
+   transitional measure until #92 ships postinst. Touches:
+   `server/internal/detect/`, `agent/internal/respond/auto.go`,
+   `server/internal/grpcserv/session.go`, `server/internal/store/pg/hosts.go`,
+   `docs/install.md`. **Exit:** integration tests for (a)+(b)+(c);
+   doc step verified by re-reading.
+
+3. **#89 — Reproducible builds.** `Makefile` build targets gain
+   `-trimpath`, `-buildvcs=true`, `-mod=readonly`; CI workflow
+   `verify-reproducible` job builds twice and diffs the SHA-256.
+   Pin `llvm`/`clang` versions in `agent/internal/bpf/src/Makefile`
+   + the agent build Dockerfile via Debian package pinning. Pin
+   Go toolchain via `go.work` `toolchain` directive (matches
+   existing 1.25 pin). Touches: `Makefile`, `.github/workflows/ci.yml`,
+   `deploy/docker/server.Dockerfile`, `deploy/docker/bootstrap.Dockerfile`,
+   new `deploy/docker/agent.Dockerfile`, `go.work`. **Exit:** CI
+   green; two consecutive `make build` runs produce byte-identical
+   `bin/*`.
+
+4. **#90 — SBOM via syft.** Goreleaser-style hook (or scripted
+   step in `.github/workflows/release.yml`) runs `syft` against
+   each release artefact and attaches the SBOM as a release asset.
+   Both SPDX-JSON and CycloneDX-JSON formats. Touches:
+   `.github/workflows/release.yml` (new), `tools/sbom.sh` (new).
+   **Exit:** a tagged release produces `*.spdx.json` +
+   `*.cyclonedx.json` for each binary + each package + each OCI
+   manifest digest.
+
+5. **#91 — Cosign keyless signing.** GitHub OIDC → cosign-keyless
+   signature on every release artefact (binaries, deb, rpm, OCI
+   image manifests). Verification documented in `docs/install.md`
+   for both the cosign path and the `gpg --verify` path on deb/rpm
+   (nfpm signing keyring case). Touches:
+   `.github/workflows/release.yml`, `docs/install.md`.
+   **Exit:** `cosign verify --certificate-identity-regexp ...
+   slither-agent` passes against a tagged release.
+
+6. **#92 — nfpm `.deb` + `.rpm` packaging.** `nfpm.yaml` config
+   building both formats. Postinst:
+   (i) install `99-slither.conf` into `/etc/sysctl.d/` + `sysctl --system`
+       — closes Gap A from #86;
+   (ii) install systemd unit + reload + enable (don't auto-start —
+        operator runs `slither-agent enroll` first);
+   (iii) install `agent.yaml.sample` to `/etc/slither/`;
+   (iv) chown `/var/lib/slither` + `/etc/slither` to root:root mode 0700.
+   Postuninst removes the systemd unit + sysctl drop-in but preserves
+   `/var/lib/slither/quarantine/` + `/var/lib/slither/buffer/` (operator
+   data). Touches: new `deploy/nfpm/nfpm.yaml`,
+   `.github/workflows/release.yml`, `docs/install.md` rewrite.
+   **Exit:** install/upgrade/remove on a fresh Debian 13 + RHEL 10 +
+   Ubuntu 24.04 VM; `apt install ./slither-agent_*.deb` works
+   end-to-end; postinst applied sysctl drop-in observable in
+   `/etc/sysctl.d/`.
+
+7. **#93 — OCI image build.** Multi-arch (amd64 + arm64) agent +
+   server images. Agent image runs as a k8s daemonset shape:
+   capabilities-only (no `privileged: true`), bind-mounts
+   `/sys/kernel/btf`, `/proc`, `/sys/fs/bpf`, `/var/lib/slither` (PVC),
+   `/etc/slither` (Secret). Server image productionised — distroless
+   base, signed, includes `slither-db` + `slither-ch` for migration
+   sidecar use. Both pushed to ghcr.io on release tag. Sample
+   k8s manifests in `deploy/k8s/`. Touches:
+   `deploy/docker/agent.Dockerfile` (new),
+   `deploy/docker/server.Dockerfile` (rewrite to distroless +
+   multi-arch),
+   new `deploy/k8s/{daemonset,deployment,service}.yaml`,
+   `.github/workflows/release.yml`. **Exit:** kind-cluster smoke test
+   in CI brings up agent daemonset + server deployment, agent enrolls
+   + reports events, console reachable.
+
+8. **#94 — Agent self-protection v1.** On startup:
+   `prctl(PR_SET_DUMPABLE, 0)` to block ptrace + core dumps;
+   refuse to run if attached via PTRACE_ATTACH (check `/proc/self/status`
+   `TracerPid` field); after BPF programs load, drop unused caps
+   via `prctl(PR_CAP_AMBIENT_LOWER)` — keep CAP_BPF/CAP_PERFMON
+   only in the long-running tracepoint goroutine, drop the rest;
+   chmod 0700 on `/var/lib/slither` + `/etc/slither` at startup
+   (agent owns these via systemd's StateDirectory). Touches:
+   new `agent/internal/selfprotect/`, `agent/internal/app/app.go`.
+   **Exit:** integration test (privileged) — start agent, attempt
+   `gdb -p <agent-pid>` → fails with EPERM; agent logs the rejection
+   on a tracer-attached startup; capability bound observable in
+   `/proc/<agent-pid>/status` post-BPF-load.
+
+9. **#95 — Tamper-evident logs.** Hash-chain over the agent's local
+   forensic state: each `response_actions` execution + each emitted
+   detection finding writes one line to `/var/lib/slither/log.chain`
+   carrying `prev_hash + record_hash + timestamp + record_summary`.
+   Flushed before shutdown via signal handler. New
+   `slither-agent verify-logs --since DURATION` walks the chain and
+   exits non-zero on any break. Server-side cross-check (Phase 6+):
+   periodically compare against the equivalent CH-side records.
+   Touches: `agent/internal/selfprotect/chain.go` (new),
+   `agent/cmd/slither-agent/verify.go` (new), state-dir hardening
+   from #94. **Exit:** unit test breaks the chain at row N → verify
+   exits non-zero pointing at row N; clean chain → exit 0.
+
+10. **#96 — Offline buffering.** On-disk ringbuffer at
+    `/var/lib/slither/buffer/`. 6 h cap × ~1k events/s/host →
+    256 MiB default budget (operator-tunable via
+    `agent.output.grpc.buffer.{disk_max_bytes,max_age}`). Oldest-wins
+    drop on overflow. Replay protocol on reconnect: agent streams
+    buffered Envelopes ahead of fresh ones; server detects via
+    `Envelope.observed_at < (now - 1m)` and routes to a replay-bypass
+    path that lands in CH but skips the live-tail SSE bus (replay
+    clutters live-tail). Buffer survives agent restart. Touches:
+    `agent/internal/output/grpc/sink.go`, new
+    `agent/internal/output/grpc/buffer/`, `server/internal/grpcserv/session.go`,
+    `server/internal/ingest/bus.go` (replay-class subscriber filter).
+    **Exit:** integration test — disconnect agent for 30s → reconnect
+    → assert all events from the disconnect window land in CH but
+    don't appear on `/live/stream` retroactively; oldest-wins eviction
+    holds at the configured cap.
+
+11. **#97 — End-to-end backpressure.** Two-direction signal:
+    **Up:** agent monitors `telemetry.DropsOutput` over a 30s window;
+    when non-zero, raises sampling on low-priority classes
+    (NetworkActivity for non-IOC events first; FileSystemActivity
+    for non-rule paths second). Sampling rate computed from drop
+    pressure with hysteresis. **Down:** server's CH writer reports
+    subscriber drops via a new `BackpressureSignal` message
+    (additive `slither.v1` wire bump on `ServerMessage`). Agents
+    cache the signal in atomic pointer; auto-respond + detection
+    paths consult it; cleared by a follow-up signal or 5min timeout.
+    Touches: `proto/slither/v1/control.proto`,
+    `agent/internal/collector/`, `agent/internal/output/grpc/sink.go`,
+    `server/internal/store/ch/writer.go`, new
+    `server/internal/control/backpressure.go`. **Exit:** integration
+    test under `make load-test` — pin server CH writer to slow
+    flush, observe agent-side sampling raise on Network class
+    within 30s; recovery within 30s after writer unpins.
+
+12. **#98 — Cert storage: kernel keyring + file fallback.**
+    Closes §10.2. Agent stores client cert + key via
+    `add_key(2)` to the user keyring on enrollment; reads via
+    `keyctl(2)` on subsequent boot. Falls back to `/etc/slither/`
+    files when `/proc/keys` is unavailable (containers without
+    keyring access, kernels < 5.4). New `agent/internal/keystore/`
+    with `Keyring` + `FileFallback` impls behind a `Store` interface.
+    Touches: `agent/internal/enroll/enroll.go`,
+    `agent/internal/output/grpc/sink.go` (cert load),
+    new `agent/internal/keystore/`, `docs/install.md` (TPM is
+    Phase 6+ — note that). **Exit:** integration test on Debian 13
+    with keyring → cert lives in keyring, file absent;
+    container-shape test with `/proc/keys` unreadable → falls back
+    to file, both paths produce a working agent.
+
+13. **#99 — CH migration harness.** Closes §10.3. Goose-style
+    forward + down migrations with a `schema_version` table in CH.
+    Tooling: `slither-ch migrate-up`, `slither-ch migrate-down`,
+    `slither-ch status`, plus a `--dry-run` flag that prints SQL
+    without applying. Symmetric to the existing pg path
+    (`slither-db`). Phase 5 ships the harness only — no OCSF
+    version bump in this phase. Touches: `server/cmd/slither-ch/`
+    extensions, new `server/internal/store/ch/migrate/`, possibly
+    `server/clickhouse/migrations/` reorganisation if the existing
+    files don't fit goose's down-migration shape.
+    **Exit:** integration test — applies all migrations forward,
+    rolls back the last two, re-applies forward, assert
+    `schema_version` row count + table contents stable.
+
+14. **#100 — Quarantine subprocess decoupling (Gap B fix).** Spawn
+    a short-lived sub-process for each `quarantine_file` /
+    `unquarantine` action with relaxed namespace (no `PrivateTmp`,
+    `ProtectSystem=` off) so it can see + modify `/tmp/`, `/opt/`,
+    `/var/spool/`. Sub-process drops all caps except
+    `CAP_DAC_OVERRIDE` + `CAP_DAC_READ_SEARCH`, communicates with
+    the parent agent over a unix socket pair, returns the same
+    `ResponseResult` shape. Audited via the existing
+    `response_actions` chain — operator never sees the subprocess.
+    Touches: `agent/internal/respond/quarantine.go`,
+    new `agent/internal/respond/quarantine_subprocess/`,
+    `deploy/systemd/slither-agent.service` (no change — sub-process
+    inherits unit caps but not namespacing because `ExecStartPost`
+    doesn't propagate `PrivateTmp` to forked children with a
+    bespoke namespace setup). **Exit:** integration test —
+    quarantine `/tmp/x` succeeds, unquarantine restores byte-identical;
+    BPF + detection paths still observably namespaced (verify via
+    agent's view of `/tmp` differs from operator's).
+
+15. **#101 — Stateful cold-start hybrid decision.** Re-examine
+    §5.1 #59 with Phase 5 fleet telemetry. Operate the cloud fleet
+    for ≥48 h with a representative mix of stateful rules; sample
+    CH `system.query_log` for the lookback queries; measure
+    read-amplification + p95 latency. Decision matrix:
+    | Telemetry shows | Decision |
+    |-----------------|----------|
+    | Lookback queries < 5% of total CH read budget AND p95 < 500ms | Ship hybrid (always-on + max_cold_start_lookback=1h cap). |
+    | Either threshold crossed | Close as won't-do; document in `docs/phase5-validation.md`. |
+    Either way, this is a numbered task that ships: code + tests OR
+    a doc-only commit recording the closure rationale. Touches:
+    `server/internal/detect/lookback.go` (if shipping),
+    `docs/phase5-validation.md` (the decision either way).
+    **Exit:** decision recorded with the underlying telemetry.
+
+16. **#102 — Threat model doc.** `docs/threat-model.md`. STRIDE
+    per surface: ingest path (gRPC mTLS), control plane (rule push,
+    response dispatch), console (HTMX session auth), agent runtime
+    (BPF + capability bound + state dir), package distribution
+    (cosign + reproducible builds). Captures: what slither defends
+    against (local-root tamper, opportunistic malware on a host
+    with kill_process permitted, unauthorised response action via
+    console RBAC); what slither does **not** defend against
+    (kernel-mode rootkits, supply-chain compromise of the build
+    system, physical access, TPM-less firmware attack); residual
+    risks. Lands toward the end of Phase 5 so it describes
+    what shipped. Touches: new `docs/threat-model.md`,
+    `README.md` (link). **Exit:** doc reviewed end-to-end; every
+    §3.x trust assumption referenced.
+
+17. **#103 — Phase 5 exit validation.** Doc-backed manual run on
+    the Phase 3/4 cloud fleet (existing stopped instances —
+    `start-instances` brings them back). Validates:
+    (i) `apt install ./slither-agent_*.deb` on Debian 13 + Ubuntu 24.04;
+        `dnf install ./slither-agent-*.rpm` on RHEL 10. Postinst
+        applies sysctl drop-in. Service starts via `systemctl enable`;
+    (ii) cosign verify on a tagged release artefact;
+    (iii) reproducible-builds proof — two consecutive CI builds on
+        the same SHA → same binary SHA-256;
+    (iv) OCI image works as a k8s daemonset against a kind cluster
+        (or one of the cloud VMs running k3s);
+    (v) Self-protection — `gdb -p <agent>` rejected; cap bound
+        observably reduced post-startup;
+    (vi) Tamper-evident log chain verifies on every host;
+    (vii) Offline buffering — disconnect agent 30 minutes →
+        reconnect → all events from the disconnect window land in CH
+        but stay out of `/live/stream` history;
+    (viii) Backpressure — pin CH writer slow → agent observably
+        raises NetworkActivity sampling within 30s;
+    (ix) Cert storage — kernel keyring used on Debian 13 (verify
+        via `keyctl list @u`); file fallback exercised on the OCI
+        image where keyring is unavailable;
+    (x) Quarantine on `/tmp/`, `/opt/` works (Gap B fix);
+    (xi) #101 telemetry collected; cold-start hybrid decision recorded;
+    (xii) Threat model doc walked through against the running fleet —
+        every claim verifiable.
+    Capture under `phase5_validation/`; commit
+    `docs/phase5-validation.md`. **Exit:** all green; Phase 5 closed;
+    Phase 6 (extensions) opens.
+
+### 7.2 Cross-cutting notes
+
+- **Wire stability holds.** Phase 5 adds `BackpressureSignal` on
+  `ServerMessage` — additive inside `slither.v1`. No `slither.v2`
+  discussion. ADR-0011's wire-freeze invariant is preserved per
+  §2.4.
+- **No new operator capability.** Phase 5 ships zero new alerts,
+  responses, or console pages. End-users see "we package now" and
+  "the agent defends itself" — not new dashboards.
+- **Reproducibility before signing.** #91 (signing) depends on #89
+  (reproducibility) so the signed artefact is meaningful — signing
+  a non-reproducible binary attests to "the build that happened on
+  this CI run produced this byte sequence", which is weaker than
+  "this source tree at this commit produces this byte sequence".
+- **Default-detect-only carries forward.** Per ADR-0034, every
+  freshly-enrolled host lands at all-false. Phase 5 packaging
+  doesn't change that — `apt install` produces a host that emits
+  telemetry and detects, but acts on nothing until an operator
+  promotes it.
+
+**Estimated effort:** 6–8 weeks for one person. Biggest unknowns:
+#93 (OCI daemonset shape across CRI implementations — containerd
+should be uniform, but BPF mounts differ subtly between Docker /
+containerd / cri-o), #97 (backpressure signal stability — tuning
+the agent-side hysteresis without thrashing on bursty load), and
+#100 (subprocess unix-socket protocol — keep it dirt-simple to
+avoid re-inventing gRPC inside the agent).
 
 ## 8. Phase 6 — Extensions & Console Expansion (bullet)
 
