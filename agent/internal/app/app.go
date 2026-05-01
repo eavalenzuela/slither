@@ -19,6 +19,7 @@ import (
 	"github.com/t3rmit3/slither/agent/internal/selfprotect"
 
 	grpcsink "github.com/t3rmit3/slither/agent/internal/output/grpc"
+	grpcbuffer "github.com/t3rmit3/slither/agent/internal/output/grpc/buffer"
 	"github.com/t3rmit3/slither/agent/internal/respond"
 	"github.com/t3rmit3/slither/agent/internal/ruleengine"
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
@@ -227,6 +228,28 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 		// Provider() the AutoResponder consults from the engine's hot
 		// path. Empty cache = nil pointer = detect-only baseline.
 		policyCache := respond.NewPolicyCache()
+
+		// Phase 5 #96: optional offline disk buffer. Empty Dir disables
+		// it (legacy memory-only drop-oldest behaviour). When configured,
+		// in-flight envelopes spool to disk on overflow + replay on
+		// every reconnect. Nil-safe: a buffer that fails to open warns
+		// and continues without disk durability.
+		var diskBuf *grpcbuffer.Buffer
+		if g.Buffer.Dir != "" {
+			b, bufErr := grpcbuffer.Open(grpcbuffer.Options{
+				Dir:          g.Buffer.Dir,
+				MaxBytes:     g.Buffer.DiskMaxBytes,
+				MaxAge:       g.Buffer.MaxAge,
+				SegmentBytes: g.Buffer.SegmentBytes,
+			})
+			if bufErr != nil {
+				slog.Warn("grpc sink: disk buffer unavailable; continuing without offline durability",
+					"err", bufErr, "dir", g.Buffer.Dir)
+			} else {
+				diskBuf = b
+			}
+		}
+
 		sink, err := grpcsink.New(grpcsink.Options{
 			ServerAddr:        g.ServerAddr,
 			CAPath:            g.CAPath,
@@ -236,6 +259,7 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 			HeartbeatInterval: g.HeartbeatInterval,
 			BufferSize:        g.BufferSize,
 			AgentVersion:      version.Version,
+			Buffer:            diskBuf,
 			// emit is filled in below — applyRuleSetTo holds the
 			// indirection so the callback closes over the variable
 			// rather than the (still-nil) value at this point.

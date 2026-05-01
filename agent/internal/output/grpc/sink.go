@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/t3rmit3/slither/agent/internal/output/grpc/buffer"
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
 	"github.com/t3rmit3/slither/pkg/ocsf"
 	pb "github.com/t3rmit3/slither/proto/gen/slither/v1"
@@ -64,6 +65,13 @@ type Options struct {
 	// auto-respond cache (atomic.Pointer behind a PolicyProvider).
 	// Must be non-blocking.
 	OnHostPolicy func(*pb.HostPolicy)
+
+	// Buffer is the optional Phase 5 #96 offline disk buffer. When
+	// non-nil, push() spools to disk when the in-memory queue is full
+	// (replacing the drop-oldest behaviour) and runSession replays
+	// the spool ahead of fresh events on every reconnect. Nil keeps
+	// the legacy memory-only behaviour for tests + dev configs.
+	Buffer *buffer.Buffer
 }
 
 // Sink is the gRPC Session-stream output. Implements
@@ -196,17 +204,31 @@ func (s *Sink) ingest(ctx context.Context, in <-chan ocsf.Event) {
 	}
 }
 
-// push pushes env into s.buf. On full: drop the oldest queued envelope
-// (per §4.1 #35 drop-oldest policy), then retry the send. Both selects
-// are non-blocking; in the pathological case we fail to enqueue and
-// count the drop, keeping upstream unblocked.
+// push pushes env into s.buf. On full:
+//   - If a disk buffer is configured (Phase 5 #96), spool env to disk
+//     so it gets replayed on the next successful Session stream. The
+//     in-memory queue stays at its existing depth; live shipping
+//     resumes as soon as the session goroutine drains it.
+//   - Otherwise (no disk buffer configured), drop the oldest queued
+//     envelope per the original §4.1 #35 drop-oldest policy. Both
+//     selects are non-blocking; in the pathological case we fail to
+//     enqueue and count the drop, keeping upstream unblocked.
 func (s *Sink) push(env *pb.Envelope) {
 	select {
 	case s.buf <- env:
 		return
 	default:
 	}
-	// Full — drop oldest.
+	// Full — Phase 5 #96 path: spool to disk if available.
+	if s.opts.Buffer != nil {
+		if _, err := s.opts.Buffer.Append(env); err != nil {
+			// Disk buffer error — fall through to drop-oldest so a
+			// jammed disk doesn't stall the agent.
+			s.telem.IncDropOutput()
+		}
+		return
+	}
+	// Memory-only legacy path — drop oldest.
 	select {
 	case <-s.buf:
 		s.telem.IncDropOutput()
@@ -261,6 +283,24 @@ func (s *Sink) runSession(ctx context.Context, client pb.AgentServiceClient) err
 	stream, err := client.Session(ctx)
 	if err != nil {
 		return err
+	}
+
+	// Phase 5 #96 — replay the disk spool BEFORE pumping fresh
+	// envelopes. Each replayed Envelope already carries its original
+	// observed_at, so the server's replay-bypass filter
+	// (Envelope.observed_at < now-1m) routes them past the live-tail
+	// SSE bus while still landing in CH. Replay errors fall through
+	// to the normal session loop — the failed segment stays on disk
+	// and the next reconnect retries.
+	if buf := s.opts.Buffer; buf != nil {
+		_, _, replayErr := buf.Replay(func(env *pb.Envelope) error {
+			return stream.Send(&pb.ClientMessage{
+				Kind: &pb.ClientMessage_Event{Event: env},
+			})
+		})
+		if replayErr != nil {
+			return fmt.Errorf("grpc sink: replay: %w", replayErr)
+		}
 	}
 	// Server may send control messages back (RuleSet today, hunt
 	// queries + response requests in later phases). A receive goroutine

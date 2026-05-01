@@ -97,6 +97,17 @@ func (s *Server) liveStream(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+			// Phase 5 #96 — replay-bypass: events older than 1 minute
+			// are presumed to be agent-side offline-buffer replays.
+			// They land in CH normally (the writer is downstream of
+			// this subscriber), but they don't appear in live-tail.
+			// Backfilling /live with hours-old events on every
+			// reconnect storm would be a UX disaster. The 1m bound
+			// is generous enough to absorb normal clock skew + agent
+			// batching (typical live latency is sub-second).
+			if isReplayEvent(env, time.Now()) {
+				continue
+			}
 			if !filt.matches(env) {
 				continue
 			}
@@ -113,6 +124,25 @@ func (s *Server) liveStream(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+// replayBypassWindow is the wall-clock cutoff between "live" and
+// "agent-side replay" for live-tail consumption. Phase 5 #96. Tunable
+// via a future config knob if real fleets surface clock-skew patterns
+// outside the default; v1 hard-codes the bound.
+const replayBypassWindow = 1 * time.Minute
+
+// isReplayEvent reports whether env's observed_at is far enough
+// behind now that it should be treated as an agent-side offline-
+// buffer replay (and skipped from live-tail). Missing observed_at
+// is treated as live — better to over-show on live-tail than
+// silently swallow events that lack a timestamp.
+func isReplayEvent(env *pb.Envelope, now time.Time) bool {
+	t := env.GetObservedAt()
+	if t == nil {
+		return false
+	}
+	return now.Sub(t.AsTime()) > replayBypassWindow
 }
 
 // liveFilter holds the parsed request filters.

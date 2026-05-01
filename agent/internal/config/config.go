@@ -79,6 +79,27 @@ type GRPCSink struct {
 	HostIDPath        string        `yaml:"host_id_path"`
 	HeartbeatInterval time.Duration `yaml:"heartbeat_interval"`
 	BufferSize        int           `yaml:"buffer_size"`
+	// Buffer is the Phase 5 #96 offline disk-buffer config. Empty Dir
+	// (the zero value) disables disk buffering — the in-memory
+	// channel still drops oldest on overflow exactly as before.
+	Buffer GRPCBuffer `yaml:"buffer"`
+}
+
+// GRPCBuffer configures the on-disk replay buffer (Phase 5 #96).
+type GRPCBuffer struct {
+	// Dir is the on-disk root for spooled segments. When empty,
+	// disk buffering is disabled.
+	Dir string `yaml:"dir"`
+	// DiskMaxBytes caps total spool size; oldest segments are
+	// evicted when the cap is exceeded. Zero defaults to 256 MiB.
+	DiskMaxBytes int64 `yaml:"disk_max_bytes"`
+	// MaxAge bounds replay-on-reconnect; events older than this
+	// are skipped to avoid post-multi-day-disconnection backfill
+	// storms. Zero defaults to 6h.
+	MaxAge time.Duration `yaml:"max_age"`
+	// SegmentBytes is the per-segment rotation threshold. Zero
+	// defaults to 16 MiB.
+	SegmentBytes int64 `yaml:"segment_bytes"`
 }
 
 // ErrInvalidConfig is returned when validation fails. Callers can use
