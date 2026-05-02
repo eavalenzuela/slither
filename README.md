@@ -60,6 +60,8 @@ PRs welcome. All commits must be DCO-signed (`git commit -s`). See [CONTRIBUTING
 
 To report a vulnerability, use GitHub's private vulnerability reporting — do not file a public issue. See [SECURITY.md](./SECURITY.md).
 
+The [threat model](./docs/threat-model.md) enumerates exactly what slither defends against, what it explicitly doesn't, and the residual risks operators inherit by deploying it. Read it before evaluating fit.
+
 ## License
 
 [MIT](./LICENSE).

@@ -1179,7 +1179,7 @@ quarantine subprocess decoupling for the Gap-B fix, deferred §10.5
     flip from `lookback: false` to `lookback: true` default in the
     compiler is all it would take to reopen.)*
 
-16. **#102 — Threat model doc.** `docs/threat-model.md`. STRIDE
+16. ✅ **#102 — Threat model doc.** `docs/threat-model.md`. STRIDE
     per surface: ingest path (gRPC mTLS), control plane (rule push,
     response dispatch), console (HTMX session auth), agent runtime
     (BPF + capability bound + state dir), package distribution
@@ -1192,7 +1192,15 @@ quarantine subprocess decoupling for the Gap-B fix, deferred §10.5
     risks. Lands toward the end of Phase 5 so it describes
     what shipped. Touches: new `docs/threat-model.md`,
     `README.md` (link). **Exit:** doc reviewed end-to-end; every
-    §3.x trust assumption referenced.
+    §3.x trust assumption referenced. *(Committed 2026-05-01. Five
+    surface-by-surface STRIDE tables (ingest / control plane /
+    console / agent runtime / distribution); explicit
+    "does NOT defend against" section listing kernel-mode rootkits,
+    supply-chain compromise, physical access, server compromise,
+    insider operator abuse, side-channels, network-level traffic
+    analysis, upstream Sigma-rule logic flaws; defence-in-depth
+    posture summary cross-referencing every Phase 1-5 task that
+    contributes. Cross-referenced from README.md.)*
 
 17. **#103 — Phase 5 exit validation.** Doc-backed manual run on
     the Phase 3/4 cloud fleet (existing stopped instances —
