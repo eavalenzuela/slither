@@ -110,7 +110,7 @@ verify-gen: ## Fail if `make gen` would produce a diff (CI guard)
 # ----------------------------------------------------------------------------
 
 .PHONY: build
-build: build-agent build-server build-db ## Build all binaries
+build: build-agent build-server build-db build-ch ## Build all binaries
 
 .PHONY: build-agent
 build-agent: ## Build slither-agent → bin/
@@ -127,20 +127,25 @@ build-db: ## Build slither-db (Postgres migration harness) → bin/
 	@mkdir -p $(BIN)
 	@cd server && CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(BIN)/slither-db ./cmd/slither-db
 
+.PHONY: build-ch
+build-ch: ## Build slither-ch (ClickHouse migration harness) → bin/
+	@mkdir -p $(BIN)
+	@cd server && CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(BIN)/slither-ch ./cmd/slither-ch
+
 .PHONY: verify-reproducible
 verify-reproducible: ## Phase 5 #89 — build twice, assert bin/* are byte-identical
 	@set -e; \
 	tmp=$$(mktemp -d); \
 	echo "▶ first build"; \
 	$(MAKE) --no-print-directory build >/dev/null; \
-	for f in $(BIN)/slither-agent $(BIN)/slither-server $(BIN)/slither-db; do \
+	for f in $(BIN)/slither-agent $(BIN)/slither-server $(BIN)/slither-db $(BIN)/slither-ch; do \
 		cp "$$f" "$$tmp/$$(basename $$f).1"; \
 	done; \
 	echo "▶ second build"; \
-	rm -f $(BIN)/slither-agent $(BIN)/slither-server $(BIN)/slither-db; \
+	rm -f $(BIN)/slither-agent $(BIN)/slither-server $(BIN)/slither-db $(BIN)/slither-ch; \
 	$(MAKE) --no-print-directory build >/dev/null; \
 	fail=0; \
-	for f in $(BIN)/slither-agent $(BIN)/slither-server $(BIN)/slither-db; do \
+	for f in $(BIN)/slither-agent $(BIN)/slither-server $(BIN)/slither-db $(BIN)/slither-ch; do \
 		base=$$(basename $$f); \
 		s1=$$(sha256sum "$$tmp/$$base.1" | cut -d' ' -f1); \
 		s2=$$(sha256sum "$$f" | cut -d' ' -f1); \
