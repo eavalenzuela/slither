@@ -71,7 +71,16 @@ NoNewPrivileges=no
 # at the cost of losing /tmp + /opt quarantine coverage.
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/lib/slither /var/log/slither
+# /tmp + /opt + /var/spool need write access for the Phase 4 #79
+# quarantine_file response action — these are the realistic
+# malware-drop locations a quarantine has to reach. Phase 5 #100
+# initially dropped PrivateTmp=yes thinking that was sufficient, but
+# Phase 5 #103 cloud validation exposed that ProtectSystem=strict
+# also blocks writes (file delete returns EROFS even when the agent
+# can read the path). Operator-controlled additions to this list are
+# the right knob — quarantining /home/<user>/Downloads/ would need
+# /home explicitly here, since ProtectHome=read-only otherwise blocks.
+ReadWritePaths=/var/lib/slither /var/log/slither /tmp /opt /var/spool
 RuntimeDirectory=slither
 StateDirectory=slither
 LogsDirectory=slither

@@ -172,24 +172,36 @@ func Enroll(ctx context.Context, opts Options) (*Result, error) {
 		HostIDPath: filepath.Join(opts.StateDir, "host_id"),
 	}
 
-	// Phase 5 #98 — persist via keystore.AutoSelect. The Linux
-	// happy path lands the three PEM blobs in the kernel session
-	// keyring; container shapes without a usable keyring fall back
-	// to the file shape Phase 2 #36 shipped. Result paths above are
-	// returned for backwards compat (tests + tooling that grep them
-	// out of stderr); when the keyring path is taken, the files
-	// don't exist on disk and Result.{Key,Cert,CA}Path point at
-	// not-found locations — operators read keystore.Load output, not
-	// these files.
+	// Phase 5 #98 — persist cert material. Phase 5 #103 cloud
+	// validation surfaced that the keyring-only path doesn't survive
+	// across process boundaries on systemd-managed Linux (session
+	// keyring scope ≠ agent unit scope; user keyring may be empty
+	// under PAM's pam_keyinit + KeyringMode=private). Files are the
+	// durable, cross-process truth; the keyring write is additive
+	// (best-effort hot-cache for runtime confidentiality, but never
+	// the source of truth). This is more conservative than the
+	// original ADR-0035 sketch and remains correct on container
+	// shapes without a usable keyring.
+	//
+	// Always write files first.
+	if err := writeFileAtomic(res.KeyPath, keyPEM, 0o600); err != nil {
+		return nil, err
+	}
+	if err := writeFileAtomic(res.CertPath, resp.GetClientCertPem(), 0o644); err != nil {
+		return nil, err
+	}
+	if err := writeFileAtomic(res.CAPath, resp.GetCaCertPem(), 0o644); err != nil {
+		return nil, err
+	}
+	// Best-effort additive keyring write. Failure here is non-fatal
+	// because the file path above is the operational fallback.
 	store := keystore.AutoSelect(opts.StateDir)
 	res.StoreName = store.Name()
-	if err := store.Save(keystore.Material{
+	_ = store.Save(keystore.Material{
 		ClientKey:  keyPEM,
 		ClientCert: resp.GetClientCertPem(),
 		CACert:     resp.GetCaCertPem(),
-	}); err != nil {
-		return nil, fmt.Errorf("enroll: persist material: %w", err)
-	}
+	})
 
 	// host_id stays as a file under both store flavours — it's a
 	// stable identifier, not a secret. Tools that read $StateDir/host_id
