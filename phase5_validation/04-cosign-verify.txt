@@ -1,0 +1,70 @@
+=== Phase 5 #103 V2: cosign signature verification ===
+timestamp: 2026-05-02T01:48:51Z
+
+Phase 5 #91 wires cosign keyless via GitHub OIDC into the release
+pipeline. Live signature verification requires a refs/tags/v*
+push that exercises .github/workflows/release.yml end-to-end —
+no such tag exists at this validation point. We document the
+static evidence here and exit-criterion verify the contract on
+the first tagged release.
+
+--- release.yml cosign step (Phase 5 #91, modified by #92 + #93) ---
+17:  id-token: write          # cosign keyless via OIDC
+53:      - name: Install cosign
+54:        uses: sigstore/cosign-installer@v3
+155:              # Capture the resulting digest so cosign can sign by
+174:          # Surface the version tag for downstream cosign + SBOM steps.
+180:      - name: Sign OCI images (cosign keyless)
+184:        # cosign sign attaches a signature to the manifest digest in
+186:        # `cosign verify --certificate-identity-regexp ...` against
+189:          cosign sign --yes "${{ steps.oci.outputs.agent_tag }}"
+190:          cosign sign --yes "${{ steps.oci.outputs.server_tag }}"
+216:        # Phase 5 #91 — cosign keyless via GitHub OIDC over every
+220:        # `cosign verify-blob --certificate-identity-regexp`.
+229:            cosign sign-blob --yes "$f" --output-signature "$f.sig" --output-certificate "$f.pem"
+
+--- install.md verification recipe (operator-facing) ---
+that signs the tarballs. The `cosign verify-blob` recipe in §1.2
+applies unchanged; just substitute the package filename for the
+tarball filename.
+
+After installation, skip to §2 (Enrol). The unit is already installed
+and enabled by the postinst; once enrollment + config are in place,
+start it with `sudo systemctl start slither-agent`.
+
+### 1.1 Build from source
+
+From a dev host:
+
+```bash
+make build-agent          # produces bin/slither-agent
+```
+cosign verify-blob \
+    --certificate-identity-regexp "^https://github.com/t3rmit3/slither/.github/workflows/release.yml@refs/tags/v" \
+    --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+    --signature slither-agent-linux-amd64.tar.gz.sig \
+    --certificate slither-agent-linux-amd64.tar.gz.pem \
+    slither-agent-linux-amd64.tar.gz
+```
+exact tag — both are visible in the certificate via `cosign verify-blob`
+with `--output json`.
+
+
+--- recipe contract checks ---
+(a) certificate-identity-regexp anchors to this repo's release.yml at refs/tags/v*: PRESENT
+2
+(b) certificate-oidc-issuer matches Sigstore Fulcio OIDC: PRESENT
+2
+(c) recipe covers tarball + SBOM + deb/rpm + OCI: see install.md §1.0 (deb/rpm), §1.2 (tarball), deploy/k8s/README.md (OCI)
+
+--- live verification deferred contract ---
+Tagged release v* will exercise:
+  cosign sign-blob --yes <artefact>     (blobs: tarball, deb, rpm, SBOMs)
+  cosign sign --yes <ghcr-image-ref>    (OCI manifests)
+Verifiers:
+  cosign verify-blob --certificate-identity-regexp ... <artefact>
+  cosign verify --certificate-identity-regexp ... <ghcr-image>
+Identity anchor: ^https://github.com/t3rmit3/slither/.github/workflows/release.yml@refs/tags/v
+OIDC issuer:     https://token.actions.githubusercontent.com
+
+=== V2 — static evidence captured; live verify on first v-tag release ===

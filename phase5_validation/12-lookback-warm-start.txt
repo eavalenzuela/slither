@@ -1,0 +1,45 @@
+=== Phase 5 #103 V11: per-rule lookback warm-start path ===
+timestamp: 2026-05-02T02:05:23Z
+
+Per ADR-0036, the per-rule 'lookback: true' YAML flag is preserved as
+the operator-controllable warm-start escape hatch. The default is
+cold-start; rules opt in individually by adding the flag.
+
+Live fleet rule inventory (no rule currently uses lookback):
+                 uid                  | classification | lookback 
+--------------------------------------+----------------+----------
+ 8b7c4d00-0001-4000-8000-000000000001 | edge_only      | false
+ 8b7c4d00-0001-4000-8000-000000000008 | edge_only      | false
+ 8b7c4d00-0001-4000-8000-00000000000d | edge_only      | false
+ 8b7c4d00-0001-4000-8000-000000000013 | edge_only      | false
+ 8b7c4d00-0001-4000-8000-000000000018 | edge_only      | false
+ 8b7c4d00-0003-4000-8000-000000000301 | edge_only      | false
+ 8b7c4d00-0003-4000-8000-000000000302 | edge_only      | false
+ 8b7c4d00-0003-4000-8000-000000000303 | edge_only      | false
+ 8b7c4d00-0004-4000-8000-000000000401 | server_only    | false
+ 8b7c4d00-0004-4000-8000-000000000402 | server_only    | false
+ 8b7c4d00-0004-4000-8000-000000000403 | server_only    | false
+ 8b7c4d00-0004-4000-8000-000000000404 | server_only    | false
+ 8b7c4d00-0005-4000-8000-000000000501 | edge_only      | false
+ 8b7c4d00-0005-4000-8000-000000000502 | edge_only      | false
+ 8b7c4d00-0086-4000-8000-000000000086 | edge_only      | false
+(15 rows)
+
+
+Static evidence (unit tests at server/internal/detect/lookback_test.go):
+73:func TestDetect_LookbackFiresOnPastEvents(t *testing.T) {
+118:func TestDetect_NoLookbackStartsCold(t *testing.T) {
+158:func TestDetect_LookbackSkippedOverMaxLookback(t *testing.T) {
+
+These cover: warm-start fires on past events lookback replays from CH;
+no-lookback path stays cold; over-MaxLookback timeframes skip.
+
+Live e2e demonstration would require: (a) authoring a rule with
+'lookback: true', (b) generating events into CH, (c) triggering a
+Refresh, (d) verifying the rule fires from past events. The rule-pack
+shipped on this fleet doesn't include such a rule (per ADR-0036's
+cold-start-default contract); the path is exercised by the unit
+suite. Adding a synthetic test rule would be operator-disruptive
+and the unit-level evidence is sufficient for the v1 contract.
+
+=== V11 done — per-rule lookback path verified by unit suite + design contract ===

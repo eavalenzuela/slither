@@ -1,0 +1,54 @@
+=== Phase 5 #103 V4: OCI image smoke ===
+timestamp: 2026-05-02T01:50:46Z
+
+Local docker doesn't have buildx (29.1.3 server, no buildx CLI plugin)
+so multi-arch was substituted with single-arch amd64 build via the
+legacy docker build path (FROM --platform=$BUILDPLATFORM stripped
+for the smoke test). Multi-arch buildx is exercised by release.yml
+on every tag push.
+
+--- single-arch amd64 build (smoke) ---
+sha256:67ffd497928479c1d24643e6760e50e2d1429bbc6590d3d508cfe2ca05723f7e  size=16573075  arch=amd64/linux
+
+--- container --version smoke (proves entrypoint works) ---
+slither-agent v0.0.0-pkg103 (17fd679e0490+dirty)
+
+--- daemonset shape (capabilities-only, no privileged: true) ---
+3:# Capability-only privilege grant — NEVER `securityContext.privileged: true`.
+50:      # hostPID is required so /proc enrichment can resolve PIDs
+51:      # outside the container's pid namespace. hostNetwork is NOT
+54:      hostPID: true
+71:            # No privileged: true. Capabilities are the contract.
+72:            privileged: false
+75:            capabilities:
+
+--- agent capabilities the daemonset grants ---
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - BPF                 # load + attach eBPF programs (>=5.8)
+                - PERFMON             # tracepoint perf_event_open
+                - SYS_PTRACE          # /proc/<pid>/exe + cmdline cross-ns
+                - DAC_READ_SEARCH     # hash arbitrary executables
+                - DAC_OVERRIDE        # quarantine_file (Phase 4 #79)
+                - KILL                # kill_process / kill_tree (Phase 4 #78)
+                - NET_ADMIN           # isolate_host iptables (Phase 4 #80)
+            # Match the systemd unit's NoNewPrivileges=no posture —
+            # some kernels refuse BPF_PROG_LOAD with no_new_privs set.
+            allowPrivilegeEscalation: true
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              # Matches the systemd unit's TasksMax/LimitNOFILE rough
+
+--- live cluster validation deferred to first tagged release ---
+release.yml (Phase 5 #93) builds + pushes ghcr.io/t3rmit3/slither/{agent,server}
+as multi-arch manifest lists on every refs/tags/v* push. Today's local
+build proves the Dockerfile + entrypoint are sound; daemonset shape is
+well-formed YAML. Full daemonset validation against a real cluster
+(kind, k3s, or production) will be exercised on the first v-tag release.
+=== V4 done ===

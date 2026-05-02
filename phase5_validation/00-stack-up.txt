@@ -1,0 +1,58 @@
+=== Phase 5 #103 stack-up capture ===
+timestamp: 2026-05-02T01:46:19Z
+
+--- AWS fleet (us-west-2) ---
+------------------------------------------------------------------------------------------------
+|                                       DescribeInstances                                      |
++---------------------+-----------------+---------------------------+----------+---------------+
+|         ID          |       IP        |           Name            |  State   |     Type      |
++---------------------+-----------------+---------------------------+----------+---------------+
+|  i-03b468e20e802f163|  16.147.39.142  |  slither-p3-agent-debian  |  running |  c7i.xlarge   |
+|  i-0338aaeebcbd42433|  54.188.54.220  |  slither-p3-agent-ubuntu  |  running |  c7i.xlarge   |
+|  i-0fddb743cda81e679|  44.251.154.238 |  slither-p3-agent-rhel    |  running |  c7i.xlarge   |
+|  i-04a784fe98ecdb974|  16.147.242.85  |  slither-p3-server        |  running |  c7i.2xlarge  |
++---------------------+-----------------+---------------------------+----------+---------------+
+
+--- per-host distro/kernel/agent_version ---
+--- server ---
+OS: "Debian GNU/Linux 13 (trixie)"
+Kernel: 6.12.74+deb13+1-cloud-amd64
+perf_event_paranoid: 3
+agent: n/a
+--- agent-debian ---
+OS: "Debian GNU/Linux 13 (trixie)"
+Kernel: 6.12.74+deb13+1-cloud-amd64
+perf_event_paranoid: 2
+agent: slither-agent 17fd679 (17fd679e0490+dirty)
+--- agent-ubuntu ---
+OS: "Ubuntu 24.04.4 LTS"
+Kernel: 6.17.0-1012-aws
+perf_event_paranoid: 2
+agent: slither-agent 17fd679 (17fd679e0490+dirty)
+--- agent-rhel ---
+OS: "Red Hat Enterprise Linux 10.0 (Coughlan)"
+Kernel: 6.12.0-55.66.1.el10_0.x86_64
+perf_event_paranoid: 2
+agent: slither-agent 17fd679 (17fd679e0490+dirty)
+
+--- compose stack on server ---
+NAME                 STATUS
+slither-clickhouse   Up 17 minutes (healthy)
+slither-postgres     Up 17 minutes (healthy)
+slither-server       Up 2 minutes (healthy)
+
+--- bootstrap ---
+▶ deploy/pki/ca.crt already exists — skipping. Pass --force to regenerate.
+[bootstrap] applying postgres migrations…
+2026/05/02 01:44:01 goose: no migrations to run. current version: 16
+[bootstrap] applying clickhouse migrations…
+2026/05/02 01:44:01 goose: no migrations to run. current version: 5
+[bootstrap] seeding admin user…
+slither-db: admin user already present, leaving as is
+[bootstrap] done
+
+--- server gRPC ports (rebound to 0.0.0.0 for VPC reach) ---
+LISTEN 0      4096         0.0.0.0:9444      0.0.0.0:*    users:(("docker-proxy",pid=18836,fd=8))  
+LISTEN 0      4096         0.0.0.0:9443      0.0.0.0:*    users:(("docker-proxy",pid=18823,fd=8))  
+LISTEN 0      4096       127.0.0.1:8080      0.0.0.0:*    users:(("docker-proxy",pid=18809,fd=8))  
+=== stack-up done ===

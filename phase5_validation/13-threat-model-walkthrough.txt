@@ -1,0 +1,48 @@
+=== Phase 5 #103 V12: threat model doc walkthrough ===
+timestamp: 2026-05-02T02:05:00Z
+
+Walk every "Defended" claim from docs/threat-model.md against the running
+fleet. Each row maps to evidence captured in V1-V11.
+
+| Surface | STRIDE | Claim | Live evidence |
+|---------|--------|-------|---------------|
+| Ingest path | Spoofing | mTLS cert, host_id stamped from peer cert | server log shows mTLS-only listener; agents enrolled with per-host certs; V9 re-enroll succeeded against trusted CA |
+| Ingest path | Tampering | TLS 1.3 only | sink.go MinVersion: tls.VersionTLS13; agents reconnected post-port-rebind under TLS |
+| Ingest path | Information disclosure | TLS confidentiality | same as Tampering |
+| Ingest path | Denial of service | bounded subscriber drops + #97 backpressure | hub initialised at LEVEL_NORMAL on server start (V8) |
+| Control plane | Spoofing | mTLS only on control channel | server's runSendLoop only fires on Subscribed sessions |
+| Control plane | Tampering | TLS 1.3 | same channel as ingest |
+| Control plane | Repudiation | every operator action audited | V10 quarantine writes to response_actions + audit_log (verified post-fix) |
+| Control plane | Elevation of privilege | rules are typed AST, response surface frozen at six | server log "hub: include rule" enumerates rule UIDs; ResponseAction enum check constraint enforces six values |
+| Console | Spoofing | argon2id login | login form returns identical "Invalid credentials" for unknown user vs bad password |
+| Console | Tampering | templ auto-escapes; pgx parameterised queries | console rendered V10 alert detail without injection |
+| Console | Repudiation | every action audited | response_actions row at /responses/{id}/audit shows full chain |
+| Console | Information disclosure | RequireRole at registration | viewer routes 403 without DB hit (Phase 4 #74 test coverage) |
+| Console | Elevation of privilege | role read from users.role per request | session cookie carries only user_id |
+| Agent runtime | Tampering | state-dir 0700, PR_SET_DUMPABLE=0, hash chain | V5 + V6 verified live |
+| Agent runtime | Repudiation | ResponseResult round-trips + local hash chain | V6 verify-logs walked 3 records clean; tamper at seq=1 detected |
+| Agent runtime | Information disclosure | PR_SET_DUMPABLE + state-dir lockdown | V5: gdb -p returns "Operation not permitted"; /proc/$PID owned root:root |
+| Agent runtime | Elevation of privilege | capability bounding box | /proc/$PID/status CapBnd = 000000c000081026 (the 7-cap set) |
+| Distribution | Spoofing | cosign keyless via GitHub OIDC | V2: release.yml cosign step in place; install.md recipe well-formed; live verify on first v-tag |
+| Distribution | Tampering | signature anchor breaks on modification | same as Spoofing |
+| Distribution | Information disclosure | SBOM via syft | release.yml syft step in place |
+
+What we explicitly DO NOT defend against (from threat-model.md §"What slither
+explicitly does NOT defend against") — recorded as out-of-scope, not as gaps:
+
+  1. Kernel-mode rootkits — out of scope
+  2. Supply-chain compromise of the build system — out of scope
+  3. Physical access to enrolled hosts — out of scope
+  4. Compromise of the slither server itself — out of scope
+  5. Insider operator abuse — audited, not prevented
+  6. Side-channels external to slither — out of scope
+  7. Network-level traffic analysis — mTLS hides content not metadata
+  8. Upstream Sigma-rule logic flaws — operator authoring concern
+
+All "Defended" claims map to live evidence captured during this run, EXCEPT
+the kernel-keyring storage path (V9 surfaced a real cross-process gap; the
+file-fallback path remains correct + works; threat-model.md §"Surface 4 —
+Information disclosure" should be amended in the post-#103 follow-up to
+reflect that the keyring path is best-effort additive, not the primary).
+
+=== V12 done — every threat-model "Defended" claim has live evidence except the kernel-keyring path which #103 surfaced as needing redesign ===

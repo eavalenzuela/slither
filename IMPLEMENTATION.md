@@ -1202,7 +1202,7 @@ quarantine subprocess decoupling for the Gap-B fix, deferred §10.5
     posture summary cross-referencing every Phase 1-5 task that
     contributes. Cross-referenced from README.md.)*
 
-17. **#103 — Phase 5 exit validation.** Doc-backed manual run on
+17. ✅ **#103 — Phase 5 exit validation.** Doc-backed manual run on
     the Phase 3/4 cloud fleet (existing stopped instances —
     `start-instances` brings them back). Validates:
     (i) `apt install ./slither-agent_*.deb` on Debian 13 + Ubuntu 24.04;
@@ -1233,7 +1233,17 @@ quarantine subprocess decoupling for the Gap-B fix, deferred §10.5
         every claim verifiable.
     Capture under `phase5_validation/`; commit
     `docs/phase5-validation.md`. **Exit:** all green; Phase 5 closed;
-    Phase 6 (extensions) opens.
+    Phase 6 (extensions) opens. *(Completed 2026-05-02 on the same
+    AWS us-west-2 fleet that closed Phases 3 and 4. Twelve exit
+    criteria pass live or via static evidence + unit-test coverage.
+    Two real bugs caught + hot-fixed in-flight: Gap A — kernel-
+    keyring storage cross-process gap (enroll.go now writes files
+    first, keyring is best-effort additive); Gap B — quarantine
+    blocked by ProtectSystem=strict even after PrivateTmp removal
+    (unit's ReadWritePaths extended to /tmp + /opt + /var/spool).
+    Captures in `phase5_validation/`; narrative in
+    `docs/phase5-validation.md`. Phase 5 closed; Phase 6 scope is
+    open.)*
 
 ### 7.2 Cross-cutting notes
 

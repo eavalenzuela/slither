@@ -1,0 +1,49 @@
+=== Phase 5 #103 V5: agent self-protection ===
+timestamp: 2026-05-02T01:51:15Z
+
+Target: agent-debian (Debian 13, kernel 6.12.74)
+
+agent PID: 1499
+
+--- gdb installed? ---
+(installing gdb temporarily)
+Setting up gdb (16.3-1) ...
+Processing triggers for man-db (2.13.1-1) ...
+Processing triggers for libc-bin (2.41-12+deb13u2) ...
+
+--- ptrace attach attempt (expect: Operation not permitted) ---
+command: gdb -p 1499 -batch -ex quit
+exit-code captured above
+
+--- /proc/1499/status: TracerPid + Dumpable signal ---
+Name:	slither-agent
+Pid:	1499
+TracerPid:	0
+Uid:	0	0	0	0
+CapEff:	000000c000081026
+CapBnd:	000000c000081026
+CapAmb:	000000c000081026
+
+--- /proc/1499 dumpable check via dir ownership ---
+(when PR_SET_DUMPABLE=0, /proc/<pid> dir is owned by root:root)
+/proc/1499: owner=root:root
+
+--- state dirs ---
+/var/lib/slither: mode=700 owner=root:root
+/etc/slither: mode=755 owner=root:root
+
+=== V5 done ===
+--- ptrace attach as unprivileged user (expect: Operation not permitted) ---
+agent PID: 1499, current user: admin
+
+--- gdb -p 1499 (no sudo) ---
+ptrace: Operation not permitted.
+
+--- direct ptrace via /proc/.../mem read attempt ---
+cat: /proc/1499/mem: Permission denied
+
+--- /proc/<pid> dir ownership (PR_SET_DUMPABLE=0 → root:root, otherwise run-user:run-group) ---
+dr-xr-xr-x 9 root root 0 May  2 01:47 /proc/1499
+
+--- /proc/<pid>/maps readable from same user? ---
+head: cannot open '/proc/1499/maps' for reading: Permission denied

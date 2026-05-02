@@ -1,0 +1,91 @@
+=== Phase 5 #103 V1: deb/rpm install via packaged path ===
+timestamp: 2026-05-02T01:47:47Z
+
+package digests (built locally from main@17fd679):
+e1c88be36c73be25773d07b07075038c355e77659b2558b2864f2a95f1152f46  dist/slither-agent_0.0.0~pkg103_amd64.deb
+fc724c17853df806cce80e03fe2c5250b700575ee74f6baac91d02ad3f286ce7  dist/slither-agent_0.0.0~pkg103_arm64.deb
+5e0bf3e06665a7427512536f511eb1d8a0c3a7d18ef8481695561912f4b55fda  dist/slither-agent-0.0.0~pkg103-1.aarch64.rpm
+3c267616579a05582c1ff1cde516d51fdbf353cc02fb9f33815f516d206917eb  dist/slither-agent-0.0.0~pkg103-1.x86_64.rpm
+
+############################################
+## agent-debian (Debian 13) — apt install ##
+############################################
+--- pre-install: existing binary + service ---
+slither-agent 17fd679 (17fd679e0490+dirty)
+active
+
+--- apt install ---
+  1. Mint an enrolment token on the server:
+       slither-server enroll mint --ttl=1h
+
+  2. Run enrolment on this host (provisions client cert + writes config):
+       sudo slither-agent enroll \
+           --server-addr=YOUR-SERVER:9444 \
+           --token=THE-TOKEN \
+           --ca-cert=/path/to/ca.crt
+
+  3. Start the service:
+       sudo systemctl start slither-agent
+
+The unit is already enabled — it will auto-start on next boot once
+configured.
+
+
+--- post-install: binary version ---
+slither-agent v0.0.0-pkg103 (17fd679e0490+dirty)
+
+--- postinst dropped sysctl drop-in? ---
+-rw-r--r-- 1 root root 703 Apr 23 00:04 /etc/sysctl.d/99-slither.conf
+current perf_event_paranoid: 2
+
+--- postinst installed unit + enabled? ---
+enabled
+active
+
+--- agent.yaml.sample landed (config|noreplace; existing /etc/slither/agent.yaml untouched)? ---
+-rw-r--r-- 1 root root 734 Apr 29 21:26 /etc/slither/agent.yaml
+-rw-r--r-- 1 root root 814 Apr 22 16:23 /etc/slither/agent.yaml.sample
+
+--- state dirs at 0700 ---
+/var/lib/slither: mode=700 owner=root:root
+/var/log/slither: mode=755 owner=root:root
+
+############################################
+## agent-ubuntu (Ubuntu 24.04) — apt install ##
+############################################
+slither-agent 17fd679 (17fd679e0490+dirty)
+
+No services need to be restarted.
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+slither-agent v0.0.0-pkg103 (17fd679e0490+dirty)
+-rw-r--r-- 1 root root 703 Apr 23 00:04 /etc/sysctl.d/99-slither.conf
+perf_event_paranoid: 2
+enabled
+active
+
+############################################
+## agent-rhel (RHEL 10) — dnf install ##
+############################################
+slither-agent 17fd679 (17fd679e0490+dirty)
+The unit is already enabled — it will auto-start on next boot once
+configured.
+
+
+Installed products updated.
+
+Installed:
+  slither-agent-0.0.0~pkg103-1.x86_64                                           
+
+Complete!
+slither-agent v0.0.0-pkg103 (17fd679e0490+dirty)
+-rw-r--r--. 1 root root 703 Apr 23 00:04 /etc/sysctl.d/99-slither.conf
+perf_event_paranoid: 2
+enabled
+active
+
+=== V1 done ===

@@ -1,0 +1,20 @@
+=== Phase 5 #103 V3: reproducible builds ===
+timestamp: 2026-05-02T01:46:43Z
+commit: 17fd679e04900f6e7026560170588dc0557760a3 (17fd679)
+
+--- make verify-reproducible ---
+▶ first build
+▶ second build
+  ✓ slither-agent 67065689ab0303992eb5af939230079bd0ba48aa74302d5440ffb35b25bc12ff
+  ✓ slither-server 22bafba3274a35c1216a2c14c7f3884e25edf3e946d92771775467a410f51557
+  ✓ slither-db 5e6ff1c01b42956e428ced026be559e3e6b19092a1537c6cefb50dfc14fea618
+  ✓ slither-ch 7238e052b7587c692dc1dfaa1c05978cbb0597eca3f0059b2a7376b9b07d03db
+✓ all binaries reproducible
+
+--- final binary digests ---
+67065689ab0303992eb5af939230079bd0ba48aa74302d5440ffb35b25bc12ff  bin/slither-agent
+22bafba3274a35c1216a2c14c7f3884e25edf3e946d92771775467a410f51557  bin/slither-server
+5e6ff1c01b42956e428ced026be559e3e6b19092a1537c6cefb50dfc14fea618  bin/slither-db
+7238e052b7587c692dc1dfaa1c05978cbb0597eca3f0059b2a7376b9b07d03db  bin/slither-ch
+
+=== V3 done ===

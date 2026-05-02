@@ -1,0 +1,24 @@
+=== Phase 5 #103 fleet state — V1 prelude (all 3 connected, agent_version writeback live) ===
+timestamp: 2026-05-02T01:47:17Z
+
+--- hosts heartbeating ---
+                  hostname                   | agent_version |           last_seen           |    staleness    
+---------------------------------------------+---------------+-------------------------------+-----------------
+ ip-172-31-19-7                              | 17fd679       | 2026-05-02 01:47:03.808364+00 | 00:00:14.123664
+ ip-172-31-26-27                             | 17fd679       | 2026-05-02 01:47:12.216532+00 | 00:00:05.715496
+ ip-172-31-31-200.us-west-2.compute.internal | 17fd679       | 2026-05-02 01:47:02.786372+00 | 00:00:15.145656
+(3 rows)
+
+
+--- server log: subscribers + hub state ---
+time=2026-05-02T01:45:02.047Z level=INFO msg="policy hub: refreshed" host_count=3 subscribers=2 version=3
+time=2026-05-02T01:45:02.079Z level=INFO msg="hub: refreshed" rule_count=11 skipped=4 version=3 subscribers=2
+time=2026-05-02T01:45:32.047Z level=INFO msg="policy hub: refreshed" host_count=3 subscribers=3 version=4
+time=2026-05-02T01:45:32.079Z level=INFO msg="hub: refreshed" rule_count=11 skipped=4 version=4 subscribers=3
+time=2026-05-02T01:46:02.047Z level=INFO msg="policy hub: refreshed" host_count=3 subscribers=3 version=5
+time=2026-05-02T01:46:02.080Z level=INFO msg="hub: refreshed" rule_count=11 skipped=4 version=5 subscribers=3
+time=2026-05-02T01:46:32.048Z level=INFO msg="policy hub: refreshed" host_count=3 subscribers=3 version=6
+time=2026-05-02T01:46:32.081Z level=INFO msg="hub: refreshed" rule_count=11 skipped=4 version=6 subscribers=3
+time=2026-05-02T01:47:02.047Z level=INFO msg="policy hub: refreshed" host_count=3 subscribers=3 version=7
+time=2026-05-02T01:47:02.079Z level=INFO msg="hub: refreshed" rule_count=11 skipped=4 version=7 subscribers=3
+=== fleet-state done ===

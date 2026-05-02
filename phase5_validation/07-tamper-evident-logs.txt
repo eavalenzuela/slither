@@ -1,0 +1,28 @@
+=== Phase 5 #103 V6: tamper-evident log chain ===
+timestamp: 2026-05-02T01:52:14Z
+
+Target: agent-debian
+
+--- chain file size + record count ---
+   3 1143 /var/lib/slither/log.chain
+
+--- first + last 2 records ---
+{"seq":0,"ts":"2026-05-02T01:39:03.574008114Z","kind":"chain.init","summary":{"agent_pid":"986","chain_start":"2026-05-02T01:39:03.573990768Z"},"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","record_hash":"d466bcd940fb0aba5c4e0a79b38dcb94d56beb38ed306b6d188dcb7f386a2029"}
+{"seq":1,"ts":"2026-05-02T01:45:44.323196249Z","kind":"detection_finding","summary":{"auto_response":"","executed":false,"finding_uid":"7c54c8b828a7ee1206085fac2d4aba60","rule_uid":"8b7c4d00-0001-4000-8000-000000000001","severity":4,"would_have_exec":false},"prev_hash":"d466bcd940fb0aba5c4e0a79b38dcb94d56beb38ed306b6d188dcb7f386a2029","record_hash":"25f1064cd2de33be96bcf31d0f11750853e1f11abcd4ca0c4564b306d04b0b7a"}
+{"seq":1,"ts":"2026-05-02T01:45:44.323196249Z","kind":"detection_finding","summary":{"auto_response":"","executed":false,"finding_uid":"7c54c8b828a7ee1206085fac2d4aba60","rule_uid":"8b7c4d00-0001-4000-8000-000000000001","severity":4,"would_have_exec":false},"prev_hash":"d466bcd940fb0aba5c4e0a79b38dcb94d56beb38ed306b6d188dcb7f386a2029","record_hash":"25f1064cd2de33be96bcf31d0f11750853e1f11abcd4ca0c4564b306d04b0b7a"}
+{"seq":2,"ts":"2026-05-02T01:45:44.326154955Z","kind":"detection_finding","summary":{"auto_response":"","executed":false,"finding_uid":"b6b28feef9a75492143c8d96a353d6d2","rule_uid":"8b7c4d00-0001-4000-8000-000000000001","severity":4,"would_have_exec":false},"prev_hash":"25f1064cd2de33be96bcf31d0f11750853e1f11abcd4ca0c4564b306d04b0b7a","record_hash":"8c32f8ac9f0e31f89cf8f29b47553d273fbcde7d4f9445e0744858f5f7729683"}
+
+--- verify-logs (clean chain) ---
+ok: walked 3 records
+exit-code: 0
+
+--- verify-logs --since 1h (only count recent records) ---
+ok: walked 3 records
+
+--- tamper test: copy chain + flip one byte in a non-init record ---
+tampered record 1
+
+--- verify-logs against tampered file (expect: exit 1, chain break at seq=1) ---
+chain break at seq=1: record_hash mismatch: expected 9c208aa2a57129e11342e754f47c4d319b6cf1e781378b24fdfa4a9b016a7900, got 25f1064cd2de33be96bcf31d0f11750853e1f11abcd4ca0c4564b306d04b0b7a
+
+=== V6 done ===

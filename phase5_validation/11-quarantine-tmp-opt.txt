@@ -1,0 +1,62 @@
+=== Phase 5 #103 V10: /tmp + /opt quarantine works (Gap B fix from #100) ===
+timestamp: 2026-05-02T02:03:14Z
+
+carrier alert (ubuntu): ae575f2a-4dc7-478b-ac60-6117f6a53a1e
+
+############################################
+## quarantine /tmp/phase5-quarantine-test.txt ##
+############################################
+pre-quarantine:
+-rw-r--r-- 1 root root 70 May  2 02:03 /tmp/phase5-quarantine-test.txt
+12876e32da6077bc1c7a1e69b71c7d0818237dea2b652038ffb424c25c0afe87  /tmp/phase5-quarantine-test.txt
+pre_sha=12876e32da6077bc1c7a1e69b71c7d0818237dea2b652038ffb424c25c0afe87
+
+POST quarantine:
+http=303
+
+flash:
+Dispatched quarantine_file (action f21f23ec); see history for status.
+
+polling for terminal status...
+[t+1] f21f23ec-853c-462f-9994-8420722fa544|failed|remove target after copy: remove /tmp/phase5-quarantine-test.txt: read-only file system
+
+post-quarantine state on ubuntu:
+-rw-r--r-- 1 root root 70 May  2 02:03 /tmp/phase5-quarantine-test.txt
+
+############################################
+## quarantine /opt/phase5-quarantine-test.txt ##
+############################################
+pre-quarantine:
+-rw-r--r-- 1 root root 70 May  2 02:03 /opt/phase5-quarantine-test.txt
+157bee629346c5b21f282af1c1b228cb8c6595c6190661ea473d0e4d7b6ea985  /opt/phase5-quarantine-test.txt
+pre_sha=157bee629346c5b21f282af1c1b228cb8c6595c6190661ea473d0e4d7b6ea985
+
+POST quarantine:
+http=303
+
+flash:
+Dispatched quarantine_file (action 99fd8666); see history for status.
+
+polling for terminal status...
+[t+1] 99fd8666-d8b0-4233-a11e-07e4efef5341|failed|remove target after copy: remove /opt/phase5-quarantine-test.txt: read-only file system
+
+post-quarantine state on ubuntu:
+-rw-r--r-- 1 root root 70 May  2 02:03 /opt/phase5-quarantine-test.txt
+
+=== V10 done ===
+
+--- V10 retry post-unit-fix (ReadWritePaths += /tmp /opt /var/spool) ---
+
+## quarantine /tmp/phase5-quarantine-test-v2.txt ##
+-rw-r--r-- 1 root root 14 May  2 02:04 /tmp/phase5-quarantine-test-v2.txt
+POST http=303
+[t+1] 68e45e2d-2da4-4d52-848f-b81ada4347e2|done|quarantined /tmp/phase5-quarantine-test-v2.txt (14 bytes, sha256=5d71ca1246b652aa) to /var/lib/slither/quarantine/68e45e2d-2da4-4d52-848f-b81ada4347e2
+post-quarantine ls: cannot access '/tmp/phase5-quarantine-test-v2.txt': No such file or directory
+
+## quarantine /opt/phase5-quarantine-test-v2.txt ##
+-rw-r--r-- 1 root root 14 May  2 02:04 /opt/phase5-quarantine-test-v2.txt
+POST http=303
+[t+1] f7f3355f-78e8-4356-8979-090287a897c5|done|quarantined /opt/phase5-quarantine-test-v2.txt (14 bytes, sha256=5d71ca1246b652aa) to /var/lib/slither/quarantine/f7f3355f-78e8-4356-8979-090287a897c5
+post-quarantine ls: cannot access '/opt/phase5-quarantine-test-v2.txt': No such file or directory
+
+=== V10 retry done ===

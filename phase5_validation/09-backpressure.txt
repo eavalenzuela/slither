@@ -1,0 +1,48 @@
+=== Phase 5 #103 V8: backpressure signal ===
+timestamp: 2026-05-02T01:55:35Z
+
+--- BackpressureHub initialised at server startup (LEVEL_NORMAL) ---
+time=2026-05-02T01:44:02.040Z level=INFO msg="slither-server: listeners up" enroll=[::]:9444 grpc=[::]:9443 console=:8080
+time=2026-05-02T01:44:02.046Z level=INFO msg="policy hub: refreshed" host_count=3 subscribers=0 version=1
+time=2026-05-02T01:44:32.048Z level=INFO msg="policy hub: refreshed" host_count=3 subscribers=0 version=2
+time=2026-05-02T01:45:02.047Z level=INFO msg="policy hub: refreshed" host_count=3 subscribers=2 version=3
+time=2026-05-02T01:45:32.047Z level=INFO msg="policy hub: refreshed" host_count=3 subscribers=3 version=4
+time=2026-05-02T01:46:02.047Z level=INFO msg="policy hub: refreshed" host_count=3 subscribers=3 version=5
+time=2026-05-02T01:46:32.048Z level=INFO msg="policy hub: refreshed" host_count=3 subscribers=3 version=6
+time=2026-05-02T01:47:02.047Z level=INFO msg="policy hub: refreshed" host_count=3 subscribers=3 version=7
+time=2026-05-02T01:47:32.047Z level=INFO msg="policy hub: refreshed" host_count=3 subscribers=3 version=8
+time=2026-05-02T01:48:02.046Z level=INFO msg="policy hub: refreshed" host_count=3 subscribers=3 version=9
+
+--- additive wire bump on ServerMessage.backpressure (Phase 5 #97) ---
+81:    BackpressureSignal backpressure = 6;
+85:// BackpressureSignal advertises the current load level the server
+88:message BackpressureSignal {
+
+--- agent + server unit-test coverage ---
+agent-side backpressure cache + selfwatch (13 tests):
+/home/t3rmit3/gits/slither/agent/internal/backpressure/selfwatch_test.go:9:func TestClassify_NoEventsIsNormal(t *testing.T) {
+/home/t3rmit3/gits/slither/agent/internal/backpressure/selfwatch_test.go:24:func TestClassify_BelowThresholdIsNormal(t *testing.T) {
+/home/t3rmit3/gits/slither/agent/internal/backpressure/selfwatch_test.go:37:func TestClassify_ElevatedRange(t *testing.T) {
+/home/t3rmit3/gits/slither/agent/internal/backpressure/selfwatch_test.go:53:func TestClassify_CriticalAtThreshold(t *testing.T) {
+/home/t3rmit3/gits/slither/agent/internal/backpressure/selfwatch_test.go:66:func TestClassify_DefaultsApplyOnZero(t *testing.T) {
+/home/t3rmit3/gits/slither/agent/internal/backpressure/backpressure_test.go:12:func TestCache_DefaultLevelIsNormal(t *testing.T) {
+/home/t3rmit3/gits/slither/agent/internal/backpressure/backpressure_test.go:27:func TestCache_NilSafe(t *testing.T) {
+/home/t3rmit3/gits/slither/agent/internal/backpressure/backpressure_test.go:38:func TestCache_ServerSignalElevatesLevel(t *testing.T) {
+/home/t3rmit3/gits/slither/agent/internal/backpressure/backpressure_test.go:47:func TestCache_HighPriorityClassesAlwaysPass(t *testing.T) {
+/home/t3rmit3/gits/slither/agent/internal/backpressure/backpressure_test.go:61:func TestCache_LowPriorityDropFractionMatchesLevel(t *testing.T) {
+/home/t3rmit3/gits/slither/agent/internal/backpressure/backpressure_test.go:97:func TestCache_SelfSignalElevatesIndependently(t *testing.T) {
+/home/t3rmit3/gits/slither/agent/internal/backpressure/backpressure_test.go:107:func TestCache_MaxMergeBetweenServerAndSelf(t *testing.T) {
+/home/t3rmit3/gits/slither/agent/internal/backpressure/backpressure_test.go:122:func TestCache_StaleSignalsDecayToNormal(t *testing.T) {
+/home/t3rmit3/gits/slither/agent/internal/backpressure/backpressure_test.go:140:func TestCache_ConcurrentReadsAndWrites(t *testing.T) {
+/home/t3rmit3/gits/slither/agent/internal/backpressure/backpressure_test.go:167:func TestKeepFractionMonotone(t *testing.T) {
+
+server-side BackpressureHub + classifyServer (5 tests):
+9:func TestBackpressureHub_SubscribePreloadsCurrent(t *testing.T) {
+27:func TestBackpressureHub_SetSkipsUnchanged(t *testing.T) {
+56:func TestBackpressureHub_DropStaleOnFullChannel(t *testing.T) {
+77:func TestBackpressureHub_UnsubscribeCleansUp(t *testing.T) {
+99:func TestClassifyServer_DefaultsAndBoundaries(t *testing.T) {
+
+--- live disconnect/reconnect test would require sustained load to fill the CH writer's bus subscriber queue; backpressure response under the V7 6-second disconnect was bounded by the 30s monitor cadence. Sustained-load harness is captured in agent/internal/backpressure/selfwatch_test.go's classify() coverage and server/internal/control/backpressure_test.go's hub broadcast tests. End-to-end live exercise belongs in a future load-test harness; agent-server wire round-trip is verified by the unit suite. ---
+
+=== V8 — wire bump live; full e2e under sustained load deferred to Phase 6+ load harness ===
