@@ -53,6 +53,15 @@ type PolicyHub interface {
 	Subscribe(hostID string) (<-chan *pb.HostPolicy, func())
 }
 
+// BackpressureHub is the global server-wide signal push (Phase 5 #97).
+// Subscribe is keyed by session name (not hostID — the signal is
+// fleet-global, but per-session bookkeeping keeps unsubscribe clean).
+// The hub delivers the current snapshot synchronously and broadcasts
+// every level transition.
+type BackpressureHub interface {
+	Subscribe(name string) (<-chan *pb.BackpressureSignal, func())
+}
+
 // SessionService implements AgentService.Session. It embeds
 // UnimplementedAgentServiceServer so it satisfies AgentServiceServer
 // with Enroll left unimplemented — the two halves of AgentService run
@@ -62,12 +71,13 @@ type PolicyHub interface {
 type SessionService struct {
 	pb.UnimplementedAgentServiceServer
 
-	Store       *pg.Store
-	Bus         *ingest.Bus
-	Telem       *telemetry.Counters
-	RuleHub     RuleHub     // optional; nil disables rule push
-	ResponseHub ResponseHub // optional; nil disables response dispatch
-	PolicyHub   PolicyHub   // optional; nil disables host-policy push
+	Store           *pg.Store
+	Bus             *ingest.Bus
+	Telem           *telemetry.Counters
+	RuleHub         RuleHub         // optional; nil disables rule push
+	ResponseHub     ResponseHub     // optional; nil disables response dispatch
+	PolicyHub       PolicyHub       // optional; nil disables host-policy push
+	BackpressureHub BackpressureHub // optional; nil disables backpressure push
 
 	// PeerHostIDExtractor is overridable for tests that route through
 	// bufconn without real client certs. Production leaves it nil and
@@ -123,7 +133,7 @@ func (s *SessionService) Session(stream pb.AgentService_SessionServer) error {
 	// by cancelling sendCtx on its own return.
 	sendCtx, cancelSend := context.WithCancel(ctx)
 	var sendWG sync.WaitGroup
-	if s.RuleHub != nil || s.ResponseHub != nil || s.PolicyHub != nil {
+	if s.RuleHub != nil || s.ResponseHub != nil || s.PolicyHub != nil || s.BackpressureHub != nil {
 		sendWG.Add(1)
 		go func() {
 			defer sendWG.Done()
@@ -175,6 +185,13 @@ func (s *SessionService) runSendLoop(sendCtx context.Context, hostID string, str
 	if s.PolicyHub != nil {
 		hpUpdates, hpUnsubscribe = s.PolicyHub.Subscribe(hostID)
 		defer hpUnsubscribe()
+	}
+
+	var bpUpdates <-chan *pb.BackpressureSignal
+	var bpUnsubscribe func()
+	if s.BackpressureHub != nil {
+		bpUpdates, bpUnsubscribe = s.BackpressureHub.Subscribe(subName)
+		defer bpUnsubscribe()
 	}
 
 	for {
@@ -232,6 +249,23 @@ func (s *SessionService) runSendLoop(sendCtx context.Context, hostID string, str
 			}
 			slog.Debug("policy: sent",
 				"host_id", hostID, "version", hp.GetVersion())
+		case sig, ok := <-bpUpdates:
+			if !ok {
+				bpUpdates = nil
+				continue
+			}
+			if sig == nil {
+				continue
+			}
+			if err := stream.Send(&pb.ServerMessage{
+				Kind: &pb.ServerMessage_Backpressure{Backpressure: sig},
+			}); err != nil {
+				return
+			}
+			slog.Debug("backpressure: sent",
+				"host_id", hostID,
+				"level", sig.GetLevel().String(),
+				"observed_drop_rate", sig.GetObservedDropRate())
 		}
 	}
 }

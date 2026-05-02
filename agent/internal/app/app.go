@@ -18,6 +18,7 @@ import (
 	"github.com/t3rmit3/slither/agent/internal/output"
 	"github.com/t3rmit3/slither/agent/internal/selfprotect"
 
+	"github.com/t3rmit3/slither/agent/internal/backpressure"
 	grpcsink "github.com/t3rmit3/slither/agent/internal/output/grpc"
 	grpcbuffer "github.com/t3rmit3/slither/agent/internal/output/grpc/buffer"
 	"github.com/t3rmit3/slither/agent/internal/respond"
@@ -95,6 +96,12 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 
 	iocStore := ioc.New()
 
+	// Phase 5 #97 — backpressure cache. Exposed to the sink (so
+	// server-pushed signals land here) and to the self-watch goroutine
+	// (so DropsOutput-derived self-pressure also lands here). The
+	// collector layer queries Cache.ShouldSample on the hot path.
+	bpCache := backpressure.New()
+
 	rules, err := loadRules(cfg, telem)
 	if err != nil {
 		return fmt.Errorf("app: %w", err)
@@ -116,7 +123,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	}
 	eng.SetAuditChain(chain)
 
-	sink, err := newSink(ctx, cfg, telem, eng, iocStore, chain)
+	sink, err := newSink(ctx, cfg, telem, eng, iocStore, chain, bpCache)
 	if err != nil {
 		return fmt.Errorf("app: output sink: %w", err)
 	}
@@ -125,6 +132,13 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	defer cancel()
 
 	go watchReload(ctx, configPath, enr, eng, telem)
+
+	// Phase 5 #97 — agent self-pressure watcher. Polls telem on a
+	// fixed cadence (10 s default), computes the running drop_rate,
+	// and updates bpCache's self channel. Server-pushed signals land
+	// in the same cache via the sink's OnBackpressure callback; the
+	// cache merges max(server, self).
+	go backpressure.RunSelfWatch(ctx, bpCache, telem, backpressure.SelfWatchOptions{})
 
 	errs := make(chan error, 4)
 	go func() { errs <- cg.Run(ctx) }()
@@ -213,7 +227,7 @@ func isCancelled(err error, ctx context.Context) bool {
 // flow in #36) — a missing or empty file is a startup error, not a
 // silent degradation. eng is wired in so the sink's ServerMessage
 // receiver can apply server-pushed RuleSets via Engine.ReplaceRules.
-func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engine, iocStore *ioc.Store, chain *selfprotect.ChainWriter) (output.Sink, error) {
+func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engine, iocStore *ioc.Store, chain *selfprotect.ChainWriter, bpCache *backpressure.Cache) (output.Sink, error) {
 	switch cfg.Output.Kind {
 	case "stdout", "":
 		return output.NewStdoutJSONL(os.Stdout), nil
@@ -280,6 +294,19 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 			OnHostPolicy: func(p *pb.HostPolicy) {
 				policyCache.Set(p)
 			},
+			// Phase 5 #97: server-pushed BackpressureSignal lands in
+			// the agent's backpressure cache. Collectors consult
+			// bpCache.ShouldSample on the hot path; the cache merges
+			// this signal with the self-watcher's drop_rate-derived
+			// self signal via max().
+			OnBackpressure: func(sig *pb.BackpressureSignal) {
+				if sig == nil {
+					return
+				}
+				since := sig.GetSince().AsTime()
+				bpCache.SetServer(sig.GetLevel(), sig.GetObservedDropRate(), since)
+			},
+			Backpressure: bpCache,
 		}, telem)
 		if err != nil {
 			return nil, err

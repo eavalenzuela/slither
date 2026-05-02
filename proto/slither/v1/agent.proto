@@ -5,6 +5,7 @@ package slither.v1;
 
 import "slither/v1/common.proto";
 import "slither/v1/control.proto";
+import "google/protobuf/timestamp.proto";
 
 // AgentService is the long-lived session between a single agent and the server.
 service AgentService {
@@ -73,7 +74,31 @@ message ServerMessage {
     // on Session open and on every policy edit — the agent caches
     // it for the auto-respond gate. v0 agents ignore.
     HostPolicy host_policy = 5;
+    // Phase 5 #97: end-to-end backpressure. Server broadcasts when
+    // its CH writer falls behind; agent caches the latest signal
+    // and consults it from the sampling decision in low-priority
+    // collectors. Additive — v0 agents ignore.
+    BackpressureSignal backpressure = 6;
   }
+}
+
+// BackpressureSignal advertises the current load level the server
+// is willing to absorb. Phase 5 #97. Agents respect the signal until
+// a follow-up signal arrives or 5 minutes elapse (whichever first).
+message BackpressureSignal {
+  enum Level {
+    LEVEL_UNSPECIFIED = 0;
+    LEVEL_NORMAL      = 1;  // back to baseline; agents stop sampling
+    LEVEL_ELEVATED    = 2;  // ~50% drop on low-priority classes
+    LEVEL_CRITICAL    = 3;  // ~90% drop on low-priority classes
+  }
+  Level level = 1;
+  // observed_drop_rate is the server's recent subscriber drop_rate_pct
+  // expressed as a fraction (0.0–1.0). Informational; the agent's
+  // sampling math reads `level` not this field.
+  float observed_drop_rate = 2;
+  // since is when the server transitioned into this level.
+  google.protobuf.Timestamp since = 3;
 }
 
 // DiagReport is a periodic or on-demand snapshot of agent internals.

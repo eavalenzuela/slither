@@ -116,12 +116,16 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	// --- Per-host response policy push (Phase 4 #84) ---
 	policyHub := control.NewPolicyHub(pgStore, telem)
 
+	// --- Fleet-global backpressure push (Phase 5 #97) ---
+	bpHub := control.NewBackpressureHub()
+
 	// --- gRPC services ---
 	enrollSvc := grpcserv.NewEnrollService(pgStore, ca, telem)
 	sessionSvc := grpcserv.NewSessionService(pgStore, bus, telem)
 	sessionSvc.RuleHub = hub
 	sessionSvc.ResponseHub = responseHub
 	sessionSvc.PolicyHub = policyHub
+	sessionSvc.BackpressureHub = bpHub
 
 	enrollSrv := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(mtls.ServerEnrollTLSConfig(serverCert))),
@@ -227,6 +231,15 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		if err := control.RunPolicyHub(ctx, policyHub, pgStore, control.RunnerOptions{}); err != nil {
 			errs <- fmt.Errorf("policy runner: %w", err)
 		}
+	}()
+
+	// Phase 5 #97: backpressure monitor. Watches the CH writer's
+	// subscriber drops and broadcasts BackpressureSignal level
+	// transitions through bpHub to every connected session.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		control.RunBackpressureMonitor(ctx, bpHub, telem, control.BackpressureMonitorOptions{})
 	}()
 
 	// Detection engine + finding logger (placeholder until #60's

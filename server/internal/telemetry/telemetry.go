@@ -174,6 +174,14 @@ func (c *Counters) IncResponseDropped() { c.responseDropped.Add(1) }
 // IncResponseDispatched signals stuck pending actions.
 func (c *Counters) IncResponseCompleted() { c.responseCompleted.Add(1) }
 
+// SnapshotForBackpressure returns the two counters the Phase 5 #97
+// backpressure monitor consults: ingest events received and CH-writer
+// subscriber drops. Cheaper than a full Snapshot when the monitor
+// runs on a 10s cadence + the rest of the counter table is irrelevant.
+func (c *Counters) SnapshotForBackpressure() (eventsReceived, dropsSubscriber uint64) {
+	return c.eventsReceived.Load(), c.dropsSubscriber.Load()
+}
+
 // Snapshot captures the current counter values.
 type Snapshot struct {
 	EventsReceived        uint64

@@ -66,12 +66,29 @@ type Options struct {
 	// Must be non-blocking.
 	OnHostPolicy func(*pb.HostPolicy)
 
+	// OnBackpressure, when non-nil, is called for every server-pushed
+	// BackpressureSignal (Phase 5 #97). Production wires this to the
+	// agent's backpressure.Cache. Must be non-blocking.
+	OnBackpressure func(*pb.BackpressureSignal)
+
+	// Backpressure, when non-nil, is consulted on every event in
+	// ingest() to decide whether to keep or sample-drop it. Phase
+	// 5 #97. Same Cache the OnBackpressure callback writes to (the
+	// app wires both ends to the same instance).
+	Backpressure SamplingDecider
+
 	// Buffer is the optional Phase 5 #96 offline disk buffer. When
 	// non-nil, push() spools to disk when the in-memory queue is full
 	// (replacing the drop-oldest behaviour) and runSession replays
 	// the spool ahead of fresh events on every reconnect. Nil keeps
 	// the legacy memory-only behaviour for tests + dev configs.
 	Buffer *buffer.Buffer
+}
+
+// SamplingDecider is the sink's view of backpressure.Cache. The
+// interface stays trivial so a stub can satisfy it in tests.
+type SamplingDecider interface {
+	ShouldSample(class ocsf.ClassID) bool
 }
 
 // Sink is the gRPC Session-stream output. Implements
@@ -191,6 +208,15 @@ func (s *Sink) ingest(ctx context.Context, in <-chan ocsf.Event) {
 		case ev, ok := <-in:
 			if !ok {
 				return
+			}
+			// Phase 5 #97 — consult the backpressure cache before
+			// encoding. Low-priority classes (NetworkActivity,
+			// FileSystemActivity) are sampled down at ELEVATED /
+			// CRITICAL pressure; everything else passes regardless.
+			// Drop counter bumps so the load test surfaces it.
+			if s.opts.Backpressure != nil && !s.opts.Backpressure.ShouldSample(ev.ClassID()) {
+				s.telem.IncDropOutput()
+				continue
 			}
 			env, err := s.encode(ev)
 			if err != nil {
@@ -390,6 +416,12 @@ func (s *Sink) handleServerMessage(msg *pb.ServerMessage) {
 	case *pb.ServerMessage_HostPolicy:
 		if s.opts.OnHostPolicy != nil && k.HostPolicy != nil {
 			s.opts.OnHostPolicy(k.HostPolicy)
+		}
+	case *pb.ServerMessage_Backpressure:
+		// Phase 5 #97 — server-pushed backpressure signal. Forward to
+		// the agent's cache; collectors consult it on the hot path.
+		if s.opts.OnBackpressure != nil && k.Backpressure != nil {
+			s.opts.OnBackpressure(k.Backpressure)
 		}
 	}
 }
