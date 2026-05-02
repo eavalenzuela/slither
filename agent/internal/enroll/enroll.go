@@ -3,8 +3,10 @@
 // Phase 2 §4.1 task #36: `slither-agent enroll --token X --server addr`
 // generates a P-256 keypair, builds a CSR with blank CN, calls the
 // server's AgentService.Enroll RPC over plain TLS (server-auth only —
-// the agent has no client cert yet), and persists `client.key` (0600),
-// `client.crt`, `ca.crt`, and `host_id` under the configured state
+// the agent has no client cert yet), persists the cert material via
+// keystore.AutoSelect (kernel keyring on Linux when available, file
+// fallback otherwise — Phase 5 #98), and writes `host_id` under the
+// configured state
 // directory. After this the operator points `output.grpc` at those
 // paths and `slither-agent run` can connect with mTLS.
 //
@@ -37,6 +39,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	"github.com/t3rmit3/slither/agent/internal/keystore"
 	pb "github.com/t3rmit3/slither/proto/gen/slither/v1"
 )
 
@@ -82,6 +85,12 @@ type Result struct {
 	CertPath   string
 	CAPath     string
 	HostIDPath string
+	// StoreName is the keystore implementation that persisted the
+	// cert material — "kernel-keyring" or "file". Phase 5 #98.
+	// Operators reading the enrol stderr can tell whether the
+	// keyring path was taken; tooling that wants determinism sets
+	// the choice via config (Phase 5+ knob).
+	StoreName string
 }
 
 // HostFingerprint is the data sent in EnrollRequest.fingerprint.
@@ -163,15 +172,28 @@ func Enroll(ctx context.Context, opts Options) (*Result, error) {
 		HostIDPath: filepath.Join(opts.StateDir, "host_id"),
 	}
 
-	if err := writeFileAtomic(res.KeyPath, keyPEM, 0o600); err != nil {
-		return nil, err
+	// Phase 5 #98 — persist via keystore.AutoSelect. The Linux
+	// happy path lands the three PEM blobs in the kernel session
+	// keyring; container shapes without a usable keyring fall back
+	// to the file shape Phase 2 #36 shipped. Result paths above are
+	// returned for backwards compat (tests + tooling that grep them
+	// out of stderr); when the keyring path is taken, the files
+	// don't exist on disk and Result.{Key,Cert,CA}Path point at
+	// not-found locations — operators read keystore.Load output, not
+	// these files.
+	store := keystore.AutoSelect(opts.StateDir)
+	res.StoreName = store.Name()
+	if err := store.Save(keystore.Material{
+		ClientKey:  keyPEM,
+		ClientCert: resp.GetClientCertPem(),
+		CACert:     resp.GetCaCertPem(),
+	}); err != nil {
+		return nil, fmt.Errorf("enroll: persist material: %w", err)
 	}
-	if err := writeFileAtomic(res.CertPath, resp.GetClientCertPem(), 0o644); err != nil {
-		return nil, err
-	}
-	if err := writeFileAtomic(res.CAPath, resp.GetCaCertPem(), 0o644); err != nil {
-		return nil, err
-	}
+
+	// host_id stays as a file under both store flavours — it's a
+	// stable identifier, not a secret. Tools that read $StateDir/host_id
+	// at boot continue to work regardless of the cert store choice.
 	if err := writeFileAtomic(res.HostIDPath, []byte(resp.GetHostId()+"\n"), 0o644); err != nil {
 		return nil, err
 	}

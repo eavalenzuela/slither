@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/t3rmit3/slither/agent/internal/keystore"
 	"github.com/t3rmit3/slither/agent/internal/output/grpc/buffer"
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
 	"github.com/t3rmit3/slither/pkg/ocsf"
@@ -42,6 +43,13 @@ type Options struct {
 	HeartbeatInterval time.Duration
 	BufferSize        int
 	AgentVersion      string // stamped on every Envelope
+
+	// KeystoreDir, when non-empty, takes precedence over the
+	// CAPath/CertPath/KeyPath triplet. The sink calls
+	// keystore.AutoSelect(KeystoreDir) and loads cert material via
+	// the resulting Store — kernel keyring on Linux when usable,
+	// file under this dir otherwise (Phase 5 #98).
+	KeystoreDir string
 
 	// Dialer is an optional gRPC dial-options list. Tests inject
 	// bufconn-backed dial options here; production leaves it nil and
@@ -493,23 +501,49 @@ func classIDToProto(c ocsf.ClassID) pb.OcsfClassId {
 }
 
 // dialOptions returns the gRPC dial options. Tests inject their own
-// (bufconn + insecure) via Options.DialOptions; when left nil we build
-// mTLS from the configured cert paths.
+// (bufconn + insecure) via Options.DialOptions; when left nil we
+// build mTLS from the keystore (Phase 5 #98) or fall back to the
+// path triplet for legacy operator setups that pre-date the keystore
+// path.
 func (s *Sink) dialOptions() ([]grpc.DialOption, error) {
 	if len(s.opts.DialOptions) > 0 {
 		return s.opts.DialOptions, nil
 	}
-	cert, err := tls.LoadX509KeyPair(s.opts.CertPath, s.opts.KeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("client cert: %w", err)
+
+	var (
+		cert tls.Certificate
+		caPEM []byte
+		err  error
+	)
+
+	if s.opts.KeystoreDir != "" {
+		// Keystore path. Same AutoSelect logic enroll used to
+		// persist the material — picks kernel keyring on Linux when
+		// available, file under KeystoreDir otherwise.
+		store := keystore.AutoSelect(s.opts.KeystoreDir)
+		mat, loadErr := store.Load()
+		if loadErr != nil {
+			return nil, fmt.Errorf("client cert: keystore.Load (%s): %w", store.Name(), loadErr)
+		}
+		cert, err = tls.X509KeyPair(mat.ClientCert, mat.ClientKey)
+		if err != nil {
+			return nil, fmt.Errorf("client cert: parse from keystore: %w", err)
+		}
+		caPEM = mat.CACert
+	} else {
+		cert, err = tls.LoadX509KeyPair(s.opts.CertPath, s.opts.KeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("client cert: %w", err)
+		}
+		caPEM, err = os.ReadFile(s.opts.CAPath) //nolint:gosec // operator-supplied
+		if err != nil {
+			return nil, fmt.Errorf("ca read: %w", err)
+		}
 	}
-	caPEM, err := os.ReadFile(s.opts.CAPath) //nolint:gosec // operator-supplied
-	if err != nil {
-		return nil, fmt.Errorf("ca read: %w", err)
-	}
+
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(caPEM) {
-		return nil, fmt.Errorf("no certificates in %s", s.opts.CAPath)
+		return nil, fmt.Errorf("no certificates in CA bundle")
 	}
 	creds := credentials.NewTLS(&tls.Config{
 		Certificates: []tls.Certificate{cert},

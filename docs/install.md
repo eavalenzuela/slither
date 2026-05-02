@@ -204,6 +204,32 @@ For dev / docker-compose against an ephemeral CA, pass
 `--insecure-skip-verify` instead of `--ca-cert`. Never use it against a
 production server.
 
+### 2.1 Cert storage: kernel keyring vs file (Phase 5 #98)
+
+`slither-agent enroll` calls `keystore.AutoSelect` to persist the
+client cert + key + CA bundle. On Linux with a usable kernel
+keyring (the default for systemd-managed agents on Debian 12+,
+RHEL 10, Ubuntu 22.04+) the three PEM blobs land as `user`-typed
+keys under the agent's session keyring — they don't touch the
+filesystem.
+
+Containers without `/proc/keys` access (some k8s distros, older
+CRI runtimes) fall through to the file path: the same blobs land
+at `$StateDir/{client.key,client.crt,ca.crt}`. The `enroll` stderr
+reports which store was chosen via `Result.StoreName`.
+
+To force the file path explicitly (long-uptime fleets that don't
+want to re-enrol on every reboot, or operator policies requiring
+on-disk material for backup workflows), set
+`output.grpc.keystore_dir: ""` in `agent.yaml` — empty falls back
+to the legacy `ca_path`/`cert_path`/`key_path` triplet shape Phase 2
+shipped. To force the keystore path (and let it fall back to file
+under the same dir if the keyring isn't usable), set
+`output.grpc.keystore_dir: /var/lib/slither`.
+
+TPM-sealed cert storage is explicitly out of scope here — Phase 6+
+work gated on hardware availability.
+
 ## 3. Write the config
 
 ```bash

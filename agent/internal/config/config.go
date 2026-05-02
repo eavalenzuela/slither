@@ -79,6 +79,11 @@ type GRPCSink struct {
 	HostIDPath        string        `yaml:"host_id_path"`
 	HeartbeatInterval time.Duration `yaml:"heartbeat_interval"`
 	BufferSize        int           `yaml:"buffer_size"`
+	// KeystoreDir, when non-empty, switches cert loading to the
+	// Phase 5 #98 keystore (kernel keyring on Linux when usable,
+	// file under this dir otherwise). Empty preserves the legacy
+	// path-triplet shape (CAPath/CertPath/KeyPath).
+	KeystoreDir string `yaml:"keystore_dir"`
 	// Buffer is the Phase 5 #96 offline disk-buffer config. Empty Dir
 	// (the zero value) disables disk buffering — the in-memory
 	// channel still drops oldest on overflow exactly as before.

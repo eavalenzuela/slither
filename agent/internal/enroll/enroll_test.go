@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/t3rmit3/slither/agent/internal/keystore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -160,29 +161,46 @@ func TestEnroll_HappyPathWritesAllFiles(t *testing.T) {
 		t.Errorf("HostID = %q", res.HostID)
 	}
 
-	// All four files exist.
-	for label, path := range map[string]string{
-		"key":     res.KeyPath,
-		"cert":    res.CertPath,
-		"ca":      res.CAPath,
-		"host_id": res.HostIDPath,
-	} {
-		fi, statErr := os.Stat(path)
-		if statErr != nil {
-			t.Fatalf("%s missing: %v", label, statErr)
-		}
-		if fi.Size() == 0 {
-			t.Errorf("%s empty", label)
-		}
+	// host_id is always a file regardless of keystore choice.
+	if fi, statErr := os.Stat(res.HostIDPath); statErr != nil {
+		t.Fatalf("host_id missing: %v", statErr)
+	} else if fi.Size() == 0 {
+		t.Errorf("host_id empty")
 	}
 
-	// Key permissions are 0600.
-	st, err := os.Stat(res.KeyPath)
+	// Cert material lands in whichever keystore AutoSelect picked
+	// for this host (kernel-keyring on a normal Linux runner; file
+	// in a container without /proc/keys). Phase 5 #98 — assert via
+	// keystore.AutoSelect.Load() so the test is store-agnostic.
+	store := keystore.AutoSelect(opts.StateDir)
+	mat, err := store.Load()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("keystore.Load: %v (chose %s)", err, store.Name())
 	}
-	if mode := st.Mode().Perm(); mode != 0o600 {
-		t.Errorf("key perm = %o, want 0600", mode)
+	if len(mat.ClientKey) == 0 {
+		t.Error("ClientKey empty after enroll")
+	}
+	if len(mat.ClientCert) == 0 {
+		t.Error("ClientCert empty after enroll")
+	}
+	if len(mat.CACert) == 0 {
+		t.Error("CACert empty after enroll")
+	}
+	if res.StoreName != store.Name() {
+		t.Errorf("Result.StoreName = %q, want %q", res.StoreName, store.Name())
+	}
+
+	// File-store-specific check: when AutoSelect picked file, the
+	// client.key on disk is mode 0600. Skip on keyring (no file
+	// to stat).
+	if store.Name() == "file" {
+		st, err := os.Stat(res.KeyPath)
+		if err != nil {
+			t.Fatalf("client.key missing on file store: %v", err)
+		}
+		if mode := st.Mode().Perm(); mode != 0o600 {
+			t.Errorf("key perm = %o, want 0600", mode)
+		}
 	}
 
 	// host_id file content matches HostID.
