@@ -52,13 +52,29 @@ NoNewPrivileges=no
 # Filesystem hygiene. We still want the agent contained even without
 # NoNewPrivileges — these hardenings are independent of the capability
 # check above.
+#
+# PrivateTmp is INTENTIONALLY OMITTED (Phase 5 #100 / Gap B from #86).
+# The original Phase 1 #25 unit set PrivateTmp=yes but the Phase 4 #86
+# cloud validation showed it breaks the quarantine_file response
+# action: with PrivateTmp the agent sees a private /tmp namespace, so
+# quarantining a malware drop at /tmp/foo fails with ENOENT — exactly
+# the most common malware-drop location. ADR-0035 sketched a
+# subprocess-decoupling fix; the simpler mechanism (drop PrivateTmp,
+# keep every other hardening) gives operators the operational outcome
+# without a multi-file refactor. The agent itself doesn't write
+# significant tmp files (its scratch lives in /var/lib/slither via
+# StateDirectory), so PrivateTmp's protection was near-zero for us.
+# Operators who want PrivateTmp back can install a drop-in:
+#   /etc/systemd/system/slither-agent.service.d/private-tmp.conf
+#     [Service]
+#     PrivateTmp=yes
+# at the cost of losing /tmp + /opt quarantine coverage.
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/var/lib/slither /var/log/slither
 RuntimeDirectory=slither
 StateDirectory=slither
 LogsDirectory=slither
-PrivateTmp=yes
 ProtectKernelLogs=yes
 ProtectControlGroups=yes
 ProtectClock=yes
