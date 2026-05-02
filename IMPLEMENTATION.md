@@ -1154,7 +1154,7 @@ quarantine subprocess decoupling for the Gap-B fix, deferred §10.5
     BPF + detection paths still observably namespaced (verify via
     agent's view of `/tmp` differs from operator's).
 
-15. **#101 — Stateful cold-start hybrid decision.** Re-examine
+15. ✅ **#101 — Stateful cold-start hybrid decision.** Re-examine
     §5.1 #59 with Phase 5 fleet telemetry. Operate the cloud fleet
     for ≥48 h with a representative mix of stateful rules; sample
     CH `system.query_log` for the lookback queries; measure
@@ -1167,7 +1167,17 @@ quarantine subprocess decoupling for the Gap-B fix, deferred §10.5
     a doc-only commit recording the closure rationale. Touches:
     `server/internal/detect/lookback.go` (if shipping),
     `docs/phase5-validation.md` (the decision either way).
-    **Exit:** decision recorded with the underlying telemetry.
+    **Exit:** decision recorded with the underlying telemetry. *(Closed
+    2026-05-01 as won't-do via ADR-0036. Decision is structural
+    rather than telemetry-driven: the hybrid's only tuning knob is
+    global (`max_cold_start_lookback`) while the existing per-rule
+    `lookback: true` flag is per-rule, strictly more expressive.
+    Phase 3/4 cloud runs surfaced no operator pain point that the
+    hybrid would relieve. Reopen criterion in Phase 6+: "operator
+    UX failure pattern documented", not "lookback queries cost too
+    much" (which the per-rule shape already controls). One-line
+    flip from `lookback: false` to `lookback: true` default in the
+    compiler is all it would take to reopen.)*
 
 16. **#102 — Threat model doc.** `docs/threat-model.md`. STRIDE
     per surface: ingest path (gRPC mTLS), control plane (rule push,
@@ -1207,7 +1217,10 @@ quarantine subprocess decoupling for the Gap-B fix, deferred §10.5
         via `keyctl list @u`); file fallback exercised on the OCI
         image where keyring is unavailable;
     (x) Quarantine on `/tmp/`, `/opt/` works (Gap B fix);
-    (xi) #101 telemetry collected; cold-start hybrid decision recorded;
+    (xi) #101 already closed via ADR-0036 — no telemetry to collect;
+        the cloud run sanity-checks the existing per-rule lookback
+        path still fires correctly (single rule with `lookback: true`,
+        agent restarted mid-window, threshold crosses on warm window);
     (xii) Threat model doc walked through against the running fleet —
         every claim verifiable.
     Capture under `phase5_validation/`; commit
