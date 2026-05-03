@@ -1308,7 +1308,8 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
 - **E. Console expansion:** #113 (OIDC SSO), #114 (live process-tree explorer), #115 (saved queries + dashboards), #116 (search refinements + reopen-alert) — independent of the extension track, parallel from #105
 - **F. Keystore + TPM:** #117 (Gap A keyring strategy — ADR-0038 + code), #118 (TPM-sealed variant) — sequential
 - **G. Distribution polish:** #119 (multi-arch buildx + live k8s) — independent, parallel after #105
-- **Exit gate:** #120 (subsumes everything; user-execution like #29/#46/#70/#86/#103)
+- **H. External read-only JSON API:** #120 (eyeexam contract — ADR-0040; bearer-token middleware + tag plumbing + JSON handlers) — independent, parallel after #105
+- **Exit gate:** #121 (subsumes everything; user-execution like #29/#46/#70/#86/#103)
 
 1. **#104 — ADR-0037 + scoping spike (this commit).** Locks: first-
    party extension model (unix socket + length-delimited protobuf,
@@ -1647,7 +1648,84 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     server; arm64 host (Graviton EC2) runs the agent natively without
     qemu-user.
 
-17. **#120 — Phase 6 exit validation.** Doc-backed manual run on the
+17. **#120 — External read-only JSON API for BAS integrations.**
+    Adds a `/api/v1/*` route subtree separate from the HTML console,
+    bearer-token-authenticated, read-only, contract-frozen at v1.
+    Built to satisfy the eyeexam contract at
+    `../eyeexam/docs/slither-api-requirements.md`; future external
+    detector / scoring consumers slot into the same surface.
+    ADR-0040 locks the shape. Four sub-deliverables, one task to
+    keep the contract atomic:
+    (a) Bearer-token middleware + `api_keys` pg schema (id, name,
+        argon2id hash, created_by, created_at, last_used_at,
+        revoked_at, scopes text[]). 32-byte URL-safe-base64 token
+        prefixed `slither_apikey_`. First-16-chars-of-base64 prefix
+        index drives lookup so we don't argon2id every row per
+        request. Admin-only console pages `/api/keys` (list + mint
+        with one-shot scs flash) and POST `/api/keys/{id}/revoke`,
+        mirroring #45's enrolment-token UX. Audit `api_key.minted` /
+        `api_key.revoked` / `api_key.used`. New
+        `server/internal/console/apiauth/middleware.go` — applied
+        only on `/api/v1/*`, leaves `/healthz` (HTML console),
+        `/login`, the rest of the console untouched.
+    (b) MITRE tag plumbing — agent → OCSF → CH. Today
+        `pkg/ruleast.Rule.Tags []string` carries Sigma `tags:`
+        verbatim; `agent/internal/ruleengine/finding.go.buildFinding`
+        drops them on the floor. This task: buildFinding picks up
+        `rule.Tags`, normalises to lowercase, filters to
+        `attack.t*`/`attack.s*`/`attack.g*` prefixes, populates
+        `ocsf.DetectionFinding.MitreATTACK[]MitreTag` with
+        `Technique.UID = "T1070.003"`-shape values. CH writer in
+        `server/internal/store/ch/writer.go` extracts the technique
+        UIDs into the existing `mitre_techniques Array(String)`
+        column on `ocsf_detection_finding_2004` (provisioned by
+        migration 00004, unused since). No backfill — pre-existing
+        events stay tag-less; eyeexam queries post-test detections.
+    (c) `EventFilter` + `SearchEvents` filter additions:
+        `RuleUID string` → `WHERE rule_uid = ?` and `Tag string` →
+        `WHERE has(mitre_techniques, ?)`. Both narrow on
+        class_uid=2004; queries pairing `Tag != ""` with
+        non-2004-only `class_uids` return zero rows by construction.
+        HTML console's `/events` page does NOT grow these inputs in
+        this task — keeping the JSON API additive avoids regressing
+        anyone's saved queries from #115.
+    (d) JSON handlers:
+        - `GET /api/v1/healthz` — JSON `{"ok": true}`,
+          unauthenticated. Distinct from HTML `/healthz` so an API
+          consumer never sees an HTML body.
+        - `POST /api/v1/events/search` — body matches the eyeexam
+          spec: `host_id`/`host_name`, `sigma_id`/`rule_uid`,
+          `tag`, `class_uids`, `since`/`until`, `cursor`, `limit`.
+          `host_name` resolves to `host_id` via `pg.GetHostByName`
+          before hitting CH. Response: `hits[]` (id, host_id,
+          host_name, observed_at, class_uid, severity_id, rule_uid,
+          rule_name, raw OCSF JSON) + `next_cursor`. Cursor reuses
+          the existing `ch.Cursor` opaque encoding — same shape as
+          the HTML pagination key.
+        - `GET /api/v1/rules` (optional, recommended) — JSON list
+          of currently-loaded Sigma rules with optional
+          `?since=&technique=` filters. Wraps `pg.ListEnabledRules`
+          + a slim projection.
+        - 401/403/4xx all return JSON error bodies, never the HTML
+          login page.
+    Touches: `server/internal/store/ch/search.go` (filter fields +
+    WHERE clauses), `server/internal/store/ch/writer.go` (technique
+    extraction), `agent/internal/ruleengine/finding.go` (tag
+    population), `pkg/ocsf/finding.go` (no struct change — the
+    `MitreATTACK` field already exists), new
+    `server/internal/api/v1/{events,rules,health,errors}.go`,
+    new `server/internal/console/apiauth/`, new
+    `server/internal/store/pg/api_keys.go`, new migrations
+    `00023_api_keys.sql`, new `server/internal/console/api_keys.go`,
+    new `docs/api-v1.md`. **Exit:** integration test — mint a key,
+    fire a Sigma rule with ATT&CK tags, query
+    `POST /api/v1/events/search` with `tag=attack.t1070.003` →
+    one hit, technique extracted into `mitre_techniques`,
+    `host_name` lookup resolves correctly, revoke key → next call
+    401s with JSON body; OpenAPI/JSON-Schema description in
+    `docs/api-v1.md` reviewed end-to-end.
+
+18. **#121 — Phase 6 exit validation.** Doc-backed manual run on the
     Phase 3/4/5 cloud fleet (existing stopped instances —
     `start-instances` brings them back; allocate one Graviton instance
     for arm64 coverage from #119). Validates:
@@ -1688,7 +1766,14 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     (xii) sustained-load backpressure e2e (deferred from Phase 5
         #103 V8) — `make load-test` against the fleet under pinned
         slow CH writer; agents observably raise NetworkActivity
-        sampling within 30s; recovery within 30s of writer unpin.
+        sampling within 30s; recovery within 30s of writer unpin;
+    (xiii) eyeexam JSON API contract (#120 / ADR-0040) — mint an
+        api key, fire a known Atomic test on a fleet host, eyeexam
+        runs end-to-end (`eyeexam exec --pack ...`) against a
+        live `slither-server`, scoring marks the expectation
+        `caught` with `raw_json` populated and the host_name +
+        sigma_id + tag filters all narrowing as advertised; revoked
+        key returns 401 with JSON body.
     Capture under `phase6_validation/`; commit
     `docs/phase6-validation.md`. **Exit:** all green; Phase 6
     closed; Phase 7 (platform expansion) opens or stays parked
@@ -1716,6 +1801,13 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
   §10.3 (CH schema evolution under OCSF version bumps) remains open
   — we have the harness from Phase 5 #99; we don't yet have a forced
   bump.
+- **External JSON API surface lands additively (#120 / ADR-0040).**
+  `/api/v1/*` is a new public-facing surface contract; ADR-0040 binds
+  it to the same wire-stability discipline as ADR-0011 binds
+  `slither.v1`. Read-only by construction; future write surfaces need
+  a fresh ADR. Bearer-token auth is orthogonal to argon2id+SCS
+  (humans) and OIDC (#113, SSO humans) — three auth backends, three
+  consumer types.
 - **Snapshot-on-alert lands empty.** No extension in Phase 6 provides
   snapshots. This is deliberate — Phase 7's auditd / FIM / canary
   candidates are the natural snapshot providers; locking the wire +
@@ -1725,16 +1817,21 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
   actions still need an ADR + an additive enum bump per §2.4.
 
 **Estimated effort:** 8–10 weeks for one person — Phase 6 is broader
-than Phase 5 because the extension model (4 tasks) and console
-expansion (4 tasks) are independent fronts. Biggest unknowns:
-#107 (cosign verify on every spawn — latency budget vs operator
-restart UX), #110 (live-query latency budget across ≥10-host fleets
-— osquery itself is fast; the aggregation + console SSE-shaped
-streaming is the unknown), #114 (vanilla-JS process-tree pan/zoom
-without a framework — refresh-load + lazy-expand state machine is
-fiddlier than #65's SSR shape), and #118 (TPM PCR re-measure UX
-across distros — PCR 7 semantics differ subtly between Secure Boot
-implementations).
+than Phase 5 because the extension model (4 tasks), console expansion
+(4 tasks), and the new external JSON API track (1 task) are
+independent fronts. #120 was a late add via ADR-0040 to satisfy the
+eyeexam BAS-scoring contract; the work is small (1–2 weeks for one
+person) because every CH-side filter, the cursor encoding, and the
+`mitre_techniques` column already exist — only the agent-side tag
+plumbing, the API tree, and the bearer-token middleware are net-new.
+Biggest unknowns: #107 (cosign verify on every spawn — latency budget
+vs operator restart UX), #110 (live-query latency budget across
+≥10-host fleets — osquery itself is fast; the aggregation + console
+SSE-shaped streaming is the unknown), #114 (vanilla-JS process-tree
+pan/zoom without a framework — refresh-load + lazy-expand state
+machine is fiddlier than #65's SSR shape), and #118 (TPM PCR re-
+measure UX across distros — PCR 7 semantics differ subtly between
+Secure Boot implementations).
 
 ## 9. Phase 7 — Platform Expansion (bullet, demand-driven)
 
