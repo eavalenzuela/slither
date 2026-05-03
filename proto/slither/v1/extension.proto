@@ -1,58 +1,181 @@
-// Agent↔Extension interface (Phase 6).
+// Agent↔Extension wire (Phase 6).
 //
-// Defined in v1 so the wire contract is frozen from day one. Implementations
-// land in Phase 6; see PROJECT.md §4.4 for the execution model and
-// security properties (signature-checked, capability-gated, supervised,
-// unix-socket transport).
+// Per ADR-0037: length-delimited protobuf over a unix domain socket,
+// not gRPC. Each direction is an independent message stream; a sender
+// writes a varint length prefix followed by an `AgentToExtension` /
+// `ExtensionToAgent` envelope. Framing helpers live at pkg/extsdk/codec.
+//
+// First message on a freshly-accepted connection MUST be an
+// `ExtensionToAgent.hello`. Until the agent has read it, no other
+// envelope is honoured. Capability declarations on Hello determine
+// which subsequent message kinds the agent will accept from this
+// extension and dispatch to it; an extension that did not declare
+// CAPABILITY_OCSF_EMIT cannot push events.
+//
+// This file deliberately ships NO gRPC service definition — extensions
+// are first-party binaries spawned by the agent, not network-reachable
+// services. Defining a service would invite running them over TCP.
 syntax = "proto3";
 
 package slither.v1;
 
 import "slither/v1/common.proto";
 
-// ExtensionService is implemented by out-of-process extensions.
-// The agent is the client: it dials the extension's unix socket,
-// sends Tasks, and receives Events.
-service ExtensionService {
-  // Hello is called once after process start; the extension declares its
-  // identity and capability set. Agent refuses connections from extensions
-  // whose declared capabilities exceed what the agent config allows.
-  rpc Hello(HelloRequest) returns (HelloResponse);
+// Capability is the set of message classes an extension is permitted to
+// participate in. Declared by the extension on Hello; enforced by the
+// agent on every inbound and outbound envelope.
+//
+// Wire-frozen — values do not renumber. Adding a capability is additive.
+enum Capability {
+  CAPABILITY_UNSPECIFIED = 0;
 
-  // Events is a server-stream from the extension to the agent.
-  // Extensions emit OCSF envelopes that are merged into the agent's pipeline.
-  rpc Events(EventsRequest) returns (stream Envelope);
+  // Extension may emit OCSF events on the agent's outbound gRPC sink
+  // (ExtensionToAgent.ocsf_event).
+  CAPABILITY_OCSF_EMIT = 1;
 
-  // Execute dispatches a task to the extension (e.g. run an osquery query).
-  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+  // Extension may respond to live-query hunts dispatched by the server
+  // (AgentToExtension.live_query_request → ExtensionToAgent.live_query_row* +
+  // .live_query_complete).
+  CAPABILITY_LIVE_QUERY_RESPOND = 2;
+
+  // Extension may provide forensic snapshots in response to alert-fire
+  // events (AgentToExtension.snapshot_request → ExtensionToAgent.snapshot_chunk* +
+  // .snapshot_complete).
+  CAPABILITY_SNAPSHOT_PROVIDE = 3;
 }
 
-message HelloRequest {
-  // Agent identity handed to extension so it can correlate logs.
-  string agent_host_id = 1;
-  string agent_version = 2;
+// Hello is the extension's greeting. MUST be the first envelope on a
+// freshly-accepted unix-socket connection. Sent exactly once.
+message Hello {
+  // Stable identifier — used by the agent in logs, telemetry, and
+  // event provenance tags. Conventionally matches the extension's
+  // package name (e.g. "osquery").
+  string name = 1;
+
+  // Semver of the extension binary. Logged + surfaced on the host
+  // detail page.
+  string version = 2;
+
+  // Capability set the extension claims to provide. The agent
+  // intersects this with the operator's per-extension config; only
+  // the intersection is honoured at runtime.
+  repeated Capability capabilities = 3;
 }
 
-message HelloResponse {
-  string extension_id = 1;            // e.g. "osquery-bridge"
-  string extension_version = 2;
-  repeated string capabilities = 3;   // e.g. ["emit:process_activity", "execute:osquery"]
-  repeated OcsfClassId emits = 4;
+// OCSFEvent is an extension-emitted event headed for the agent's
+// outbound gRPC sink. Agent stamps device.uid, time, and audit fields
+// before forwarding; class_id + payload are extension-supplied.
+message OCSFEvent {
+  // Which OCSF class the payload conforms to. Must be a value from
+  // common.OcsfClassId.
+  OcsfClassId class_id = 1;
+
+  // OCSF payload, canonical JSON encoding (same shape as common.Envelope.payload).
+  bytes payload = 2;
 }
 
-message EventsRequest {
-  // Empty; reserved for future filters.
+// LiveQueryRequest dispatches a hunt from server → agent → extension.
+// Originates as `ServerMessage.hunt_query` (Phase 6 #110) on the
+// agent's session stream; the agent forwards to the extension
+// declaring CAPABILITY_LIVE_QUERY_RESPOND.
+message LiveQueryRequest {
+  // Server-assigned hunt id. Echoed in every LiveQueryRow + the final
+  // LiveQueryComplete so the agent (and server) can multiplex.
+  string query_id = 1;
+
+  // Query payload. Dialect is extension-specific; for the osquery
+  // bridge (#109) this is a SQL string.
+  string sql = 2;
+
+  // Per-host row cap, enforced server-side (#110). Extension MUST stop
+  // producing rows once it has emitted this many — additional rows
+  // will be silently dropped by the agent's enforcement layer.
+  uint32 max_rows = 3;
+
+  // Soft deadline. Extension MUST send LiveQueryComplete (with or
+  // without error) before the deadline elapses.
+  uint32 timeout_secs = 4;
 }
 
-message ExecuteRequest {
-  string task_id = 1;
-  string task_kind = 2;               // e.g. "osquery.sql"
-  bytes payload = 3;                  // kind-specific
+message LiveQueryRow {
+  string query_id = 1;
+
+  // Column names, in the order matching `values`. Repeated per row
+  // because some extensions stream variable-shape result sets.
+  repeated string columns = 2;
+  repeated string values = 3;
 }
 
-message ExecuteResponse {
-  string task_id = 1;
-  bool ok = 2;
+message LiveQueryComplete {
+  string query_id = 1;
+
+  // Number of rows the extension actually emitted (pre-cap).
+  uint64 row_count = 2;
+
+  // Optional terminal error. Empty string means success.
   string error = 3;
-  bytes result = 4;                   // kind-specific
+}
+
+// SnapshotRequest is dispatched by the agent's auto-respond path when
+// a rule with `slither.snapshot: true` fires; routed to every
+// extension declaring CAPABILITY_SNAPSHOT_PROVIDE (Phase 6 #111).
+message SnapshotRequest {
+  // Agent-assigned snapshot id. Echoed on every chunk + complete.
+  string snapshot_id = 1;
+
+  // Alert id the snapshot is attached to. Used by the server to file
+  // the resulting blob under /var/lib/slither/artefacts/<alert_id>/.
+  string alert_id = 2;
+
+  // Extension-specific target hint (e.g. a PID for process-tree
+  // snapshot extensions). May be empty.
+  string target = 3;
+}
+
+// SnapshotChunk is one piece of a multi-chunk snapshot upload. Chunks
+// MUST be sent in order; the agent reassembles them by snapshot_id.
+message SnapshotChunk {
+  string snapshot_id = 1;
+
+  // SHA-256 of the *cumulative* bytes through this chunk. Lets the
+  // agent abort early on corruption rather than waiting for the
+  // terminal complete.
+  string sha256 = 2;
+
+  bytes bytes = 3;
+}
+
+message SnapshotComplete {
+  string snapshot_id = 1;
+
+  // Free-form manifest the extension supplies — content type, schema
+  // version, metadata. Surfaced on the alert detail page.
+  string manifest = 2;
+
+  // Optional terminal error. Empty string means success.
+  string error = 3;
+}
+
+// AgentToExtension is the agent → extension envelope. Sent over the
+// unix socket as length-delimited protobuf. Exactly one payload field
+// is set per envelope.
+message AgentToExtension {
+  oneof payload {
+    LiveQueryRequest live_query_request = 1;
+    SnapshotRequest snapshot_request = 2;
+  }
+}
+
+// ExtensionToAgent is the extension → agent envelope. The first
+// envelope on a connection MUST set `hello`; all other payloads are
+// honoured only after the agent has accepted the Hello.
+message ExtensionToAgent {
+  oneof payload {
+    Hello hello = 1;
+    OCSFEvent ocsf_event = 2;
+    LiveQueryRow live_query_row = 3;
+    LiveQueryComplete live_query_complete = 4;
+    SnapshotChunk snapshot_chunk = 5;
+    SnapshotComplete snapshot_complete = 6;
+  }
 }
