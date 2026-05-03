@@ -1273,14 +1273,468 @@ the agent-side hysteresis without thrashing on bursty load), and
 #100 (subprocess unix-socket protocol — keep it dirt-simple to
 avoid re-inventing gRPC inside the agent).
 
-## 8. Phase 6 — Extensions & Console Expansion (bullet)
+## 8. Phase 6 — Extensions & Console Expansion
 
-- Agent extension interface (`proto/slither/v1/extension.proto`): unix socket, protobuf, capability-gated, signature-checked, supervised with backoff.
-- Reference extension: osquery bridge. Subscribes to curated tables, maps to OCSF via extension-side mappers, emits through agent.
-- Live-query hunt: server-dispatched osquery over bridge, aggregated in console.
-- Forensic snapshot-on-alert: alert rule can trigger a one-shot capture through enabled extensions.
-- Fully-interactive live process-tree explorer.
-- Saved queries + dashboards in console.
+**Goal:** ship the first-party extension model (interface + supervisor +
+reference osquery bridge), the live-query hunt workflow, snapshot-on-
+alert wiring, the deferred-from-v1 console surfaces (live process-tree
+explorer, saved queries, dashboards, OIDC SSO), and the §10 deferred-
+question closures that ADR-0035 parked here. New operator-facing capability
+*does* land in Phase 6 (unlike Phase 5) — but bounded to the extension
+surface + console UX. Detection content + response action surface stay
+frozen.
+
+Phase 5 closed at task #103 (cloud-VM exit validation, 2026-05-02 with
+captures under `phase5_validation/`). Phase 6 picks up at #104,
+mirroring the §3.x / §4.1 / §5.1 / §6.1 / §7.1 numbered-task pattern.
+
+Architectural contract for Phase 6 lives in **ADR-0037**
+(`docs/adr/0037-phase6-scope.md`): first-party extension model only
+(no public SDK, no marketplace, no dynamic loading); operator-installed
+extension binaries (closes §10.6); osquery as the sole shipped
+reference extension; rule-pack signing folded into extension-signing
+infra (closes §10.5); OIDC SSO console backend (closes §10.7);
+TPM-sealed cert variant + Gap A keyring strategy (Phase 6+ piece of
+§10.2 + Phase 5 #103 carry-over); snapshot-on-alert wire ships empty;
+multi-arch buildx + live k8s validation closing #93's deferred piece.
+
+### 8.1 Tasks
+
+**Dependency graph at a glance:**
+- **A. Foundation:** #104 (this ADR + breakdown) → #105 (Phase 5 carry-over remediation) — sequential
+- **B. Extension wire + supervisor:** #106 (extension.proto + framing) → #107 (agent supervisor) → #108 (distribution + signing decision) — sequential, locks the wire
+- **C. Reference extension:** #109 (osquery bridge) → #110 (live-query hunt) — sequential, both need #107
+- **D. Server-side surfaces:** #111 (snapshot-on-alert wire — needs #107), #112 (server-side tamper-chain cross-check — independent) — parallel after #107
+- **E. Console expansion:** #113 (OIDC SSO), #114 (live process-tree explorer), #115 (saved queries + dashboards), #116 (search refinements + reopen-alert) — independent of the extension track, parallel from #105
+- **F. Keystore + TPM:** #117 (Gap A keyring strategy — ADR-0038 + code), #118 (TPM-sealed variant) — sequential
+- **G. Distribution polish:** #119 (multi-arch buildx + live k8s) — independent, parallel after #105
+- **Exit gate:** #120 (subsumes everything; user-execution like #29/#46/#70/#86/#103)
+
+1. **#104 — ADR-0037 + scoping spike (this commit).** Locks: first-
+   party extension model (unix socket + length-delimited protobuf,
+   capability-enum-gated, cosign-keyless-signed, agent-supervised);
+   operator-installed extension binaries (closes §10.6); rule-pack
+   signing folded into extension-signing infra (closes §10.5); osquery
+   bridge as the sole shipped reference extension; live-query hunt
+   workflow with per-host row cap + per-hunt timeout; snapshot-on-
+   alert wire ships empty (no extension in Phase 6 provides one);
+   OIDC SSO closes §10.7; live process-tree explorer + saved queries +
+   dashboards on the console expansion track; server-side tamper-
+   chain cross-check (#95 follow-up); Gap A keyring strategy
+   resolution + TPM-sealed cert variant (Phase 6+ piece of §10.2);
+   multi-arch buildx + live k8s validation (#93 carry-over); default-
+   detect-only carries forward; action surface still frozen at six.
+   Touches: `docs/adr/0037-phase6-scope.md`, `IMPLEMENTATION.md §8`.
+   **Exit:** ADR accepted; §8.1 task breakdown in place.
+
+2. **#105 — Phase 5 carry-over remediation.** Three operational
+   papercuts from the #103 cloud validation captured under
+   `docs/phase5-validation.md §"Cosmetic warnings caught"`:
+   (a) `selfprotect.LockdownStateDirs` should detect read-only mounts
+       (e.g. `/etc/slither` under `ProtectSystem=strict`) and skip the
+       chmod attempt rather than logging a self-inflicted WARN;
+   (b) `nfpm.yaml` postinst order — `/var/log/slither` came back at
+       0755 not 0700 on Debian apt-install; verify the postinst chmod
+       runs after the dir creation regardless of pre-existing dir
+       state, and add a regression check on the deb install path;
+   (c) `docs/threat-model.md §"Surface 4 — Information disclosure"`
+       amended to reflect the keyring is best-effort additive (not
+       the primary cert store) per Gap A's hot-fix; #117's resolution
+       overwrites this section in turn.
+   Touches: `agent/internal/selfprotect/lockdown.go`,
+   `deploy/nfpm/nfpm.yaml`, `docs/threat-model.md`. **Exit:**
+   integration test for (a)+(b); doc edit verified by re-reading.
+
+3. **#106 — Extension wire + framing.** New
+   `proto/slither/v1/extension.proto` namespace (separate from
+   agent.proto + control.proto — extensions never touch the server-
+   facing wire). Messages: `Hello{name, version, capabilities[]}`,
+   `OCSFEvent{class_uid, payload}`, `LiveQueryRequest{query_id, sql}`,
+   `LiveQueryRow{query_id, columns, values}`, `LiveQueryComplete{query_id, error?}`,
+   `SnapshotRequest{snapshot_id, alert_id, target}`,
+   `SnapshotChunk{snapshot_id, sha256, bytes}`, `SnapshotComplete{snapshot_id, manifest}`.
+   Capability enum: `CAPABILITY_OCSF_EMIT`, `CAPABILITY_LIVE_QUERY_RESPOND`,
+   `CAPABILITY_SNAPSHOT_PROVIDE`. Length-delimited protobuf framing
+   over a unix socket — each direction is a stream; sender writes
+   varint-length + payload, reader matches. Generated bindings live
+   at `proto/slither/v1/extension/*.go`. Touches: `proto/slither/v1/extension.proto`
+   (new), `make gen-proto` (extend), `pkg/extsdk/codec.go` (new
+   length-delim helpers — agent and extensions share). **Exit:**
+   `make verify-gen` clean; round-trip codec tests; ADR-0011's
+   slither.v1 additive-only invariant preserved (no edits to
+   agent.proto / control.proto in this task).
+
+4. **#107 — Agent extension supervisor.** New `agent/internal/extensions/`
+   with `Manager` (per-extension lifecycle), `Process` (cosign-verify +
+   spawn + cap-cgroup + RSS limit + stdout/stderr capture + restart
+   with 1s→60s ±25% jitter backoff matching #35), and `Channel` (the
+   length-delim codec + capability-gate enforcement — an extension
+   that didn't declare `OCSFEmit` cannot push events). Operator
+   declaration: new `extensions:` list in `agent.yaml` with
+   `name`, `binary_path`, `signature_path`, `capabilities[]`, optional
+   `rss_limit_mib` (default 256), optional `cpu_share` (default 256/1024).
+   Cosign verify uses the same trust root as Phase 5 #91 release
+   verification — read `~/.slither/cosign.pub` or
+   `/etc/slither/cosign.pub`, fail-closed on missing. OCSF events
+   from extensions get stamped with `device.uid` + `time` + audit
+   fields by the agent before forwarding on the existing gRPC sink
+   (#35) — extensions never see the server-facing wire. New telemetry
+   counters: `ext_spawned`, `ext_restarts`, `ext_signature_failures`,
+   `ext_capability_violations`, `ext_events_emitted`. Touches:
+   `agent/internal/extensions/` (new), `agent/internal/config`
+   (extensions schema), `agent/internal/app/app.go`. **Exit:** unit
+   tests cover signature reject + capability violation + restart
+   backoff + RSS-cap kill; integration test with a stub extension
+   that emits 1k OCSF events shows them landing in the gRPC sink
+   indistinguishable from native collector events.
+
+5. **#108 — Extension distribution + signing model (closes §10.5 + §10.6).**
+   Concretely: (i) operator-installed only — agent.yaml declares paths,
+   no server-pushed binaries (server-pushed deferred to Phase 6+ per
+   ADR-0037); (ii) every extension binary cosign-keyless-signed using
+   the same OIDC chain as the slither release (Phase 5 #91), verified
+   by the agent on every spawn (#107); (iii) rule-pack signing — folds
+   into the same infra: `slither-db insert-rule --signed-bundle FILE`
+   verifies a detached cosign signature on a tar of YAML files before
+   ingest, default required when reading from any path under
+   `/usr/share/slither/rules/` and any HTTPS URL; in-band rule push
+   over the control channel stays unsigned (mTLS + server-trust
+   covers it per ADR-0035's reasoning). New `slither-db verify-rule-bundle`
+   subcommand for offline checks. ADR-0039 (drafted as part of this
+   task) documents the trust root, the keyless-vs-keyed call, and the
+   verification sequence. Touches: `server/cmd/slither-db/`,
+   `server/internal/store/pg/rules.go`, new `pkg/sigverify/`,
+   `docs/adr/0039-extension-and-rule-signing.md` (new), `docs/install.md`
+   (signed bundle workflow). **Exit:** signed bundle + signed extension
+   binary install paths both work end-to-end on Debian 13; tampered
+   bundle / tampered extension binary both refuse cleanly.
+
+6. **#109 — osquery bridge reference extension.** New
+   `extensions/osquery/` (in-tree). Imports `pkg/extsdk/`. Connects to
+   osqueryd via the standard osquery extension socket (`osquery.em`).
+   Subscribes to a curated table list:
+   `process_events`, `socket_events`, `file_events`, `listening_ports`,
+   `kernel_modules`, `ssh_keys`, `authorized_keys`. Per-table OCSF
+   mapper in `extensions/osquery/mappers/<table>.go` — fixture-tested
+   against captured osquery row JSON. Declares `CAPABILITY_OCSF_EMIT`
+   + `CAPABILITY_LIVE_QUERY_RESPOND`. **Does not** declare
+   `CAPABILITY_SNAPSHOT_PROVIDE` — osquery snapshot tables are a
+   Phase 7 exercise. Build: `make ext-osquery` produces
+   `bin/slither-ext-osquery` (single static binary); release pipeline
+   signs it via the existing cosign step (#91). Operator install:
+   drop binary + signature into `/usr/lib/slither/extensions/`,
+   declare in `agent.yaml`, restart agent. Touches: new
+   `extensions/osquery/`, `Makefile` (ext-osquery target),
+   `.github/workflows/release.yml` (osquery binary + signature in
+   release artefacts), `docs/install.md` (extensions section).
+   **Exit:** integration test on Debian 13 — install osqueryd, install
+   bridge, fire a `process_events` row from osquery → assert OCSF
+   `process_activity` lands in CH with `provenance.tag=osquery`.
+
+7. **#110 — Live-query hunt workflow.** Server side: new `hunts` pg
+   table (id, dispatched_by, query, host_filter, dispatched_at,
+   timeout_secs, max_rows_per_host, status, completed_at). New
+   `pb.ServerMessage.hunt_query` (additive on slither.v1). Console
+   `/hunt` page (analyst+admin gated) — POST dispatches, GET lists,
+   GET `/hunt/{id}` shows aggregated results with pagination + CSV
+   export. New `pb.ClientMessage.hunt_result` (additive) carries
+   row chunks. Hub fans `HuntQuery` to subscribed sessions filtered
+   by `host_filter`; agent forwards to the extension declaring
+   `LiveQueryRespond` (osquery bridge in v1); bridge runs query,
+   streams `LiveQueryRow` chunks back; agent wraps in
+   `HuntResult` and ships over Session stream. Per-host row cap
+   default 10k; per-hunt timeout default 60s; both operator-tunable
+   per-hunt. CH `hunt_results` table for aggregated rows (raw JSON
+   + host_id + query_id, partitioned daily, 7-day TTL). Audited
+   like response actions (`hunt.dispatched`, `hunt.completed`,
+   `hunt.cancelled`). RBAC: analyst dispatches; viewer 403. Touches:
+   `proto/slither/v1/control.proto` (additive), `proto/slither/v1/agent.proto`
+   (additive), `server/internal/hunt/` (new), `server/internal/grpcserv/session.go`
+   (multiplex `HuntQuery` onto runSendLoop), `server/migrations/00017_hunts.sql`,
+   `server/clickhouse/migrations/00006_hunt_results.sql`,
+   `server/internal/console/hunt.go` (new), `agent/internal/output/grpc/sink.go`
+   (handle `HuntQuery`, dispatch to extension via #107). **Exit:**
+   integration test — dispatch `SELECT * FROM listening_ports` against
+   a 3-host fleet, assert all three respond within 60s, results
+   aggregate at `/hunt/{id}` with per-host source attribution; row
+   cap enforced (synthetic 100k-row response truncated to 10k).
+
+8. **#111 — Snapshot-on-alert wire + alert-detail UX.** Optional
+   per-rule top-level YAML key `slither.snapshot: true` (parsed in
+   `pkg/ruleast` alongside `slither.response`). When the rule fires,
+   AutoResponder (#83) submits a synthetic `SnapshotRequest` to every
+   loaded extension declaring `CAPABILITY_SNAPSHOT_PROVIDE`.
+   Extension streams `SnapshotChunk` back; agent reassembles and
+   uploads via the existing `collect_artifacts` upload path
+   (Phase 4 #81) under `/var/lib/slither/artefacts/<alert_id>/<extension_name>.tgz`.
+   Console alert-detail page surfaces per-extension snapshot
+   downloads inline. Phase 6 ships **no extension that provides
+   snapshots** — the wire + UX land empty so Phase 7 can slot in
+   without a wire bump. New `pb.SnapshotRequest` etc. on extension.proto
+   (already covered by #106). New telemetry counters:
+   `ext_snapshots_requested`, `ext_snapshots_completed`,
+   `ext_snapshots_failed`. Touches: `pkg/ruleast/` (snapshot parse),
+   `agent/internal/respond/auto.go`, `server/internal/respond/hub.go`,
+   `server/internal/console/alerts.go`. **Exit:** unit tests cover
+   the auto-trigger path with a stub extension; alert-detail page
+   shows an "(no snapshot extensions configured)" note when the
+   alert's rule has snapshot=true but no extension declares the
+   capability — operator never sees a silent no-op.
+
+9. **#112 — Server-side tamper-chain cross-check.** New
+   `pb.ClientMessage.chain_summary` (additive slither.v1 bump).
+   Agent emits `ChainSummary{last_seq, last_hash, count, since}` to
+   the server every 5 minutes (cheap; the chain is small). Server
+   walks the equivalent CH `response_actions` + `detection_findings`
+   rows for that host + window, recomputes the expected chain hash,
+   compares. Mismatch fires a `chain.mismatch` audit event with
+   severity 4 (high). New console page `/hosts/{id}/chain-status`
+   shows last summary + mismatch history. **No new alert class** —
+   audit-only, surfaced in the audit log + the host page. New pg
+   helper `pg.RecordChainSummary` + `pg.ListChainMismatches`. Touches:
+   `proto/slither/v1/agent.proto` (additive), `agent/internal/selfprotect/chain.go`
+   (emit summary), `server/internal/grpcserv/session.go` (handle
+   summary), `server/internal/detect/chain.go` (new — verifier),
+   `server/internal/console/hosts.go` (chain-status page), migrations
+   `00018_chain_summaries.sql`. **Exit:** integration test — agent
+   emits valid summary → no mismatch; tamper a single audit row in
+   pg → next summary fires `chain.mismatch`; doc-link from
+   `/hosts/{id}` to the chain-status page.
+
+10. **#113 — Console SSO (OIDC) backend (closes §10.7).** New
+    `server/internal/console/oidc.go` with the standard
+    `golang.org/x/oauth2` + `github.com/coreos/go-oidc/v3` pair.
+    Auth-code flow with PKCE; discover via `well_known_url` config.
+    Role mapping via configurable `role_claim` + per-claim-value role
+    table (e.g. `role_mappings: { "slither-admin": "admin", "slither-analyst": "analyst" }`).
+    No group sync, no SCIM. Sits *alongside* local users — operator
+    can still log in as the bootstrap admin if the IdP is down. New
+    /login page gains "Sign in with SSO" button (rendered only when
+    OIDC is configured). New pg column `users.oidc_subject` (UNIQUE,
+    nullable) — first-time SSO login creates the user with
+    `username=email`, role from claim mapping; subsequent logins
+    match on `oidc_subject`. Audit: `auth.oidc.success` /
+    `auth.oidc.failure` (with reason). Touches: new
+    `server/internal/console/oidc.go`, `server/internal/store/pg/users.go`
+    (oidc_subject helpers), migrations `00019_users_oidc.sql`,
+    `server/internal/config` (oidc block in console config),
+    `docs/install.md` (SSO setup section). **Exit:** integration test
+    against a Dex-shaped local IdP — login flow completes, user is
+    created on first login with role from claim, role mapping
+    persists across logins, IdP-down fallback to local-user login
+    still works.
+
+11. **#114 — Live process-tree explorer (closes ADR-0024 deferral).**
+    Replaces the SSR mini-graph (#65) on the alert-detail page with
+    an interactive explorer; mini-graph stays as the fallback for
+    server-rendered notification targets. New
+    `server/internal/console/static/process-tree.js` (vanilla, no
+    framework — matches Phase 4's respond.js). Backend: new
+    `GET /alerts/{id}/process-tree.json?root_pid=N&depth=N` returns
+    JSON nodes + edges (re-uses #65's `ch.Store.ListProcessChildren`
+    + new `ch.Store.ListProcessAncestors`). Client renders via SVG
+    pan/zoom; click a node to expand its children inline (lazy-loaded
+    from the same endpoint with the clicked PID as root); right-click
+    surfaces "kill_process" + "kill_tree" + "collect_artifacts"
+    buttons gated on `pg.HostPolicy.PermitsAction` (re-uses #74).
+    Default root = the alert's triggering PID; default depth = 4
+    (matches #65). Hard cap 256 nodes per render (matches #65) with
+    "expand more" sentinel for over-cap subtrees. Cache: same
+    `graph.Cache` instance (#64) with `pte_<host>_<pid>_<depth>`
+    namespace. Touches: `server/internal/console/alerts.go`,
+    new `server/internal/console/static/process-tree.js`,
+    new `server/internal/detect/processtree_json.go`,
+    `server/internal/store/ch/process.go`. **Exit:** alert detail
+    page renders the explorer; click expand walks one hop per click;
+    response-action right-click respects host policy (denied actions
+    hidden). Manual UX walkthrough on a fleet alert during #120.
+
+12. **#115 — Saved queries + per-user dashboards.** New pg tables:
+    `saved_queries` (id, user_id, name, surface ∈ {events, alerts,
+    hunts}, params jsonb, created_at, updated_at) and `dashboards`
+    (id, user_id, name, layout jsonb, created_at, updated_at).
+    Filter forms on `/events`, `/alerts`, `/hunt` gain a "Save"
+    button that captures the URL params under a user-supplied name.
+    New `/queries` page lists the user's saved queries; click to
+    re-run on the original surface. New `/dashboards` page — per-user
+    layout of saved-query result cards (count + top-N list per card,
+    fixed grid; v1 layout shape stays simple — no resize/drag in
+    Phase 6, just card-add/card-remove). Shared dashboards parked
+    Phase 7+ per ADR-0037. Touches: migrations `00020_saved_queries.sql`
+    + `00021_dashboards.sql`, new `server/internal/console/queries.go`,
+    new `server/internal/console/dashboards.go`, console nav. **Exit:**
+    save a filter on `/events`, see it on `/queries`, re-run lands
+    on `/events?...` with the same filter; create a dashboard with
+    two cards, refresh persists; delete a saved-query that's referenced
+    by a dashboard card → card surfaces a "(query deleted)" placeholder
+    instead of erroring.
+
+13. **#116 — Search refinements + reopen-alert.** Two sub-deliverables
+    bundled because both are small UX wins on existing pages:
+    (a) `/events` query language — promote from filter form to a
+        single text-input parser supporting `host:foo class:1007 since:24h`-shape
+        tokens, with autocomplete on the host and class axes. Filter
+        form stays as the fallback for non-shell users (toggle).
+        Query history at `/events/history` — last-50-queries per user,
+        click to re-run.
+    (b) Reopen-alert — `closed → in_progress` transition on the
+        `/alerts/{id}/transition` endpoint (existing route, just add
+        the transition to `IsValidAlertTransition`). Was deferred from
+        Phase 3 #61 ("closed is terminal in v1, reopen Phase 5"); slid
+        to Phase 6. Audit logs the reopen with `alert.reopened` reason.
+    Touches: `server/internal/console/events.go`, new
+    `server/internal/console/static/query-parser.js`, new
+    `server/internal/store/pg/query_history.go`, migrations
+    `00022_query_history.sql`, `server/internal/store/pg/alerts.go`
+    (transition table), `server/internal/console/alerts.go`. **Exit:**
+    unit tests for query-parser tokeniser (host:/class:/since: forms,
+    quoted strings, unknown tokens fall through to raw-bytes contains);
+    reopen-alert path 200s and writes audit row.
+
+14. **#117 — Keystore Gap A resolution + ADR-0038.** Decide between
+    options (a) drop kernel-keyring entirely, (b) `KEY_SPEC_USER_KEYRING`
+    (`@u`) per-uid persistent, (c) systemd helper unit pre-populating
+    via `KeyringMode=shared`. ADR-0037 narrowed the trade table; this
+    task makes the call with code. Working hypothesis from the trade
+    table: option (b) — `@u` survives session boundary, available on
+    every kernel ≥ 3.5, smallest code change vs (a)/(c). Validate
+    against Debian 13 + RHEL 10 + Ubuntu 24.04 + the OCI image during
+    the task's integration tests, not during #120. ADR-0038 records
+    the chosen option + the alternatives considered. `docs/threat-model.md
+    §"Surface 4"` rewritten to describe the chosen strategy as the
+    primary cert store, file fallback for keyring-unavailable hosts.
+    Touches: `agent/internal/keystore/keyring_linux.go`, possibly
+    `deploy/systemd/slither-agent.service` (KeyringMode=shared if (c)),
+    new `docs/adr/0038-keystore-strategy.md`, `docs/threat-model.md`.
+    **Exit:** integration test on all four host shapes — keyring
+    survives enroll → restart → second-boot lookup; unattended-host
+    use cases (no PAM session) still resolve cleanly.
+
+15. **#118 — TPM-sealed cert variant.** New `agent/internal/keystore/tpm_linux.go`
+    using `github.com/google/go-tpm` (or equivalent). PCR 7 (Secure
+    Boot state) bound — host that boots un-Secure-Boot can't unseal.
+    Opt-in via `agent.keystore.tpm: true` in `agent.yaml`; absent
+    `/dev/tpmrm0` or unreadable PCR → fall back to #117's chosen
+    keyring strategy → fall back to file. Operator workflow: on
+    first enroll with TPM enabled, the seal is created; on every
+    subsequent boot, agent unseals against current PCR state. PCR
+    re-measure (kernel update changing the boot chain) breaks the
+    seal — operator-visible failure mode documented in install.md.
+    **Not the default** — the configuration matrix gets large fast
+    and ROI without measured boot is small. ADR-0037 already locks
+    the scope. Touches: `agent/internal/keystore/tpm_linux.go` (new),
+    `agent/internal/keystore/store.go` (TPM as another `Store` impl
+    behind the same interface), `docs/install.md` (TPM section,
+    "When to use this"). **Exit:** integration test on a TPM-equipped
+    VM (AWS nitro-enclave-shaped instance) — seal on enroll, unseal
+    on restart; intentionally bump kernel → next boot fails to unseal,
+    falls back, operator sees the documented error.
+
+16. **#119 — Multi-arch buildx + live k8s validation (#93 carry-over).**
+    Phase 5 #93 shipped a single-arch amd64 OCI build with daemonset
+    YAML; multi-arch buildx + live cluster validation were deferred.
+    This task: (i) `.github/workflows/release.yml` extended with
+    `docker buildx` for `linux/amd64` + `linux/arm64` on the agent +
+    server images; (ii) k3s spin-up on a Phase 6 validation VM,
+    daemonset deploy via the existing `deploy/k8s/daemonset.yaml`,
+    enrolment + event-flow + revoke-cycle smoke; (iii) k8s-shape
+    documentation in `docs/install.md §"Kubernetes deployment"`
+    (PVC sizing, Secret rotation pattern, daemonset rolling-restart
+    behaviour). Touches: `.github/workflows/release.yml`,
+    `docs/install.md`, possibly small `deploy/k8s/*.yaml` tweaks
+    surfaced by live validation. **Exit:** `ghcr.io/.../slither-agent:vX`
+    has both arch manifests; daemonset on k3s reports events to the
+    server; arm64 host (Graviton EC2) runs the agent natively without
+    qemu-user.
+
+17. **#120 — Phase 6 exit validation.** Doc-backed manual run on the
+    Phase 3/4/5 cloud fleet (existing stopped instances —
+    `start-instances` brings them back; allocate one Graviton instance
+    for arm64 coverage from #119). Validates:
+    (i) extension supervisor — install osquery bridge on Debian 13
+        + RHEL 10 + Ubuntu 24.04, signed-bundle install path works,
+        tampered binary refuses cleanly, OCSF events from osquery
+        land in CH with `provenance.tag=osquery`;
+    (ii) live-query hunt — dispatch `SELECT * FROM listening_ports`
+        against the 3-host fleet, all three respond within 60s,
+        results aggregate at `/hunt/{id}` with per-host attribution;
+        per-host row cap enforced;
+    (iii) snapshot-on-alert wire — fire a rule with
+        `slither.snapshot: true`, alert detail surfaces the
+        "no snapshot extensions configured" note (Phase 6 ships no
+        snapshot provider — empty path validation);
+    (iv) server-side tamper-chain cross-check — happy path emits
+        clean summaries; intentional pg-side audit-row tamper fires
+        `chain.mismatch` within 5 minutes; chain-status page
+        reflects;
+    (v) console SSO — Dex-shaped IdP integration roundtrip; first-
+        login user creation; role mapping; IdP-down fallback;
+    (vi) live process-tree explorer — replaces the mini-graph on a
+        real alert; expand-on-click walks the tree; right-click
+        response actions respect host policy;
+    (vii) saved queries + dashboards — operator saves filters from
+        `/events`, `/alerts`, `/hunt`; assembles a dashboard;
+        per-user persistence;
+    (viii) search refinements — `host:foo class:1007 since:24h`
+        parses on `/events`; reopen-alert transition works;
+    (ix) keystore Gap A resolution — chosen strategy survives the
+        enroll → restart → second-boot lookup cycle on every host
+        shape;
+    (x) TPM-sealed cert variant — opt-in path works on the TPM-
+        equipped instance; PCR-bump fallback observable on a
+        kernel update;
+    (xi) multi-arch + live k8s — daemonset on k3s reports events;
+        Graviton agent runs natively;
+    (xii) sustained-load backpressure e2e (deferred from Phase 5
+        #103 V8) — `make load-test` against the fleet under pinned
+        slow CH writer; agents observably raise NetworkActivity
+        sampling within 30s; recovery within 30s of writer unpin.
+    Capture under `phase6_validation/`; commit
+    `docs/phase6-validation.md`. **Exit:** all green; Phase 6
+    closed; Phase 7 (platform expansion) opens or stays parked
+    pending demand per ADR-0037.
+
+### 8.2 Cross-cutting notes
+
+- **Wire stays additive within slither.v1.** Phase 6 adds three
+  fields: `ServerMessage.hunt_query`, `ClientMessage.hunt_result`,
+  `ClientMessage.chain_summary`. The extension wire is a *new*
+  namespace (`extension.proto`) — first-party only, not part of
+  slither.v1's public surface, no wire-freeze obligations. ADR-0011's
+  invariant on slither.v1 holds.
+- **First operator-facing capability since Phase 4.** Phase 5 was
+  deliberately invisible to end-users; Phase 6 puts the live-query
+  hunt + dashboards + SSO in front of operators. Release notes for
+  Phase 6 are user-facing, not just changelog-facing.
+- **Default-detect-only carries forward.** Per ADR-0034, every
+  freshly-enrolled host lands at all-false. Extensions inherit the
+  same posture — capability declarations are operator-scoped, not
+  auto-granted.
+- **§10 closes for v1.** §10.5 (rule signing — closed by #108),
+  §10.6 (extension distribution — closed by #108), §10.7 (console
+  SSO — closed by #113), §10.2's TPM piece (closed by #118). Only
+  §10.3 (CH schema evolution under OCSF version bumps) remains open
+  — we have the harness from Phase 5 #99; we don't yet have a forced
+  bump.
+- **Snapshot-on-alert lands empty.** No extension in Phase 6 provides
+  snapshots. This is deliberate — Phase 7's auditd / FIM / canary
+  candidates are the natural snapshot providers; locking the wire +
+  alert-detail UX without coupling rollout buys Phase 7 a clean
+  slot-in.
+- **Action surface still frozen.** Phase 4's six actions hold. New
+  actions still need an ADR + an additive enum bump per §2.4.
+
+**Estimated effort:** 8–10 weeks for one person — Phase 6 is broader
+than Phase 5 because the extension model (4 tasks) and console
+expansion (4 tasks) are independent fronts. Biggest unknowns:
+#107 (cosign verify on every spawn — latency budget vs operator
+restart UX), #110 (live-query latency budget across ≥10-host fleets
+— osquery itself is fast; the aggregation + console SSE-shaped
+streaming is the unknown), #114 (vanilla-JS process-tree pan/zoom
+without a framework — refresh-load + lazy-expand state machine is
+fiddlier than #65's SSR shape), and #118 (TPM PCR re-measure UX
+across distros — PCR 7 semantics differ subtly between Secure Boot
+implementations).
 
 ## 9. Phase 7 — Platform Expansion (bullet, demand-driven)
 
