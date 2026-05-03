@@ -25,7 +25,7 @@ func TestCosignVerifier_MissingCosignBinary(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when cosign binary missing")
 	}
-	if !strings.Contains(err.Error(), "cosign verifier requires") {
+	if !strings.Contains(err.Error(), "cosign binary not on PATH") {
 		t.Errorf("error should mention missing cosign; got %v", err)
 	}
 }

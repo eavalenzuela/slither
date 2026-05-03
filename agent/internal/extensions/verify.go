@@ -3,9 +3,8 @@ package extensions
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os/exec"
-	"strings"
+
+	"github.com/t3rmit3/slither/pkg/sigverify"
 )
 
 // SignatureVerifier verifies an extension binary before spawn. The
@@ -24,28 +23,24 @@ type SignatureVerifier interface {
 
 // ErrSignatureRefused indicates the signature was checked and rejected.
 // Callers can errors.Is on it to distinguish "wrong signature" from
-// "couldn't even attempt verify".
-var ErrSignatureRefused = errors.New("extensions: signature refused")
+// "couldn't even attempt verify". Aliased onto pkg/sigverify's sentinel
+// (Phase 6 #108) so both consumers (this supervisor + slither-db
+// rule-bundle import) report the same failure mode.
+var ErrSignatureRefused = sigverify.ErrSignatureRefused
 
-// CosignVerifier shells out to the `cosign` CLI to perform a keyless
-// verify-blob check. The slither release pipeline (Phase 5 #91) signs
-// with the same toolchain, producing detached .sig + .pem sidecars
-// alongside each binary; this verifier consumes them.
-//
-// Why shell out rather than vendor the in-process API: github.com/
-// sigstore/cosign/v2 pulls in ~150 transitive deps, including a chunk
-// of the kubernetes API surface. Verify-on-spawn happens once per
-// supervisor restart cycle (long-lived extension processes); the cost
-// of forking cosign is negligible compared to the dependency footprint
-// of vendoring it.
+// CosignVerifier delegates to pkg/sigverify (ADR-0039) for the
+// cosign-keyless verify-blob check. The slither release pipeline
+// (Phase 5 #91) signs with the same toolchain, producing detached
+// .sig + .pem sidecars alongside each binary; this verifier consumes
+// them.
 type CosignVerifier struct {
-	// IdentityRegexp pinned the certificate-identity claim — the URL
-	// of the workflow that produced the binary. Operators with their
-	// own signing pipeline override this to their own workflow URL.
+	// IdentityRegexp pins the certificate-identity claim — the URL
+	// of the workflow that produced the binary. Empty falls back to
+	// pkg/sigverify.DefaultIdentityRegexp (the slither release pipeline).
 	IdentityRegexp string
 
-	// OIDCIssuer pins the issuer claim. Defaults to GitHub Actions
-	// for the keyless flow Slither's release pipeline uses.
+	// OIDCIssuer pins the issuer claim. Empty falls back to
+	// pkg/sigverify.DefaultOIDCIssuer.
 	OIDCIssuer string
 
 	// SignaturePath + CertificatePath point at the detached .sig + .pem
@@ -59,48 +54,35 @@ type CosignVerifier struct {
 	CosignBinary string
 }
 
-// Verify runs `cosign verify-blob`, mapping its outcomes onto the
-// SignatureVerifier contract.
+// Verify delegates to pkg/sigverify.VerifyBlob, with sidecar paths
+// resolved per ADR-0039's "alongside the artefact" convention when
+// SignaturePath / CertificatePath are empty.
 func (v *CosignVerifier) Verify(ctx context.Context, binaryPath string) error {
-	bin := v.CosignBinary
-	if bin == "" {
-		bin = "cosign"
-	}
-	if _, err := exec.LookPath(bin); err != nil {
-		return fmt.Errorf("extensions: cosign verifier requires %q on PATH: %w", bin, err)
-	}
-
 	sig := v.SignaturePath
-	if sig == "" {
-		sig = binaryPath + ".sig"
-	}
 	cert := v.CertificatePath
-	if cert == "" {
-		cert = binaryPath + ".pem"
-	}
-
-	args := []string{
-		"verify-blob",
-		"--certificate-identity-regexp", v.IdentityRegexp,
-		"--certificate-oidc-issuer", v.OIDCIssuer,
-		"--signature", sig,
-		"--certificate", cert,
-		binaryPath,
-	}
-	cmd := exec.CommandContext(ctx, bin, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		// cosign exits non-zero on policy mismatch and on missing
-		// files; the textual output disambiguates. Map the policy
-		// failure cleanly so callers can distinguish.
-		text := strings.ToLower(string(out))
-		if strings.Contains(text, "no matching signatures") ||
-			strings.Contains(text, "certificate identity") ||
-			strings.Contains(text, "certificate-identity") ||
-			strings.Contains(text, "issuer") {
-			return fmt.Errorf("%w: %s: %s", ErrSignatureRefused, binaryPath, strings.TrimSpace(string(out)))
+	if sig == "" || cert == "" {
+		defSig, defCert := sigverify.SidecarPaths(binaryPath)
+		if sig == "" {
+			sig = defSig
 		}
-		return fmt.Errorf("extensions: cosign verify-blob %s: %w: %s", binaryPath, err, strings.TrimSpace(string(out)))
+		if cert == "" {
+			cert = defCert
+		}
+	}
+	err := sigverify.VerifyBlob(ctx, binaryPath, sig, cert, sigverify.Options{
+		IdentityRegexp: v.IdentityRegexp,
+		OIDCIssuer:     v.OIDCIssuer,
+		CosignBinary:   v.CosignBinary,
+	})
+	if err != nil {
+		// Surface ErrCosignMissing as the supervisor's "couldn't even
+		// attempt verify" path so operators see "extensions: cosign
+		// verifier requires cosign on PATH" rather than the package-
+		// internal sentinel name.
+		if errors.Is(err, sigverify.ErrCosignMissing) {
+			return err
+		}
+		return err
 	}
 	return nil
 }

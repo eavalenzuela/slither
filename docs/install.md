@@ -299,6 +299,62 @@ With `output.kind: stdout`, OCSF events land in the journal. Swap to
 
 There are two paths, and they target different audiences:
 
+### 5.0 Importing signed rule bundles (recommended)
+
+For out-of-band rule distribution — pulling a rule pack from a partner
+repo or from this project's release artefacts — use the signed-bundle
+path. This is the recommended workflow for any pack that didn't
+originate inside your own server.
+
+A signed bundle is a tar.gz of Sigma YAML files plus the cosign-keyless
+sidecars produced by `cosign sign-blob`:
+
+```
+slither-rules-v1.tgz
+slither-rules-v1.tgz.sig
+slither-rules-v1.tgz.pem
+```
+
+Verify offline before importing:
+
+```bash
+slither-db verify-rule-bundle ./slither-rules-v1.tgz
+# slither-db: bundle ./slither-rules-v1.tgz — verified, 23 YAML rule(s):
+#   01-process-creation/reverse-shell.yml (412 bytes)
+#   02-file-events/history-clear.yml      (358 bytes)
+#   ...
+```
+
+Import into the running server (verifies first, then upserts every YAML
+inside under one logical bundle — any compile failure aborts the
+whole import):
+
+```bash
+slither-db --dsn "$SLITHER_STORAGE_POSTGRES_DSN" \
+    insert-rule --signed-bundle ./slither-rules-v1.tgz
+```
+
+Both subcommands fail-closed:
+- Missing `cosign` on PATH → "sigverify: cosign binary not on PATH"
+- Tampered bundle / wrong signing identity → policy refusal, no DB writes
+- Tampered tar (path-traversal entry, symlink, oversize) → refused before any rule is parsed
+- Compile failure on any rule inside → "compile X: ..." aborts before any rule is upserted
+
+Operators with downstream forks override the trust root:
+
+```bash
+slither-db verify-rule-bundle \
+    --cosign-identity-regexp '^https://github\.com/your-org/.*' \
+    --cosign-oidc-issuer https://token.actions.githubusercontent.com \
+    ./bundle.tgz
+```
+
+ADR-0039 documents the bundle format + trust root in detail.
+
+The legacy `--file YAML` flow stays for one-off edits and dev loops; it
+does not require a signature. Use it for ad-hoc tweaks against rules
+that already live in the server.
+
 ### 5.1 Server-push (production)
 
 For agents enrolled to a `slither-server` (`output.kind: grpc`), rule
@@ -347,7 +403,80 @@ The two paths are independent: a SIGHUP-driven reload swaps in
 local-YAML rules, but the next server push will replace those with
 the canonical fleet ruleset.
 
-## 6. Uninstall
+## 6. Installing extensions (Phase 6 #107 / #108)
+
+The agent supervises out-of-process extensions over a unix socket
+length-delimited protobuf wire (ADR-0037). Extensions are
+operator-installed (no server-pushed binaries) and verified via
+cosign-keyless on every spawn (ADR-0039). One reference extension
+ships with v1: `slither-ext-osquery` (#109).
+
+### 6.1 Install a signed extension binary
+
+Place the binary plus its `.sig` + `.pem` sidecars under
+`/usr/lib/slither/extensions/` (or any path the operator prefers):
+
+```bash
+sudo install -m 0755 slither-ext-osquery     /usr/lib/slither/extensions/
+sudo install -m 0644 slither-ext-osquery.sig /usr/lib/slither/extensions/
+sudo install -m 0644 slither-ext-osquery.pem /usr/lib/slither/extensions/
+```
+
+### 6.2 Declare the extension in `agent.yaml`
+
+```yaml
+extensions:
+  - name: osquery
+    binary_path: /usr/lib/slither/extensions/slither-ext-osquery
+    capabilities:
+      - ocsf_emit
+      - live_query_respond
+    # signature_verification defaults to "cosign" — leave it at default
+    # in production. Override to "disabled" for dev/CI loops only.
+    rss_limit_mib: 256
+```
+
+`capabilities` is the operator allow-list. The extension declares its
+own capabilities on Hello; the supervisor uses the intersection. An
+extension that declares a capability not in this list is refused —
+the supervisor tears the connection down and ticks
+`ext_capability_violations` rather than silently running with reduced
+capabilities.
+
+### 6.3 Reload + verify
+
+Restart the agent (extensions are not yet reloadable via SIGHUP):
+
+```bash
+sudo systemctl restart slither-agent.service
+journalctl -u slither-agent.service -e | grep "ext: spawned"
+# 2026-05-03 ... INFO ext: spawned ext=osquery version=0.1.0 capabilities=[ocsf_emit live_query_respond]
+```
+
+A failed signature surfaces as
+`ext: cycle ended with error err=verify: sigverify: signature refused`
+and the supervisor backs off + retries — leaving the failed extension
+in place will produce a steady drip of restart attempts that operators
+should remediate (replace the binary or the sidecars with a freshly
+signed copy).
+
+### 6.4 Operators with downstream forks
+
+If your release pipeline signs against a different identity, override
+the trust root per-extension:
+
+```yaml
+extensions:
+  - name: osquery
+    binary_path: /usr/lib/slither/extensions/slither-ext-osquery
+    capabilities: [ocsf_emit]
+    cosign_identity_regexp: '^https://github\.com/your-org/.*'
+    cosign_oidc_issuer: https://token.actions.githubusercontent.com
+```
+
+Defaults pin the slither release pipeline.
+
+## 7. Uninstall
 
 ```bash
 sudo systemctl disable --now slither-agent.service
