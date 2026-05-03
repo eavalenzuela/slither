@@ -37,6 +37,21 @@ type Counters struct {
 	responseExecQueueFull     atomic.Uint64
 	responseExecPanic         atomic.Uint64
 	responseExecResultDropped atomic.Uint64
+
+	// extensions — Phase 6 #107 supervisor metrics. ExtSpawned counts
+	// successful spawn-and-Hello cycles (per extension, per restart).
+	// ExtSignatureFailures records cosign verify failures at spawn time
+	// (fail-closed; the extension is not spawned). ExtCapabilityViolations
+	// fires when an extension emits a message kind it didn't declare on
+	// Hello — connection torn down, restart counter ticked.
+	// ExtRestarts ticks every supervisor backoff cycle. ExtEventsEmitted
+	// is the count of OCSFEvent envelopes the supervisor passed through
+	// after capability gating + agent stamping.
+	extSpawned              atomic.Uint64
+	extRestarts             atomic.Uint64
+	extSignatureFailures    atomic.Uint64
+	extCapabilityViolations atomic.Uint64
+	extEventsEmitted        atomic.Uint64
 }
 
 // NewCounters returns a zero-valued Counters.
@@ -129,6 +144,30 @@ func (c *Counters) IncResponseExecPanic() { c.responseExecPanic.Add(1) }
 // small for the burst rate.
 func (c *Counters) IncResponseExecResultDropped() { c.responseExecResultDropped.Add(1) }
 
+// IncExtSpawned bumps the extension-spawned counter — one per Hello-
+// completed connection. Restart cycles tick this again.
+func (c *Counters) IncExtSpawned() { c.extSpawned.Add(1) }
+
+// IncExtRestart bumps the extension-restart counter. Every supervisor
+// backoff cycle adds one regardless of the failure cause.
+func (c *Counters) IncExtRestart() { c.extRestarts.Add(1) }
+
+// IncExtSignatureFailure bumps the cosign-verify-failed counter.
+// Verifies happen pre-spawn; failures keep the extension off the
+// agent and tick this counter once per attempt.
+func (c *Counters) IncExtSignatureFailure() { c.extSignatureFailures.Add(1) }
+
+// IncExtCapabilityViolation bumps the capability-violation counter.
+// Fires when an extension emits a message kind it didn't declare on
+// Hello, or claims a capability not in the operator's allow list.
+func (c *Counters) IncExtCapabilityViolation() { c.extCapabilityViolations.Add(1) }
+
+// IncExtEventEmitted bumps the per-event passthrough counter. Counts
+// every OCSFEvent envelope the supervisor forwarded after capability
+// gate + stamping, regardless of whether the engine ultimately matched
+// it.
+func (c *Counters) IncExtEventEmitted() { c.extEventsEmitted.Add(1) }
+
 // Snapshot captures the current counter values.
 type Snapshot struct {
 	EventsProduced   uint64
@@ -149,6 +188,12 @@ type Snapshot struct {
 	ResponseExecQueueFull     uint64
 	ResponseExecPanic         uint64
 	ResponseExecResultDropped uint64
+
+	ExtSpawned              uint64
+	ExtRestarts             uint64
+	ExtSignatureFailures    uint64
+	ExtCapabilityViolations uint64
+	ExtEventsEmitted        uint64
 }
 
 // Snapshot returns a point-in-time view of the counters.
@@ -171,5 +216,10 @@ func (c *Counters) Snapshot() Snapshot {
 		ResponseExecQueueFull:     c.responseExecQueueFull.Load(),
 		ResponseExecPanic:         c.responseExecPanic.Load(),
 		ResponseExecResultDropped: c.responseExecResultDropped.Load(),
+		ExtSpawned:                c.extSpawned.Load(),
+		ExtRestarts:               c.extRestarts.Load(),
+		ExtSignatureFailures:      c.extSignatureFailures.Load(),
+		ExtCapabilityViolations:   c.extCapabilityViolations.Load(),
+		ExtEventsEmitted:          c.extEventsEmitted.Load(),
 	}
 }

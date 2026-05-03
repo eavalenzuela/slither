@@ -14,6 +14,7 @@ import (
 	"github.com/t3rmit3/slither/agent/internal/collector"
 	"github.com/t3rmit3/slither/agent/internal/config"
 	"github.com/t3rmit3/slither/agent/internal/enricher"
+	"github.com/t3rmit3/slither/agent/internal/extensions"
 	"github.com/t3rmit3/slither/agent/internal/ioc"
 	"github.com/t3rmit3/slither/agent/internal/output"
 	"github.com/t3rmit3/slither/agent/internal/selfprotect"
@@ -140,15 +141,31 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	// cache merges max(server, self).
 	go backpressure.RunSelfWatch(ctx, bpCache, telem, backpressure.SelfWatchOptions{})
 
-	errs := make(chan error, 4)
+	// Phase 6 #107 — extensions supervisor. NewManager validates each
+	// extension's verifier wiring; on error we surface it as a config
+	// problem and refuse to boot rather than silently dropping
+	// extensions (operator misspelled signature_verification etc.).
+	extMgr, err := extensions.NewManager(cfg.Extensions, extensions.DefaultVerifierFor, deviceIdentity(cfg), telem, 1024)
+	if err != nil {
+		return fmt.Errorf("app: extensions: %w", err)
+	}
+
+	// Fan-in: extension OCSF events flow into the same channel the
+	// engine reads. Native enricher events take priority via a
+	// preferential select; under contention extension events queue on
+	// the manager's own buffered channel rather than the merged feed.
+	engineIn := mergeEvents(ctx, enr.Events(), extMgr.Events())
+
+	errs := make(chan error, 5)
 	go func() { errs <- cg.Run(ctx) }()
 	go func() { errs <- enr.Run(ctx) }()
-	go func() { errs <- eng.Run(ctx, enr.Events()) }()
+	go func() { errs <- extMgr.Run(ctx) }()
+	go func() { errs <- eng.Run(ctx, engineIn) }()
 	go func() { errs <- sink.Run(ctx, eng.Output()) }()
 
 	// Return on first non-cancellation error; otherwise wait for ctx.
 	var runErr error
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 5; i++ {
 		select {
 		case err := <-errs:
 			if err != nil && !isCancelled(err, ctx) {
@@ -171,11 +188,12 @@ report:
 	// the line shape stays stable across log_level changes.
 	snap := telem.Snapshot()
 	fmt.Fprintf(os.Stderr,
-		"telemetry: events=%d dropped=%d (collector=%d dispatch=%d enricher=%d engine=%d output=%d) detections=%d ringbuf_overflows=%d output_reconnects=%d heartbeats_sent=%d\n",
+		"telemetry: events=%d dropped=%d (collector=%d dispatch=%d enricher=%d engine=%d output=%d) detections=%d ringbuf_overflows=%d output_reconnects=%d heartbeats_sent=%d ext_spawned=%d ext_restarts=%d ext_signature_failures=%d ext_capability_violations=%d ext_events_emitted=%d\n",
 		snap.EventsProduced, snap.EventsDropped,
 		snap.DropsCollector, snap.DropsDispatch, snap.DropsEnricher, snap.DropsEngine, snap.DropsOutput,
 		snap.DetectionsFired, snap.RingbufOverflows,
-		snap.OutputReconnects, snap.HeartbeatsSent)
+		snap.OutputReconnects, snap.HeartbeatsSent,
+		snap.ExtSpawned, snap.ExtRestarts, snap.ExtSignatureFailures, snap.ExtCapabilityViolations, snap.ExtEventsEmitted)
 	return runErr
 }
 
@@ -400,6 +418,45 @@ func applyRuleSetTo(eng ruleengine.Engine, telem *telemetry.Counters, iocStore *
 			emitDiag(warnings)
 		}
 	}
+}
+
+// mergeEvents fans the native enricher and extension supervisor event
+// streams into a single channel for the rule engine. Both inputs are
+// drained in parallel; the merged channel closes when both inputs do.
+// Buffered to absorb bursty extension event rates without back-
+// pressuring the enricher.
+func mergeEvents(ctx context.Context, a, b <-chan ocsf.Event) <-chan ocsf.Event {
+	out := make(chan ocsf.Event, 1024)
+	go func() {
+		defer close(out)
+		for a != nil || b != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case ev, ok := <-a:
+				if !ok {
+					a = nil
+					continue
+				}
+				select {
+				case out <- ev:
+				case <-ctx.Done():
+					return
+				}
+			case ev, ok := <-b:
+				if !ok {
+					b = nil
+					continue
+				}
+				select {
+				case out <- ev:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return out
 }
 
 // deviceIdentity builds the OCSF Device stamp used in every emitted event.

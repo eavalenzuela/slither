@@ -19,10 +19,52 @@ import (
 
 // Config is the root agent configuration.
 type Config struct {
-	Agent      Agent      `yaml:"agent"`
-	Collectors Collectors `yaml:"collectors"`
-	Rules      Rules      `yaml:"rules"`
-	Output     Output     `yaml:"output"`
+	Agent      Agent       `yaml:"agent"`
+	Collectors Collectors  `yaml:"collectors"`
+	Rules      Rules       `yaml:"rules"`
+	Output     Output      `yaml:"output"`
+	Extensions []Extension `yaml:"extensions"`
+}
+
+// Extension declares one out-of-process first-party extension the agent
+// supervises (Phase 6 #107). The agent verifies the binary's cosign
+// signature on every spawn, intersects the operator-declared
+// capabilities with what the extension claims on Hello, and supervises
+// the process with backoff.
+type Extension struct {
+	// Name is the operator-friendly identifier; surfaces in logs +
+	// telemetry. Must be unique across the extensions list.
+	Name string `yaml:"name"`
+	// BinaryPath is the absolute path to the extension binary.
+	BinaryPath string `yaml:"binary_path"`
+	// SignaturePath points at the cosign sign-blob output. When empty,
+	// the agent looks for {BinaryPath}.sig + {BinaryPath}.pem alongside.
+	SignaturePath string `yaml:"signature_path"`
+	// CertificatePath is the cosign-keyless certificate. When empty,
+	// the agent looks for {BinaryPath}.pem alongside.
+	CertificatePath string `yaml:"certificate_path"`
+	// Capabilities the operator authorises this extension to hold.
+	// Any capability the extension declares on Hello that is not in
+	// this list is refused; the connection is torn down and the
+	// extension is restarted with backoff.
+	Capabilities []string `yaml:"capabilities"`
+	// SignatureVerification controls signing enforcement. "cosign" (the
+	// default) shells out to the cosign CLI; "disabled" skips verify
+	// entirely (dev/CI only). Production deployments must leave this
+	// at the default.
+	SignatureVerification string `yaml:"signature_verification"`
+	// RSSLimitMiB is a soft RSS cap enforced via setrlimit(RLIMIT_AS).
+	// Zero defaults to 256 MiB. Process exceeding the cap is killed by
+	// the kernel; the agent's supervisor records ext_rss_kills and
+	// restarts under backoff.
+	RSSLimitMiB int `yaml:"rss_limit_mib"`
+	// CosignIdentityRegexp is the certificate-identity regexp passed
+	// to `cosign verify-blob`. Defaults to the slither release pipeline
+	// identity. Operators with their own signing pipeline can override.
+	CosignIdentityRegexp string `yaml:"cosign_identity_regexp"`
+	// CosignOIDCIssuer is the issuer claim cosign requires. Defaults
+	// to GitHub's actions issuer for keyless OIDC verification.
+	CosignOIDCIssuer string `yaml:"cosign_oidc_issuer"`
 }
 
 // Agent holds host-level agent settings.
@@ -119,7 +161,16 @@ var validLogLevels = []string{"debug", "info", "warn", "error"}
 var validOutputKinds = []string{"stdout", "grpc"}
 
 // topLevelKeys is the authoritative set of root keys for typo suggestions.
-var topLevelKeys = []string{"agent", "collectors", "rules", "output"}
+var topLevelKeys = []string{"agent", "collectors", "rules", "output", "extensions"}
+
+// validSignatureVerification are the supported per-extension verify modes.
+var validSignatureVerification = []string{"cosign", "disabled"}
+
+// validExtensionCapabilities are the wire-defined capability strings.
+// They mirror the Capability enum on extension.proto via lowercase
+// strings the operator writes in YAML; the supervisor maps to the
+// proto enum when handshaking with extensions.
+var validExtensionCapabilities = []string{"ocsf_emit", "live_query_respond", "snapshot_provide"}
 
 // Load reads, decodes, env-overrides, and validates the YAML file at path.
 // Top-level unknown keys come back as "did you mean X?" errors; every other
@@ -220,6 +271,60 @@ func (c *Config) Validate() error {
 	for i, p := range c.Rules.Paths {
 		if strings.TrimSpace(p) == "" {
 			return fmt.Errorf("%w: rules.paths[%d] is empty", ErrInvalidConfig, i)
+		}
+	}
+	if err := c.validateExtensions(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateExtensions enforces the per-extension invariants. Defaults
+// land here so the supervisor can read fields directly without
+// re-deriving them.
+func (c *Config) validateExtensions() error {
+	seen := make(map[string]int, len(c.Extensions))
+	for i := range c.Extensions {
+		ext := &c.Extensions[i]
+		if strings.TrimSpace(ext.Name) == "" {
+			return fmt.Errorf("%w: extensions[%d].name required", ErrInvalidConfig, i)
+		}
+		if dup, ok := seen[ext.Name]; ok {
+			return fmt.Errorf("%w: extensions[%d].name %q duplicates extensions[%d].name", ErrInvalidConfig, i, ext.Name, dup)
+		}
+		seen[ext.Name] = i
+		if !strings.HasPrefix(ext.BinaryPath, "/") {
+			return fmt.Errorf("%w: extensions[%d=%s].binary_path must be absolute", ErrInvalidConfig, i, ext.Name)
+		}
+		if ext.SignatureVerification == "" {
+			ext.SignatureVerification = "cosign"
+		}
+		if !known(validSignatureVerification, ext.SignatureVerification) {
+			return fmt.Errorf("%w: extensions[%d=%s].signature_verification %q (valid: %s)",
+				ErrInvalidConfig, i, ext.Name, ext.SignatureVerification, strings.Join(validSignatureVerification, ", "))
+		}
+		if len(ext.Capabilities) == 0 {
+			return fmt.Errorf("%w: extensions[%d=%s].capabilities cannot be empty", ErrInvalidConfig, i, ext.Name)
+		}
+		for j, cap := range ext.Capabilities {
+			if !known(validExtensionCapabilities, cap) {
+				return fmt.Errorf("%w: extensions[%d=%s].capabilities[%d]=%q (valid: %s)",
+					ErrInvalidConfig, i, ext.Name, j, cap, strings.Join(validExtensionCapabilities, ", "))
+			}
+		}
+		if ext.RSSLimitMiB < 0 {
+			return fmt.Errorf("%w: extensions[%d=%s].rss_limit_mib cannot be negative", ErrInvalidConfig, i, ext.Name)
+		}
+		if ext.RSSLimitMiB == 0 {
+			ext.RSSLimitMiB = 256
+		}
+		if ext.SignatureVerification == "cosign" {
+			if ext.CosignIdentityRegexp == "" {
+				ext.CosignIdentityRegexp = `^https://github\.com/t3rmit3/slither/\.github/workflows/release\.yml@refs/tags/v.*$`
+			}
+			if ext.CosignOIDCIssuer == "" {
+				ext.CosignOIDCIssuer = "https://token.actions.githubusercontent.com"
+			}
 		}
 	}
 	return nil
