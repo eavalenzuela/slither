@@ -131,7 +131,7 @@ writes telemetry to ClickHouse via the server.
 | **Spoofing** | Local-root attacker impersonates the agent to peer hosts | **Out of scope.** A local-root attacker on the agent host has the agent's cert and the agent's keyring; impersonation is by definition possible. The operator's response is to revoke + re-enrol. |
 | **Tampering** | Local attacker modifies the agent's state, rules, or audit chain | **Partially defended.** State dir 0700 root:root (Phase 5 #94). PR_SET_DUMPABLE=0 blocks ptrace + core dumps + /proc/<agent-pid>/* reads from non-owner UIDs. Tamper-evident hash chain (Phase 5 #95) makes silent log edits detectable on next boot. None of this defends against a local-root attacker who can write the chain AND control the agent's outbound channel — that's the explicit non-goal. |
 | **Repudiation** | Agent denies it killed a process | **Defended.** ResponseResult round-trips back to the server's `response_actions` audit row. Agent-side hash chain duplicates the record locally so an isolated agent (during a server outage) still has provable history. |
-| **Information disclosure** | Side-channel readout of agent memory | **Partially defended.** PR_SET_DUMPABLE=0 + state-dir lockdown covers /proc and core dumps. Kernel keyring (Phase 5 #98) keeps the client cert + key out of disk where the file fallback isn't taken. Memory of a running process is still visible to a CAP_SYS_PTRACE-holding peer; we don't defend against another root process on the same host. |
+| **Information disclosure** | Side-channel readout of agent memory | **Partially defended.** PR_SET_DUMPABLE=0 + state-dir lockdown covers /proc and core dumps. Cert + key live in `/etc/slither/` files at 0600 root:root — Phase 5 #103 V9 surfaced Gap A (the chosen `KEY_SPEC_SESSION_KEYRING` type is reaped at the enroll subprocess's session boundary, so it can't be the durable cross-process store), so the keyring write became best-effort additive on top of the file. Phase 6 #117 picks the durable keyring strategy (likely `KEY_SPEC_USER_KEYRING`/`@u` or a systemd helper unit); ADR-0038 will record the choice and this row will be rewritten to reflect the chosen primary store. Memory of a running process is still visible to a CAP_SYS_PTRACE-holding peer; we don't defend against another root process on the same host. |
 | **Denial of service** | Attacker SIGKILLs the agent | **Out of scope.** A local-root attacker can kill any process. Detection of agent absence is the server's job (heartbeat staleness → host marked offline at /hosts). |
 | **Elevation of privilege** | Compromised agent escapes to ring-0 | **No known vector via slither code.** BPF programs are kernel-verified. Capability bounding box prevents the agent from acquiring caps it didn't start with. The remaining attack surface is the kernel itself, which we explicitly don't defend against (see "what we don't defend against" below). |
 
@@ -225,7 +225,9 @@ What stacks together to make the bar reasonable:
   don't backfill `/live` with stale events.
 - End-to-end backpressure (Phase 5 #97) so a slow CH writer doesn't
   cascade into the agent's collectors.
-- Kernel-keyring storage for client cert (Phase 5 #98) when usable.
+- Cert + key on disk at `/etc/slither/` 0600 root:root (Phase 5 #98
+  files-first path); Phase 6 #117 picks the durable keyring strategy on
+  top, with #118 layering a TPM-sealed variant for opt-in hosts.
 - Cosign-signed reproducible release artefacts (Phase 5 #89/#91)
   with operator-facing verification recipe.
 

@@ -37,13 +37,27 @@ if command -v systemctl >/dev/null 2>&1; then
     systemctl try-restart slither-agent.service >/dev/null 2>&1 || true
 fi
 
-# 4. Tighten state-dir permissions. systemd's StateDirectory= would
-#    create /var/lib/slither at first activation with mode 0700, but
-#    the package owns the directory now so we set the mode explicitly.
-#    Existing data is preserved.
-chown root:root /var/lib/slither /var/log/slither /etc/slither 2>/dev/null || true
-chmod 0700      /var/lib/slither /var/log/slither            2>/dev/null || true
-chmod 0755      /etc/slither                                  2>/dev/null || true
+# 4. Tighten state-dir permissions. nfpm's `dir` payload + file_info
+#    handles fresh installs cleanly, but apt reinstall + dpkg-i
+#    preserve the existing dir's mode rather than re-applying the
+#    payload mode (#103 V1 surfaced /var/log/slither lingering at 0755
+#    after a prior 0755 install). So we chmod explicitly here, per-dir,
+#    and don't rely on chained-failure semantics.
+SLITHER_STATE_ROOT="${SLITHER_STATE_ROOT:-}"
+for d in "${SLITHER_STATE_ROOT}/var/lib/slither" "${SLITHER_STATE_ROOT}/var/log/slither"; do
+    if [ ! -d "$d" ]; then
+        mkdir -p "$d"
+    fi
+    chown root:root "$d" 2>/dev/null || true
+    chmod 0700      "$d"
+done
+
+# /etc/slither stays at 0755 — operator hand-edited configs live here;
+# a tighter mode would block non-root reads of the agent.yaml.sample.
+if [ -d "${SLITHER_STATE_ROOT}/etc/slither" ]; then
+    chown root:root "${SLITHER_STATE_ROOT}/etc/slither" 2>/dev/null || true
+    chmod 0755      "${SLITHER_STATE_ROOT}/etc/slither"
+fi
 
 cat <<'EOF'
 

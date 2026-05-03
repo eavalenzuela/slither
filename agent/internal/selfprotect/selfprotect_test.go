@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
 
@@ -65,6 +66,57 @@ func TestLockdownStateDirs_EmptyPaths(t *testing.T) {
 	}
 	if err := LockdownStateDirs(""); err != nil {
 		t.Errorf("empty path returned error: %v", err)
+	}
+}
+
+func TestLockdownStateDirs_AlreadyLockedDownNoOp(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	d := filepath.Join(tmp, "already-700")
+	if err := os.MkdirAll(d, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := LockdownStateDirs(d); err != nil {
+		t.Fatalf("LockdownStateDirs: %v", err)
+	}
+	fi, _ := os.Stat(d)
+	if got := fi.Mode().Perm(); got != 0o700 {
+		t.Errorf("mode = %v, want 0700", got)
+	}
+}
+
+func TestLockdownStateDirs_ROFSIsSkipped(t *testing.T) {
+	// Phase 5 #103 V1 captured the production surface: chmod against
+	// /etc/slither under ProtectSystem=strict returns EROFS;
+	// selfprotect must not bubble that as a WARN. Inject the errno
+	// via the chmodFn seam rather than constructing a real read-only
+	// mount (would need root + bind-mount privileges in CI).
+	tmp := t.TempDir()
+	d := filepath.Join(tmp, "ro")
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	prev := chmodFn
+	chmodFn = func(string, os.FileMode) error { return &os.PathError{Op: "chmod", Path: d, Err: syscall.EROFS} }
+	defer func() { chmodFn = prev }()
+	if err := LockdownStateDirs(d); err != nil {
+		t.Errorf("EROFS should be skipped silently; got %v", err)
+	}
+}
+
+func TestLockdownStateDirs_NonROFSChmodFails(t *testing.T) {
+	// EPERM and friends still surface — only EROFS is the read-only-
+	// mount carve-out.
+	tmp := t.TempDir()
+	d := filepath.Join(tmp, "eperm")
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	prev := chmodFn
+	chmodFn = func(string, os.FileMode) error { return &os.PathError{Op: "chmod", Path: d, Err: syscall.EPERM} }
+	defer func() { chmodFn = prev }()
+	if err := LockdownStateDirs(d); err == nil {
+		t.Error("EPERM should bubble as error; got nil")
 	}
 }
 

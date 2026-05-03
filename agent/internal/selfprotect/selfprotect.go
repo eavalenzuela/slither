@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"syscall"
 )
 
 // ErrTracerAttached is returned by CheckNotTraced when /proc/self/status
@@ -29,6 +30,10 @@ import (
 // hardenings try to prevent.
 var ErrTracerAttached = errors.New("selfprotect: ptrace tracer attached at startup")
 
+// chmodFn is the indirection point for tests that want to inject an
+// EROFS-shaped error without a real read-only mount.
+var chmodFn = os.Chmod
+
 // LockdownStateDirs sets mode 0700 on the agent's state, log, and
 // config directories. systemd's StateDirectory=/LogsDirectory= already
 // does this on supported distros; this is belt-and-braces for the
@@ -36,8 +41,12 @@ var ErrTracerAttached = errors.New("selfprotect: ptrace tracer attached at start
 // running the binary directly without the unit.
 //
 // Best-effort: directories that don't exist are silently skipped.
-// Permission errors are returned (a user that can't chmod the dir
-// also probably can't fix the security posture).
+// Read-only mounts (e.g. /etc/slither under systemd's
+// ProtectSystem=strict) are silently skipped — the parent unit's
+// hardening already covers the dir, and chmod against a read-only
+// FS is a self-inflicted WARN, not a real failure. Permission errors
+// otherwise are returned (a user that can't chmod the dir also
+// probably can't fix the security posture).
 func LockdownStateDirs(paths ...string) error {
 	for _, p := range paths {
 		if p == "" {
@@ -55,7 +64,14 @@ func LockdownStateDirs(paths ...string) error {
 			// silently rather than chmod a regular file to 0700.
 			continue
 		}
-		if err := os.Chmod(p, 0o700); err != nil {
+		if fi.Mode().Perm() == 0o700 {
+			// Already locked down — nothing to do.
+			continue
+		}
+		if err := chmodFn(p, 0o700); err != nil {
+			if errors.Is(err, syscall.EROFS) {
+				continue
+			}
 			return fmt.Errorf("selfprotect: chmod %s: %w", p, err)
 		}
 	}
