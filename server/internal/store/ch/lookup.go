@@ -211,6 +211,69 @@ func (s *Store) LookupProcessByPID(
 	return n, nil
 }
 
+// ListProcessAncestors walks parent_pid up to maxDepth hops starting
+// from rootPID on hostID. Returns the chain in root-to-startPID order:
+// [oldest_ancestor, ..., parent_of_root, root]. Empty when the root
+// PID has no observable ancestors in the lookback window. Phase 6 #114.
+//
+// The walk stops at any of: maxDepth hops, a missing parent in CH, or
+// a cycle (defensive — Linux pid_t cycles shouldn't happen but a
+// PID-namespace edge case + a confused mapping could leak one).
+//
+// Each hop is one LookupProcessByPID round trip. Bounded depth keeps
+// the alert-detail page's lazy-load latency predictable.
+func (s *Store) ListProcessAncestors(
+	ctx context.Context,
+	hostID string,
+	rootPID uint32,
+	observedBefore time.Time,
+	lookback time.Duration,
+	maxDepth int,
+) ([]EventNode, error) {
+	if rootPID == 0 || maxDepth <= 0 {
+		return nil, nil
+	}
+	if observedBefore.IsZero() {
+		observedBefore = time.Now()
+	}
+	if lookback <= 0 {
+		lookback = 24 * time.Hour
+	}
+	root, err := s.LookupProcessByPID(ctx, hostID, rootPID, observedBefore, lookback)
+	if err != nil {
+		if errors.Is(err, ErrEventNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("ch.ListProcessAncestors: root: %w", err)
+	}
+	chain := []EventNode{root}
+	seen := map[uint32]struct{}{rootPID: {}}
+	cur := root
+	for hops := 0; hops < maxDepth; hops++ {
+		if cur.ParentPID == 0 {
+			break
+		}
+		if _, dup := seen[cur.ParentPID]; dup {
+			break
+		}
+		parent, perr := s.LookupProcessByPID(ctx, hostID, cur.ParentPID, observedBefore, lookback)
+		if perr != nil {
+			if errors.Is(perr, ErrEventNotFound) {
+				break
+			}
+			return nil, fmt.Errorf("ch.ListProcessAncestors: hop pid=%d: %w", cur.ParentPID, perr)
+		}
+		seen[parent.PID] = struct{}{}
+		chain = append(chain, parent)
+		cur = parent
+	}
+	// Reverse so the slice reads root-of-tree → original PID.
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
+	}
+	return chain, nil
+}
+
 func (s *Store) lookupByEventID(ctx context.Context, classUID uint32, table string, eventUUID uuid.UUID) (EventNode, bool, error) {
 	stmt := fmt.Sprintf(`
 		SELECT %s

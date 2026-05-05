@@ -2,6 +2,7 @@ package console
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -151,16 +152,17 @@ func (s *Server) alertDetail(w http.ResponseWriter, r *http.Request) {
 	snapshots, snapshotRequested := s.loadSnapshotInventory(r.Context(), row.ID, row.RuleUID)
 
 	render(w, r, views.AlertDetail(views.AlertDetailData{
-		Alert:             row,
-		AllowedNext:       allowedNextStatuses(row.Status),
-		IsAnalyst:         role == pg.RoleAnalyst || role == pg.RoleAdmin,
-		IsAdmin:           role == pg.RoleAdmin,
-		Flash:             flash,
-		ShowGraph:         s.graphBuilder != nil && len(row.EventIDs) > 0,
-		HostPolicy:        policy,
-		ResponseHistory:   history,
-		Snapshots:         snapshots,
-		SnapshotRequested: snapshotRequested,
+		Alert:                   row,
+		AllowedNext:             allowedNextStatuses(row.Status),
+		IsAnalyst:               role == pg.RoleAnalyst || role == pg.RoleAdmin,
+		IsAdmin:                 role == pg.RoleAdmin,
+		Flash:                   flash,
+		ShowGraph:               s.graphBuilder != nil && len(row.EventIDs) > 0,
+		HostPolicy:              policy,
+		ResponseHistory:         history,
+		Snapshots:               snapshots,
+		SnapshotRequested:       snapshotRequested,
+		ShowProcessTreeExplorer: s.processTreeJSON != nil && len(row.EventIDs) > 0,
 	}))
 }
 
@@ -217,6 +219,88 @@ func (s *Server) loadSnapshotInventory(ctx context.Context, alertID, ruleUID str
 		}
 	}
 	return out, requested
+}
+
+// alertProcessTreeJSON serves Phase 6 #114's live process-tree
+// explorer payload. Inputs (query string): root_pid (required, > 0;
+// defaults to the alert's first triggering event's actor PID when
+// omitted), depth (optional, 1..8, default 4). 404s on missing alert
+// or when no PID can be derived; the page UX falls back to the
+// SSR mini-graph in that case.
+func (s *Server) alertProcessTreeJSON(w http.ResponseWriter, r *http.Request) {
+	if s.processTreeJSON == nil {
+		http.NotFound(w, r)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		http.Error(w, "missing alert id", http.StatusBadRequest)
+		return
+	}
+	row, err := s.store.GetAlert(r.Context(), id)
+	switch {
+	case errors.Is(err, pg.ErrAlertNotFound):
+		http.NotFound(w, r)
+		return
+	case err != nil:
+		http.Error(w, "load alert failed", http.StatusInternalServerError)
+		return
+	}
+
+	q := r.URL.Query()
+	depth := 4
+	if d := strings.TrimSpace(q.Get("depth")); d != "" {
+		v, perr := strconv.Atoi(d)
+		if perr != nil || v < 1 || v > 8 {
+			http.Error(w, "bad depth", http.StatusBadRequest)
+			return
+		}
+		depth = v
+	}
+
+	var rootPID uint32
+	if p := strings.TrimSpace(q.Get("root_pid")); p != "" {
+		v, perr := strconv.ParseUint(p, 10, 32)
+		if perr != nil || v == 0 {
+			http.Error(w, "bad root_pid", http.StatusBadRequest)
+			return
+		}
+		rootPID = uint32(v)
+	} else {
+		// Default root: the alert's first triggering event's actor PID.
+		// GetEventNode walks every class table; process events expose
+		// PID directly, file/net via ActorPID.
+		if len(row.EventIDs) == 0 {
+			http.Error(w, "alert has no triggering events; supply root_pid", http.StatusBadRequest)
+			return
+		}
+		ev, lerr := s.chStore.GetEventNode(r.Context(), row.EventIDs[0])
+		if lerr != nil {
+			http.Error(w, "no triggering pid in CH; supply root_pid", http.StatusBadRequest)
+			return
+		}
+		switch {
+		case ev.PID != 0:
+			rootPID = ev.PID
+		case ev.ActorPID != 0:
+			rootPID = ev.ActorPID
+		default:
+			http.Error(w, "no triggering pid in CH; supply root_pid", http.StatusBadRequest)
+			return
+		}
+	}
+
+	tree, berr := s.processTreeJSON.Build(r.Context(), row.HostID, rootPID, depth, time.Time{})
+	if berr != nil {
+		http.Error(w, "build process tree failed", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if encErr := json.NewEncoder(w).Encode(tree); encErr != nil {
+		// Header is already flushed in most cases; logging is the only
+		// useful action.
+		_ = encErr
+	}
 }
 
 // alertSnapshotDownload serves <artefactDir>/<alert_id>/<extension>.tgz

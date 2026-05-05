@@ -61,6 +61,11 @@ type AlertDetailData struct {
 	// configured)" note when len(Snapshots) == 0 — operators see the
 	// rule asked for evidence but the agent had nowhere to ask.
 	SnapshotRequested bool
+
+	// ShowProcessTreeExplorer is true when the Phase 6 #114 live
+	// process-tree explorer should be embedded on the alert detail
+	// page. False keeps the SSR mini-graph as the only flow view.
+	ShowProcessTreeExplorer bool
 }
 
 // AlertSnapshot is one per-extension snapshot blob the dispatcher

@@ -114,6 +114,7 @@ type Server struct {
 	graphCache          *graph.Cache
 	graphBuilder        *detect.FlowGraphBuilder
 	processTreeBuilder  *detect.ProcessTreeBuilder
+	processTreeJSON     *detect.ProcessTreeJSONBuilder
 	responseHub         *respond.Hub
 	huntHub             *hunt.Hub
 	artefactDir         string
@@ -183,6 +184,12 @@ func New(opts Options) *Server {
 	if opts.GraphCache != nil && opts.ChStore != nil {
 		s.graphBuilder = &detect.FlowGraphBuilder{Lookup: opts.ChStore}
 		s.processTreeBuilder = &detect.ProcessTreeBuilder{Lookup: opts.ChStore}
+	}
+	// Phase 6 #114 — live process-tree JSON builder. Independent of
+	// the GraphCache (the explorer renders client-side, no SVG cache
+	// hop) so it lights up with just ChStore.
+	if opts.ChStore != nil {
+		s.processTreeJSON = &detect.ProcessTreeJSONBuilder{Lookup: opts.ChStore}
 	}
 	s.routes()
 	return s
@@ -267,6 +274,12 @@ func (s *Server) routes() {
 			Post("/alerts/{id}/transition", s.alertTransition)
 		if s.graphBuilder != nil {
 			r.Get("/alerts/{id}/graph.svg", s.alertGraph)
+		}
+		// Phase 6 #114 — live process-tree explorer. JSON endpoint
+		// the client SVG renderer fetches; lazy-loads expansions by
+		// re-calling with a different root_pid.
+		if s.processTreeJSON != nil {
+			r.Get("/alerts/{id}/process-tree.json", s.alertProcessTreeJSON)
 		}
 		// Phase 6 #111 — per-extension snapshot blob download. Reads
 		// from <artefactDir>/<alert_id>/<extension>.tgz; 404s if the

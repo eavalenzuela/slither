@@ -1610,7 +1610,7 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     validation paths (partial block, missing role_mappings, bad role,
     full block accepted, empty block accepted).)*
 
-11. **#114 — Live process-tree explorer (closes ADR-0024 deferral).**
+11. ✅ **#114 — Live process-tree explorer (closes ADR-0024 deferral).**
     Replaces the SSR mini-graph (#65) on the alert-detail page with
     an interactive explorer; mini-graph stays as the fallback for
     server-rendered notification targets. New
@@ -1634,6 +1634,30 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     page renders the explorer; click expand walks one hop per click;
     response-action right-click respects host policy (denied actions
     hidden). Manual UX walkthrough on a fleet alert during #120.
+    *(Shipped 2026-05-05. New
+    `server/internal/detect/processtree_json.go` builds the JSON
+    projection (nodes + edges + has_more_children + truncated_at)
+    using the same ProcessTreeLookup interface as the D2 builder so
+    test stubs work for both. New
+    `ch.Store.ListProcessAncestors` walks parent_pid up to maxDepth
+    hops with cycle defence. New JSON endpoint
+    `GET /alerts/{id}/process-tree.json?root_pid=N&depth=N` defaults
+    root_pid to the alert's first triggering event's actor PID
+    (process events expose PID directly; file/net via ActorPID).
+    Vanilla JS in `server/internal/console/static/process-tree.js`:
+    BFS-grid layout, SVG pan via mousedown drag, zoom via wheel
+    (0.25–4× clamp), click-to-expand re-fetches with the clicked PID
+    as the new root, right-click menu surfaces kill_process /
+    kill_process_tree / collect_artifacts buttons gated on
+    `pg.HostPolicy` data-attributes. Right-click menu hidden for
+    viewers and for actions the host policy denies; submitted via
+    the existing /alerts/{id}/respond form so #75's RBAC + audit path
+    still gates the executor. Mini-graph (#65) stays available via
+    the same alert detail page for SSR notification targets;
+    explorer renders alongside it when `chStore != nil`. 6 unit
+    tests cover root-missing → not_found, stable depth-bounded
+    render, fanout-cap signalling, depth bound respected, empty/zero
+    input rejection.)*
 
 12. **#115 — Saved queries + per-user dashboards.** New pg tables:
     `saved_queries` (id, user_id, name, surface ∈ {events, alerts,

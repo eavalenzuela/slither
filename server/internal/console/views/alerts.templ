@@ -136,6 +136,22 @@ templ AlertDetail(d AlertDetailData) {
 				</div>
 			}
 
+			if d.ShowProcessTreeExplorer {
+				<h3>Process tree</h3>
+				<div
+					id="process-tree-explorer"
+					class="process-tree-explorer"
+					data-alert-id={ d.Alert.ID }
+					data-allow-kill-process={ boolStr(d.HostPolicy.AllowKillProcess) }
+					data-allow-kill-tree={ boolStr(d.HostPolicy.AllowKillTree) }
+					data-allow-collect={ boolStr(d.HostPolicy.AllowCollect) }
+					data-is-analyst={ boolStr(d.IsAnalyst) }
+				>
+					<p class="muted">Loading process tree…</p>
+				</div>
+				<script src="/static/process-tree.js" defer></script>
+			}
+
 			if d.IsAnalyst && len(d.AllowedNext) > 0 {
 				<h3>Transition</h3>
 				<form method="post" action={ templ.URL("/alerts/" + d.Alert.ID + "/transition") } class="transition-form">
@@ -328,6 +344,16 @@ func alertRuleLabel(a pg.AlertRow) string {
 		return a.RuleName
 	}
 	return a.RuleUID
+}
+
+// boolStr renders a bool as "1" / "0" — the Phase 6 #114 process-tree
+// explorer reads these from data-* attributes and treats anything
+// non-"1" as false. Keeps the JS check trivial.
+func boolStr(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
 }
 
 // snapshotDownloadURL builds the per-extension snapshot blob URL the
