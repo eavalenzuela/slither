@@ -19,6 +19,18 @@ type EventFilter struct {
 	SeverityID uint8 // 0 = no constraint
 	Since      time.Time
 	Until      time.Time
+
+	// Phase 6 #120 — JSON API filters. Both narrow on the
+	// detection_finding (class_uid 2004) table; queries pairing a
+	// non-empty Tag/RuleUID with a ClassUIDs slice that excludes 2004
+	// return zero rows by construction.
+	//
+	// RuleUID matches `rule_uid = ?` exactly.
+	// Tag matches `has(mitre_techniques, ?)` against the array
+	// column the writer populates from each finding's MitreATTACK
+	// entries (technique + sub-technique UIDs).
+	RuleUID string
+	Tag     string
 }
 
 // EventRow is one search-result row projected to the columns the
@@ -130,6 +142,16 @@ func (s *Store) SearchEvents(ctx context.Context, filter EventFilter, cursor Cur
 	}
 	if filter.SeverityID != 0 {
 		clauses = append(clauses, fmt.Sprintf("severity_id = %s", addArg(filter.SeverityID)))
+	}
+	// Phase 6 #120: rule_uid + mitre_techniques live on the
+	// detection_finding table only; tablesFor narrows the table set
+	// when either is set so these clauses are safe to apply
+	// unconditionally.
+	if filter.RuleUID != "" {
+		clauses = append(clauses, fmt.Sprintf("rule_uid = %s", addArg(filter.RuleUID)))
+	}
+	if filter.Tag != "" {
+		clauses = append(clauses, fmt.Sprintf("has(mitre_techniques, %s)", addArg(filter.Tag)))
 	}
 	// Pass timestamp args as int64 nanos with a fromUnixTimestamp64Nano
 	// wrap on the SQL side. clickhouse-go's positional binder doesn't
@@ -266,6 +288,19 @@ func (s *Store) GetEventByID(ctx context.Context, classUID uint32, eventID strin
 // implicit guarantee is that an empty ClassUIDs filter searches every
 // known class — class additions never silently shrink the search.
 func tablesFor(filter EventFilter) []string {
+	// Phase 6 #120: RuleUID + Tag are columns on the
+	// detection_finding (class 2004) table only. When either is set,
+	// narrow the search to that table — preserves the spec's
+	// "queries pairing Tag != "" with non-2004 class_uids return
+	// zero rows by construction" semantics, but the narrow happens
+	// here rather than via WHERE on every per-class subquery (which
+	// would fail to compile against tables without those columns).
+	if filter.RuleUID != "" || filter.Tag != "" {
+		if t, ok := classTables[2004]; ok {
+			return []string{t}
+		}
+		return nil
+	}
 	if len(filter.ClassUIDs) == 0 {
 		out := make([]string, 0, len(classTables))
 		for _, t := range classTables {

@@ -1,0 +1,87 @@
+package views
+
+import "github.com/t3rmit3/slither/server/internal/store/pg"
+
+// APIKeysData drives /api/keys — Phase 6 #120 admin lifecycle.
+// MintedToken is non-empty only on the post-mint render (set in scs
+// flash by the create handler) — the page surfaces it once with a
+// "copy now" notice.
+type APIKeysData struct {
+	Keys        []pg.APIKeyRow
+	Flash       string
+	MintedToken string
+}
+
+templ APIKeys(d APIKeysData) {
+	@Layout("API keys") {
+		<div class="card">
+			<h2>API keys</h2>
+			<p class="muted">Bearer tokens for the read-only JSON API at <code>/api/v1/*</code>. Mint per integration; revoke when the consumer rotates. Tokens are shown exactly once at mint — copy them straight into the consumer's secret store.</p>
+			if d.Flash != "" {
+				<p class="flash">{ d.Flash }</p>
+			}
+			if d.MintedToken != "" {
+				<div class="card api-key-minted">
+					<p><strong>New API key (copy now — won't be shown again):</strong></p>
+					<pre class="event-summary">{ d.MintedToken }</pre>
+				</div>
+			}
+
+			<form method="post" action="/api/keys" class="response-form">
+				<label>
+					Name
+					<input type="text" name="name" required maxlength="200" placeholder="e.g. eyeexam-prod"/>
+				</label>
+				<button type="submit">Mint key</button>
+			</form>
+
+			if len(d.Keys) == 0 {
+				<p class="muted">No keys yet.</p>
+			} else {
+				<table class="events-table">
+					<thead>
+						<tr>
+							<th>name</th>
+							<th>prefix</th>
+							<th>created</th>
+							<th>last_used</th>
+							<th>state</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, k := range d.Keys {
+							<tr>
+								<td>{ k.Name }</td>
+								<td class="muted"><code>slither_apikey_{ k.Prefix }…</code></td>
+								<td class="muted">{ k.CreatedAt.UTC().Format("2006-01-02 15:04 MST") }</td>
+								<td class="muted">{ apiKeyLastUsedLabel(k) }</td>
+								<td>
+									if k.IsRevoked() {
+										<span class="alert-status alert-status-failed">revoked</span>
+									} else {
+										<span class="alert-status alert-status-ok">active</span>
+									}
+								</td>
+								<td>
+									if !k.IsRevoked() {
+										<form method="post" action={ templ.URL("/api/keys/" + k.ID + "/revoke") } class="response-form">
+											<button type="submit" class="response-btn destructive">Revoke</button>
+										</form>
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	}
+}
+
+func apiKeyLastUsedLabel(k pg.APIKeyRow) string {
+	if k.LastUsedAt == nil {
+		return "—"
+	}
+	return k.LastUsedAt.UTC().Format("2006-01-02 15:04 MST")
+}

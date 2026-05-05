@@ -29,6 +29,7 @@ import (
 
 	applog "github.com/t3rmit3/slither/pkg/log"
 	pb "github.com/t3rmit3/slither/proto/gen/slither/v1"
+	v1api "github.com/t3rmit3/slither/server/internal/api/v1"
 	"github.com/t3rmit3/slither/server/internal/config"
 	"github.com/t3rmit3/slither/server/internal/console"
 	"github.com/t3rmit3/slither/server/internal/control"
@@ -210,6 +211,14 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 			UsernameClaim: cfg.Console.OIDC.UsernameClaim,
 		},
 	})
+
+	// Phase 6 #120 — JSON API mounted on the same listener as the
+	// HTML console under /api/v1. apiauth middleware gates every
+	// route except /healthz so an external monitor can liveness-poll
+	// without minting a key.
+	apiv1 := v1api.New(pgStore, chStore)
+	consoleSvc.Mux().Route("/api/v1", apiv1.Mount)
+
 	consoleSrv := &http.Server{
 		Addr:              cfg.Listeners.Console,
 		Handler:           consoleSvc.Handler(),

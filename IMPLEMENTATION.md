@@ -1875,7 +1875,7 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     Live k3s validation deferred to #121 cloud-VM exit alongside
     the broader Phase 6 sweep.)*
 
-17. **#120 — External read-only JSON API for BAS integrations.**
+17. ✅ **#120 — External read-only JSON API for BAS integrations.**
     Adds a `/api/v1/*` route subtree separate from the HTML console,
     bearer-token-authenticated, read-only, contract-frozen at v1.
     Built to satisfy the eyeexam contract at
@@ -1951,6 +1951,47 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     `host_name` lookup resolves correctly, revoke key → next call
     401s with JSON body; OpenAPI/JSON-Schema description in
     `docs/api-v1.md` reviewed end-to-end.
+    *(Shipped 2026-05-05. (a) Migration `00023_api_keys.sql` adds
+    api_keys table with prefix-indexed lookup (16-char base64
+    prefix, 96 bits — keeps argon2id verify off the hot path).
+    Token shape `slither_apikey_<32-byte-base64>`. pg helpers:
+    InsertAPIKey returns MintedAPIKey carrying the only plaintext
+    copy; LookupAPIKey narrows by prefix then argon2id-verifies the
+    candidate row + touches last_used_at; ListAPIKeys + RevokeAPIKey
+    + GetHostByName for the JSON API's host_name resolution. New
+    `server/internal/console/apiauth/middleware.go` is the chi
+    middleware applied only to /api/v1/*; ErrAPIKeyNotFound +
+    ErrAPIKeyRevoked both fold to 401 to prevent revoked-token
+    holders from probing whether a key was ever valid. Console
+    pages /api/keys + POST /api/keys + POST /api/keys/{id}/revoke
+    (admin-only, mirrors #45 enrolment-token UX with one-shot scs
+    flash for the plaintext token). Audit api_key.minted /
+    api_key.revoked.
+    (b) MITRE tag plumbing: `mitreTagsFromSigma` in
+    agent/internal/ruleengine/finding.go normalises Sigma `attack.*`
+    tags to OCSF MitreTag (technique → Technique.UID; sub-tech →
+    SubTech.UID). buildFinding stamps MitreATTACK on every emitted
+    detection_finding. server/internal/store/ch/writer.go was
+    already extracting Technique.UID into mitre_techniques; #120
+    extends to also push SubTech.UID so `has(mitre_techniques, ?)`
+    matches at either granularity. 4 new unit tests cover
+    empty/top-level/sub-technique/non-attack-filter cases.
+    (c) ch.EventFilter + SearchEvents gain RuleUID + Tag fields.
+    tablesFor narrows to ocsf_detection_finding_2004 only when
+    either is set (those columns don't exist on file/process/net
+    tables); WHERE clauses safe to apply unconditionally because
+    the table set is now homogeneous.
+    (d) JSON handlers in new server/internal/api/v1/{api,health,
+    events,rules,errors}.go: GET /api/v1/healthz unauthenticated,
+    POST + GET /api/v1/events/search authenticated, GET
+    /api/v1/rules authenticated. Cursor reuses ch.Cursor opaque
+    encoding. host_name resolves to host_id via GetHostByName before
+    CH; unknown name returns empty hits array (200) rather than
+    404. Mounted under chi.Router.Route("/api/v1") in app.go.
+    docs/api-v1.md documents the wire shape, error codes, audit
+    trail, versioning. Console nav gains an "API keys" entry. 11
+    apiauth middleware tests (missing header, bad scheme, not-
+    found, revoked, success, bearer-extract canon).)*
 
 18. **#121 — Phase 6 exit validation.** Doc-backed manual run on the
     Phase 3/4/5 cloud fleet (existing stopped instances —

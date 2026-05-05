@@ -336,6 +336,15 @@ func (s *Server) routes() {
 		r.Post("/dashboards/{id}/cards/{query_id}/delete", s.dashboardsRemoveCard)
 		r.Post("/dashboards/{id}/delete", s.dashboardsDelete)
 
+		// Phase 6 #120 — API-key lifecycle (admin-only). The
+		// JSON API itself mounts under /api/v1 in app.go; these
+		// routes are the operator-facing mint + revoke UX.
+		r.With(s.RequireRole(pg.RoleAdmin)).Group(func(r chi.Router) {
+			r.Get("/api/keys", s.apiKeysList)
+			r.Post("/api/keys", s.apiKeysCreate)
+			r.Post("/api/keys/{id}/revoke", s.apiKeysRevoke)
+		})
+
 		// IOC feeds (#66) — admin-only CRUD.
 		r.With(s.RequireRole(pg.RoleAdmin)).Group(func(r chi.Router) {
 			r.Get("/iocs", s.iocsList)

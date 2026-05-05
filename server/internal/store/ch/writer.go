@@ -327,9 +327,16 @@ func decodeFinding(env *pb.Envelope) (chRow, error) {
 			row.triggeringEventIDs = append(row.triggeringEventIDs, u)
 		}
 	}
+	// Phase 6 #120: include both the technique UID (e.g. T1070) and the
+	// sub-technique UID (e.g. T1070.003) so `has(mitre_techniques, ?)`
+	// queries match either granularity. eyeexam queries land at
+	// either level depending on the tag the operator filtered on.
 	for _, m := range ev.MitreATTACK {
 		if m.Technique.UID != "" {
 			row.mitreTechniques = append(row.mitreTechniques, m.Technique.UID)
+		}
+		if m.SubTech != nil && m.SubTech.UID != "" && m.SubTech.UID != m.Technique.UID {
+			row.mitreTechniques = append(row.mitreTechniques, m.SubTech.UID)
 		}
 	}
 	return row, nil
