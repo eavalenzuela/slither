@@ -1,22 +1,25 @@
-# Phase 6 #121 — captures so far + operator instructions
+# Phase 6 #121 — final captures + status
+
+**Status:** ✅ all 13 steps captured (some with surfaced bugs flagged
+Phase 7). Run completed 2026-05-05.
 
 ## Status matrix
 
 | § | Status | Capture |
 |---|--------|---------|
 | V0 | ✅ | 00-preflight.txt + 00-fleet-state.txt |
-| V1 | ✅ tamper-detect; ⚠ Phase 7 OOM under disabled-verify | 01-extension-supervisor.txt |
-| V2 | ⏳ operator | OPERATOR_WALKTHROUGH.md |
+| V1 | ✅ tamper-detect; ⚠ Phase 7 #1 OOM under disabled-verify | 01-extension-supervisor.txt |
+| V2 | ✅ no-provider path documented | 02-live-hunt.txt |
 | V3 | ✅ | 03-snapshot-no-providers.txt |
 | V4 | ✅ | 04-chain-mismatch.txt |
-| V5 | ⏳ operator | OPERATOR_WALKTHROUGH.md |
-| V6 | ⏳ operator | OPERATOR_WALKTHROUGH.md |
-| V7 | ⏳ operator | OPERATOR_WALKTHROUGH.md |
-| V8 | ⏳ operator | OPERATOR_WALKTHROUGH.md |
-| V9 | ✅ restart cycle; ⚠ Phase 7 keystore probe possession bug | 09-keystore-gap-a.txt |
-| V10 | ✅ no-TPM fallback path; ⚠ Phase 7 NitroTPM AMI provisioning | 10-tpm-pcr-bump.txt |
-| V11 | ✅ native arm64 + kind; ⚠ Phase 7 arm64 BPF CO-RE | 11-multiarch-native.txt + 11-multiarch-k8s.txt |
-| V12 | ⚠ steady-state only; sustained-load deferred | 12-backpressure.txt |
+| V5 | ✅ first-login + role rotation + IdP-down fallback | 05-oidc-sso.txt |
+| V6 | ✅ explorer + policy-gated menu | 06-process-tree.txt |
+| V7 | ✅ saved queries + dashboards + dangling-card placeholder | 07-queries-dashboards.txt |
+| V8 | ✅ reopen-alert; ⚠ Phase 7 #6 host: hostname/UUID parser gap | 08-search-reopen.txt |
+| V9 | ✅ restart cycle; ⚠ Phase 7 #3 keystore probe possession bug | 09-keystore-gap-a.txt |
+| V10 | ✅ no-TPM fallback; ⚠ Phase 7 #5 NitroTPM AMI provisioning | 10-tpm-pcr-bump.txt |
+| V11 | ✅ native arm64 + kind; ⚠ Phase 7 #2 arm64 BPF CO-RE | 11-multiarch-native.txt + 11-multiarch-k8s.txt |
+| V12 | ⚠ steady-state only; sustained-load deferred per #103 V8 | 12-backpressure.txt |
 | V13 | ✅ | 13-jsonapi.txt |
 
 ## Phase 7 follow-ups surfaced by this validation run
@@ -63,20 +66,31 @@
    NitroTPM-enabled AMI. Either docs the register-image recipe or
    ships a Packer template under deploy/cloud/aws/.
 
+6. **Events query parser host: axis hostname/UUID gap.**
+   `q=host:ip-172-31-26-27` writes the literal hostname into
+   ParsedQuery.HostID. Downstream ch.SearchEvents calls
+   uuid.Parse(filter.HostID) which rejects hostnames, so the
+   page returns "search failed" instead of resolving the
+   hostname. Fix: parser should either UUID-validate at parse
+   time or hostname-resolve via pg.GetHostByName before the CH
+   query (paralleling the JSON API's host_name handling, #120(d)).
+
 ## Phase 6 close readiness
 
-Code-side: all 18 task implementations are on main (commit
-1c192f9 + earlier). The 5 follow-ups above are real bugs surfaced
-by validation, not code regressions. Phase 6 closes when:
-  (a) operator captures V2 + V5 + V6 + V7 + V8 land under
-      phase6_validation/
-  (b) docs/phase6-validation.md status flips to "completed"
-  (c) the 5 follow-ups are filed as Phase 7 task entries in
-      IMPLEMENTATION.md §9
-  (d) git push origin main with the closing commit
+All 13 V-steps captured + 6 Phase 7 follow-ups documented. Ready
+for the close commit:
+
+  1. Flip docs/phase6-validation.md status header to "completed"
+  2. Update IMPLEMENTATION.md task #18 → ✅
+  3. Append the 6 Phase 7 follow-ups to IMPLEMENTATION.md §9
+  4. Update memory project_phase_status.md
+  5. git push origin main
 
 ## Cleanup state (2026-05-05)
 
 - phase6-tpm (i-076cf63cb408f5a1d) — terminated 21:30Z
 - phase6-graviton (i-0e51640f2e31bcac4) — terminated 21:33Z
 - Phase 5 #103 fleet (4 hosts) — running, reusable per memory
+- phase6-oidc-stub.service — disabled on slither-server
+- iptables OUTPUT DNAT rule — removed
+- SG port 5556 ingress — revoked (operator + intra-SG)

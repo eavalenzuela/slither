@@ -1,0 +1,73 @@
+Phase 6 #121 V5 — console SSO via OIDC
+Date: 2026-05-05T21:53:37Z
+
+=== IdP setup ===
+Standard Dex's static-password connector doesn't surface a per-user
+groups claim, so a small (~140 line) stub OIDC provider was built
+for V5: /tmp/oidc-stub/stub.go. Issued JWT id_tokens via RS256 with
+groups + email + name + sub claims. Two static users:
+  alice (slither-admin → admin role)
+  bob   (slither-analyst → analyst role)
+
+Bound to slither-server's 0.0.0.0:5556 via systemd unit
+phase6-oidc-stub.service. iptables OUTPUT DNAT rule maps the
+server's own public IP traffic on :5556 back to loopback (AWS
+blocks self-public-IP hairpin natively).
+
+=== slither-server console.oidc config ===
+  oidc:
+    issuer_url:    "http://50.112.66.184:5556"
+    client_id:     "slither"
+    client_secret: "dev-secret-phase6-v5"
+    redirect_url:  "http://50.112.66.184:8080/oidc/callback"
+    scopes:        [openid, email, profile, groups]
+    role_claim:    "groups"
+    username_claim: "email"
+    role_mappings:
+      slither-admin:    admin
+      slither-analyst:  analyst
+      slither-viewer:   viewer
+
+=== Step 1: SSO button renders on /login ===
+  curl http://127.0.0.1:8080/login → grep -ci 'sign in with sso' = 1
+
+=== Step 2: alice signs in (groups=[slither-admin]) → role=admin ===
+First-login provisioning created users row:
+     username      | oidc_subject |  role   | sso_only |          created_at           |          updated_at           
+-------------------+--------------+---------+----------+-------------------------------+-------------------------------
+ alice@phase6.test | alice-uid    | analyst | t        | 2026-05-05 21:49:54.779613+00 | 2026-05-05 21:51:34.287313+00
+ bob@phase6.test   | bob-uid      | analyst | t        | 2026-05-05 21:50:46.467744+00 | 2026-05-05 21:50:46.467744+00
+(2 rows)
+
+
+=== Step 3: bob signs in (groups=[slither-analyst]) → role=analyst ===
+Second SSO user provisioned cleanly with the analyst role.
+
+=== Step 4: role rotation — alice's group flipped to slither-analyst ===
+Stub redeployed with alice in slither-analyst. Alice signs back in:
+  - users.role rotated from admin → analyst (UpdateUserRole path)
+  - users.oidc_subject unchanged (alice-uid)
+  - users.updated_at bumped at sign-in time
+Both alice + bob currently land at analyst (visible in pg above).
+
+=== Step 5: IdP-down fallback ===
+Stopped phase6-oidc-stub.service. Local-user login as admin /
+phase6-validate succeeded → dashboard with role=admin.
+Slither's go-oidc library caches the provider after first
+discovery, so the SSO button remained visible even though
+the IdP is down — clicking SSO would fail at token-exchange,
+but the local form keeps working as the operator-recovery path.
+
+=== Audit log entries ===
+ actor_type |       action       |          created_at           
+------------+--------------------+-------------------------------
+ user       | auth.login.success | 2026-05-05 21:52:55.63078+00
+ user       | auth.oidc.success  | 2026-05-05 21:51:34.288813+00
+ user       | auth.oidc.success  | 2026-05-05 21:50:46.470968+00
+ user       | auth.oidc.success  | 2026-05-05 21:49:54.781533+00
+ user       | auth.login.success | 2026-05-05 21:38:54.288207+00
+ user       | auth.login.failure | 2026-05-05 21:37:37.830964+00
+ user       | auth.login.failure | 2026-05-05 21:37:28.546535+00
+ user       | auth.login.success | 2026-05-02 02:12:24.446599+00
+(8 rows)
+

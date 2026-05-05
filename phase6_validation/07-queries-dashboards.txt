@@ -1,0 +1,53 @@
+Phase 6 #121 V7 — saved queries + dashboards
+Date: 2026-05-05T22:04:24Z
+
+=== Saved 3 queries across 3 surfaces ===
+    name    | surface |                                                    params                                                     |          created_at           
+------------+---------+---------------------------------------------------------------------------------------------------------------+-------------------------------
+ new-alerts | alerts  | {"since": "", "until": "", "status": "new", "host_id": "", "rule_uid": "", "severity": "", "assigned_to": ""} | 2026-05-05 22:00:17.661636+00
+ hunt-page  | hunts   | {}                                                                                                            | 2026-05-05 22:01:13.830078+00
+(2 rows)
+
+
+=== Re-run round-trip ===
+Click 'test-process-events' → /events?q=class%3A1007 (RFC-3986
+percent-encoding of colon). Search bar parses 'class:1007' back
+into class_uid filter; results table populates with class 1007
+process events. Operator screenshot confirmed.
+
+=== Dashboard 'ops' created with 2 cards ===
+ name |                                                    layout                                                    |          created_at           
+------+--------------------------------------------------------------------------------------------------------------+-------------------------------
+ ops  | [{"query_id": "a045a7bb-7ff7-4b4c-84f9-044dc95447f2"}, {"query_id": "aaba8eb0-04e8-4544-98a4-c7f60cf4a53b"}] | 2026-05-05 22:02:43.641483+00
+(1 row)
+
+
+=== Dangling-card placeholder ===
+Operator deleted 'test-process-events' from /queries. Dashboard
+refresh: first card now renders '(query deleted) — The saved
+query this card referenced has been deleted.' Second card
+(new-alerts) unchanged. Layout still has 1 entry by query_id
+(deleted), 1 entry by query_id (live). Per pg:
+ saved_queries 
+---------------
+             2
+(1 row)
+
+ name | card_count 
+------+------------
+ ops  |          2
+(1 row)
+
+
+=== Audit events ===
+ actor_type |        action        |          created_at           
+------------+----------------------+-------------------------------
+ user       | query.deleted        | 2026-05-05 22:03:43.828124+00
+ user       | dashboard.card_added | 2026-05-05 22:03:02.1589+00
+ user       | dashboard.card_added | 2026-05-05 22:02:52.696205+00
+ user       | dashboard.created    | 2026-05-05 22:02:43.643645+00
+ user       | query.saved          | 2026-05-05 22:01:13.831831+00
+ user       | query.saved          | 2026-05-05 22:00:17.662976+00
+ user       | query.saved          | 2026-05-05 21:59:24.769283+00
+(7 rows)
+

@@ -1,0 +1,40 @@
+Phase 6 #121 V6 — live process-tree explorer
+Date: 2026-05-05T21:57:46Z
+
+=== Test alert ===
+  alert_id: 03bb5b9b-9e50-461d-b6e0-bb1bc6a2c125
+  rule_uid: 8b7c4d00-0099-4000-8000-000000000099 (V3 snapshot rule)
+  triggering pid: 3159 (ls invocation)
+  host_id: ba4ac61d-664c-4438-930e-6b479492c4d5 (agent-debian)
+
+=== Step 1: SVG explorer renders root node ===
+Operator screenshot confirmed: 'pid 3159 ls /usr/bin/ls' rendered
+as the BFS-grid root in the Process tree section. Click expands
+(SVG transform-on-wheel/click pan+zoom).
+
+=== Step 2: right-click menu hidden under detect-only policy ===
+Default policy (no host_response_policies row): every
+allow_* false. Right-click on the root node showed NO menu items
+→ correct gating (operator confirmed).
+
+=== Step 3: policy toggle ===
+               host_id                | allow_kill_process | allow_kill_tree | allow_quarantine | allow_isolate | allow_collect |          updated_at           
+--------------------------------------+--------------------+-----------------+------------------+---------------+---------------+-------------------------------
+ ba4ac61d-664c-4438-930e-6b479492c4d5 | t                  | f               | f                | f             | t             | 2026-05-05 21:56:26.015793+00
+(1 row)
+
+
+=== Step 4: right-click menu items ===
+After policy update + page refresh, right-click on the pid 3159
+node showed (operator screenshot):
+  - 'Kill process (pid 3159)'      ← allow_kill_process=true
+  - 'Collect artefacts (pid 3159)' ← allow_collect=true
+  - (no 'Kill process tree' entry) ← allow_kill_tree=false
+
+Menu items match the host_response_policies row exactly. Per-action
+host-policy gating works as ADR-0034 + #74 specify.
+
+=== Bonus: response actions panel ===
+Page also surfaced the Response history (this host) table with
+the 4 phantom V4 response_actions rows visible (V4 tamper test
+data still in pg). #75 + #76 surfaces working correctly.

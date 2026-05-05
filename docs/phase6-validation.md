@@ -1,8 +1,9 @@
 # Phase 6 exit validation (§8.1 #121)
 
-**Status:** ⏳ pending operator run. This doc is the runbook the
-operator follows on the cloud fleet to close Phase 6; results land
-under `phase6_validation/` at repo root once captured.
+**Status:** ✅ completed 2026-05-05. Operator-driven cloud-fleet
+run is captured under `phase6_validation/` at repo root; six
+follow-ups carried to Phase 7 §9. This doc remains the runbook for
+re-running the matrix on a future fleet.
 
 Phase 6's surface is wider than any earlier phase — extension
 supervisor, hunts, snapshots, server-side chain check, OIDC SSO, the
@@ -65,19 +66,19 @@ column is the file name the operator records command output into.
 
 | § | Criterion | Capture | Result |
 |---|-----------|---------|--------|
-| V1 | Extension supervisor — install slither-ext-osquery via signed-bundle path on Debian 13 + RHEL 10 + Ubuntu 24.04; tampered binary refuses cleanly; OCSF events from osquery land in CH with `metadata.product.name="osquery (extension)"` | `01-extension-supervisor.txt` | ⏳ |
-| V2 | Live-query hunt — dispatch `SELECT name, port, address FROM listening_ports` against the 3-host fleet; all three respond within 60s; `/hunt/{id}` aggregates with per-host attribution; per-host row cap enforced | `02-live-query-hunt.txt` | ⏳ |
-| V3 | Snapshot-on-alert wire — fire a rule with `slither.snapshot: true`; alert detail surfaces "(no snapshot extensions configured)" since Phase 6 ships no provider; telemetry counter `ext_snapshots_requested=0` (no fanout target) and `ext_snapshots_failed=0` | `03-snapshot-no-providers.txt` | ⏳ |
-| V4 | Server-side tamper-chain cross-check — happy path emits clean ChainSummaries every 5 min for 30 min; intentional `UPDATE response_actions SET status='done' WHERE id=…` (one tampered row) fires `chain.mismatch` audit row within 5 min; `/hosts/{id}/chain-status` shows the row in red | `04-chain-mismatch.txt` | ⏳ |
-| V5 | Console SSO — Dex (or any operator-shaped OIDC IdP) integration roundtrip; first-login user creation; role mapping from `groups` claim picks `analyst` correctly; IdP-down fallback to local-user login still works | `05-oidc-sso.txt` | ⏳ |
-| V6 | Live process-tree explorer — opens on a real alert; expand-on-click walks the tree one hop per click; right-click response actions hidden when host policy denies | `06-process-tree-explorer.txt` | ⏳ |
-| V7 | Saved queries + dashboards — operator saves filters from `/events`, `/alerts`, `/hunt`; assembles a dashboard with two cards; refresh persists; deleting a saved query renders "(query deleted)" placeholder on the dashboard card | `07-queries-dashboards.txt` | ⏳ |
-| V8 | Search refinements — `host:foo class:1007 since:24h` parses on `/events` query bar; `/events/history` lists last-50 with click-to-rerun; closed→in_progress reopen-alert transition works + writes `alert.reopened` audit | `08-search-reopen.txt` | ⏳ |
-| V9 | Keystore Gap A resolution — `@u`-keyring strategy survives the enroll → restart → second-boot lookup cycle on every host shape (Debian 13, RHEL 10, Ubuntu 24.04, Graviton) | `09-keystore-gap-a.txt` | ⏳ |
-| V10 | TPM-sealed cert variant — opt-in path via `slither-agent enroll --tpm` on the TPM-equipped instance; sealed blob lands at `/var/lib/slither/tpm_sealed.bin`; PCR-bump (kernel update) → next boot logs `tpm: PCR 7 mismatch (kernel/Secure-Boot change?)` and falls back; re-enroll re-seals | `10-tpm-pcr-bump.txt` | ⏳ |
-| V11 | Multi-arch + live k8s — daemonset on k3s reports events; arm64 host (Graviton EC2) runs the agent natively without qemu-user; `deploy/k8s/smoke.sh` exits 0 | `11-k8s-multiarch.txt` | ⏳ |
-| V12 | Sustained-load backpressure e2e (deferred from Phase 5 #103 V8) — `make load-test` against the fleet under pinned slow CH writer; agents observably raise NetworkActivity sampling within 30s; recovery within 30s of writer unpin | `12-backpressure-e2e.txt` | ⏳ |
-| V13 | eyeexam JSON API contract (#120 / ADR-0040) — mint API key via `/api/keys`; fire a known Atomic test on a fleet host; `eyeexam exec --pack ...` against live `slither-server` scores the expectation `caught` with `raw_json` populated; host_name + sigma_id + tag filters all narrow as advertised; revoked key returns 401 with JSON body | `13-jsonapi-eyeexam.txt` | ⏳ |
+| V1 | Extension supervisor — install slither-ext-osquery via signed-bundle path on Debian 13 + RHEL 10 + Ubuntu 24.04; tampered binary refuses cleanly; OCSF events from osquery land in CH with `metadata.product.name="osquery (extension)"` | `01-extension-supervisor.txt` | ✅ |
+| V2 | Live-query hunt — dispatch `SELECT name, port, address FROM listening_ports` against the 3-host fleet; all three respond within 60s; `/hunt/{id}` aggregates with per-host attribution; per-host row cap enforced | `02-live-query-hunt.txt` | ✅ |
+| V3 | Snapshot-on-alert wire — fire a rule with `slither.snapshot: true`; alert detail surfaces "(no snapshot extensions configured)" since Phase 6 ships no provider; telemetry counter `ext_snapshots_requested=0` (no fanout target) and `ext_snapshots_failed=0` | `03-snapshot-no-providers.txt` | ✅ |
+| V4 | Server-side tamper-chain cross-check — happy path emits clean ChainSummaries every 5 min for 30 min; intentional `UPDATE response_actions SET status='done' WHERE id=…` (one tampered row) fires `chain.mismatch` audit row within 5 min; `/hosts/{id}/chain-status` shows the row in red | `04-chain-mismatch.txt` | ✅ |
+| V5 | Console SSO — Dex (or any operator-shaped OIDC IdP) integration roundtrip; first-login user creation; role mapping from `groups` claim picks `analyst` correctly; IdP-down fallback to local-user login still works | `05-oidc-sso.txt` | ✅ |
+| V6 | Live process-tree explorer — opens on a real alert; expand-on-click walks the tree one hop per click; right-click response actions hidden when host policy denies | `06-process-tree-explorer.txt` | ✅ |
+| V7 | Saved queries + dashboards — operator saves filters from `/events`, `/alerts`, `/hunt`; assembles a dashboard with two cards; refresh persists; deleting a saved query renders "(query deleted)" placeholder on the dashboard card | `07-queries-dashboards.txt` | ✅ |
+| V8 | Search refinements — `host:foo class:1007 since:24h` parses on `/events` query bar; `/events/history` lists last-50 with click-to-rerun; closed→in_progress reopen-alert transition works + writes `alert.reopened` audit | `08-search-reopen.txt` | ✅ |
+| V9 | Keystore Gap A resolution — `@u`-keyring strategy survives the enroll → restart → second-boot lookup cycle on every host shape (Debian 13, RHEL 10, Ubuntu 24.04, Graviton) | `09-keystore-gap-a.txt` | ✅ |
+| V10 | TPM-sealed cert variant — opt-in path via `slither-agent enroll --tpm` on the TPM-equipped instance; sealed blob lands at `/var/lib/slither/tpm_sealed.bin`; PCR-bump (kernel update) → next boot logs `tpm: PCR 7 mismatch (kernel/Secure-Boot change?)` and falls back; re-enroll re-seals | `10-tpm-pcr-bump.txt` | ✅ |
+| V11 | Multi-arch + live k8s — daemonset on k3s reports events; arm64 host (Graviton EC2) runs the agent natively without qemu-user; `deploy/k8s/smoke.sh` exits 0 | `11-k8s-multiarch.txt` | ✅ |
+| V12 | Sustained-load backpressure e2e (deferred from Phase 5 #103 V8) — `make load-test` against the fleet under pinned slow CH writer; agents observably raise NetworkActivity sampling within 30s; recovery within 30s of writer unpin | `12-backpressure-e2e.txt` | ⚠ |
+| V13 | eyeexam JSON API contract (#120 / ADR-0040) — mint API key via `/api/keys`; fire a known Atomic test on a fleet host; `eyeexam exec --pack ...` against live `slither-server` scores the expectation `caught` with `raw_json` populated; host_name + sigma_id + tag filters all narrow as advertised; revoked key returns 401 with JSON body | `13-jsonapi-eyeexam.txt` | ✅ |
 
 ## Per-step detail
 

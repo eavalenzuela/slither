@@ -1288,6 +1288,11 @@ Phase 5 closed at task #103 (cloud-VM exit validation, 2026-05-02 with
 captures under `phase5_validation/`). Phase 6 picks up at #104,
 mirroring the §3.x / §4.1 / §5.1 / §6.1 / §7.1 numbered-task pattern.
 
+**Phase 6 closed 2026-05-05** at task #121 (cloud-VM exit validation;
+captures under `phase6_validation/`; six follow-ups carried to §9
+Phase 7). Phase 7 (platform expansion) stays demand-driven per
+ADR-0037; the §9 bullet list is the live punch-out for it.
+
 Architectural contract for Phase 6 lives in **ADR-0037**
 (`docs/adr/0037-phase6-scope.md`): first-party extension model only
 (no public SDK, no marketplace, no dynamic loading); operator-installed
@@ -1993,7 +1998,7 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     apiauth middleware tests (missing header, bad scheme, not-
     found, revoked, success, bearer-extract canon).)*
 
-18. ⏳ **#121 — Phase 6 exit validation.** Doc-backed manual run on the
+18. ✅ **#121 — Phase 6 exit validation.** Doc-backed manual run on the
     Phase 3/4/5 cloud fleet (existing stopped instances —
     `start-instances` brings them back; allocate one Graviton instance
     for arm64 coverage from #119). Validates:
@@ -2061,6 +2066,21 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     back) + one new Graviton instance for arm64 coverage from #119.
     All 18 Phase 6 tasks worth of code is on main; the validation
     sweep is the operator's gate to close Phase 6.)*
+    *(Captures landed 2026-05-05 under `phase6_validation/` for
+    every V-step. V1/V3/V4/V9/V11/V13 ran clean as designed.
+    V2/V5/V6/V7/V8/V10 captured with operator-driven UI loops on
+    the live AWS fleet (server + agent-debian + agent-rhel +
+    agent-ubuntu, plus an ephemeral Graviton + ephemeral
+    NitroTPM-target instance for V11+V10). V12 sustained-load
+    deferred (Phase 5 #103 V8 carryover; steady-state behaviour
+    captured but the writer-pin sustained run is parked behind a
+    real load-test rig). Six follow-ups surfaced and filed under
+    §9 (extension OOM under disabled cosign verify; arm64 BPF
+    CO-RE for the net collector; keystore @u probe possession bug
+    + ADR-0038 effective-behaviour gap; NitroTPM AMI provisioning;
+    events parser host: hostname/UUID gap). Every follow-up is
+    non-blocking — Phase 6 closes here; Phase 7 picks them up per
+    ADR-0037's demand-driven shape.)*
 
 ### 8.2 Cross-cutting notes
 
@@ -2133,6 +2153,60 @@ Secure Boot implementations).
   bump for `log.chain` + a migration. Until then, count-based detection
   catches truncation + replay-then-extend; record-level edits remain
   detectable only via on-agent `slither-agent verify-chain`.
+- **Phase 6 #121 follow-ups (filed 2026-05-05).** Six bugs the
+  operator-driven cloud-VM exit validation surfaced. None block
+  Phase 6 close; all are picked up here on demand:
+  1. **Extension supervisor OOM under
+     `signature_verification: disabled`.** With cosign verify
+     turned off, the agent crashes with `runtime: out of memory`
+     during the Hello-frame read on the socketpair fd. Stack:
+     `extsdk.readUvarint → readFrame → ReadExtensionToAgent →
+     readHello`. Likely an interaction between the extension
+     child's `setrlimit(RLIMIT_AS)` and the parent's mmap-based
+     heap growth. Production has cosign on PATH so the path is
+     functionally unreachable — fix is operator-grade hygiene,
+     not user-facing.
+  2. **arm64 BPF CO-RE relocation failure (net collector).**
+     `agent/internal/bpf/src/*.o` are pre-compiled via `bpf2go`
+     on amd64. arm64 kernel BTF rejects the net collector's
+     `handle_inet_csk_accept` retprobe with `bad CO-RE
+     relocation: invalid func unknown#195896080`. Workaround:
+     `net.enabled=false` on arm64. Fix: regenerate per-arch `.o`
+     files via `bpf2go` in the build pipeline, ship them
+     side-by-side, pick at load time.
+  3. **Keystore `@u` probe possession-traversal bug.**
+     `agent/internal/keystore/keyring/keyring_linux.go`'s
+     `tryKeyringPlatform()` adds a probe key to `@u` then reads
+     it back. The READ returns `EACCES` on every host shape
+     because the process doesn't possess `@u` (its session
+     keyring chain doesn't include `@u`). Linking `@u` into `@s`
+     before the read makes the probe succeed. Effective Phase 6
+     behaviour: every host falls through to the file store. Fix:
+     `keyctl_link(KEY_SPEC_USER_KEYRING, KEY_SPEC_SESSION_KEYRING)`
+     before the probe READ in `tryKeyringPlatform`.
+  4. **ADR-0038 effective-behaviour gap.** Direct consequence of
+     follow-up #3 — until the keystore probe lands `@u` correctly,
+     the threat-model claim about `@u` being the primary cert
+     store is aspirational. ADR-0038 needs a docs revision (or a
+     code fix that lets it match its current claims) when #3
+     ships.
+  5. **NitroTPM AMI provisioning gap.** AWS NitroTPM 2.0 needs an
+     AMI with `TpmSupport=v2.0` baked in; Canonical's stock
+     Ubuntu 24.04 amd64 AMI ships with `TpmSupport=None`, so a
+     stock `m7a.large` exposes no `/dev/tpm*`. Phase 6 #121 V10
+     only validated the no-TPM fallback. Full hardware
+     seal/unseal + PCR-bump validation needs either a custom
+     `register-image` recipe in the docs or a Packer template
+     under `deploy/cloud/aws/`.
+  6. **Events query parser host: axis hostname/UUID gap.**
+     `q=host:ip-172-31-26-27` writes the literal hostname into
+     `ParsedQuery.HostID`; downstream `ch.SearchEvents` calls
+     `uuid.Parse(filter.HostID)` which rejects hostnames, so the
+     page returns "search failed" instead of resolving the
+     hostname. Fix: parser should either UUID-validate at parse
+     time and surface a clear "unknown host" error, or
+     hostname-resolve via `pg.GetHostByName` before the CH query
+     (paralleling the JSON API's `host_name` handling, #120(d)).
 - Explicitly gated on demand + funding; not on the default trajectory.
 
 ---

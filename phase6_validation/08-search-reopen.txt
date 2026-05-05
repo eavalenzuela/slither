@@ -1,0 +1,48 @@
+Phase 6 #121 V8 — search refinements + reopen-alert
+Date: 2026-05-05T22:10:15Z
+
+=== V8a: events search-language parser ===
+
+Working axes (operator screenshots confirmed):
+  q=class:1007                     → class_uid=1007 filter
+  q=host:<UUID> class:1007 since:24h
+    → host_id+class_uid+since populated; results filtered correctly
+
+Bug surfaced — V8 PHASE 7 FOLLOW-UP #6:
+  q=host:ip-172-31-26-27 class:1007 since:24h returns 'search failed'
+  Root cause: ParseEventsQuery's 'host:' axis writes the literal value
+  into ParsedQuery.HostID. Downstream ch.SearchEvents calls
+  uuid.Parse(filter.HostID) which rejects hostnames. The parser
+  should either (a) UUID-validate the host: value at parse time,
+  or (b) hostname-resolve via pg.GetHostByName before the CH
+  query (paralleling the JSON API's host_name handling, #120(d)).
+
+=== /events/history ===
+Operator confirmed: per-user history landed all the queries we ran.
+Click-to-rerun navigates back to /events?q=... and re-applies.
+ history_rows |          most_recent          
+--------------+-------------------------------
+            7 | 2026-05-05 22:08:09.637602+00
+(1 row)
+
+
+=== V8b: reopen-alert ===
+Alert 9a1ddc60-1e99-411c-a505-e173340aedf4 closed via console
+→ status flipped to closed (Transition reason: blank)
+→ alert detail page now shows Reopen button (only valid
+  closed→in_progress transition)
+→ click Reopen → status: in_progress; flash 'Alert transitioned
+  to in_progress.' (operator screenshot)
+
+Audit log captures both transitions distinctly:
+           action            |                        detail                         |          created_at           
+-----------------------------+-------------------------------------------------------+-------------------------------
+ alert.transition.new_closed | {"to": "closed", "from": "new", "reason": ""}         | 2026-05-05 22:09:01.37371+00
+ alert.reopened              | {"to": "in_progress", "from": "closed", "reason": ""} | 2026-05-05 22:09:10.865532+00
+(2 rows)
+
+
+Distinct 'alert.reopened' action — matches Phase 6 #116b spec.
+Generic 'alert.transition.X_Y' shape used for non-reopen paths;
+reopen gets its own action so audit-filter consumers can grep
+for it directly.
