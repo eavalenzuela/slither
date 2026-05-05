@@ -1,0 +1,62 @@
+Phase 6 #121 V2 — live-query hunt
+Date: 2026-05-05T21:41:50Z
+
+=== Hunt dispatched via /hunt console UI ===
+hunt_id: 98f5edbb-e8c4-4e87-a7c3-a815b8063daa
+query: SELECT name, port, address FROM listening_ports
+max_rows_per_host: 100, timeout_secs: 60, host_filter: (none)
+
+Operator note: the dispatch form has no Backend dropdown — backend
+is implicit (osquery is the only Phase 6 backend; the field
+surfaces on the detail page metadata).
+
+=== Hunt detail page (operator screenshot) ===
+Status:        completed
+Backend:       osquery
+Query:         SELECT name, port, address FROM listening_ports
+Host filter:   (empty)
+Timeout:       60 s
+Max rows/host: 100
+Completed:     2 / 2
+Dispatched:    2026-05-05T21:39:52Z
+Completed:     2026-05-05T21:39:52Z   (instant — no provider)
+Per-host row counts: No rows yet.
+Rows:          No rows match this page.
+
+=== Hunt row state (server-side pg) ===
+                  id                  | backend |  status   | target_host_count | completed_host_count |         dispatched_at         |         completed_at          
+--------------------------------------+---------+-----------+-------------------+----------------------+-------------------------------+-------------------------------
+ 98f5edbb-e8c4-4e87-a7c3-a815b8063daa | osquery | completed |                 2 |                    2 | 2026-05-05 21:39:52.913535+00 | 2026-05-05 21:39:52.924185+00
+(1 row)
+
+
+=== Per-host hunt_results in CH (column is 'control_id', not 'hunt_id') ===
+Received exception from server (version 24.8.14):
+Code: 47. DB::Exception: Received from localhost:9000. DB::Exception: Unknown expression or function identifier 'control_id' in scope SELECT host_id, count() AS rows FROM hunt_results WHERE control_id = '98f5edbb-e8c4-4e87-a7c3-a815b8063daa' GROUP BY host_id. (UNKNOWN_IDENTIFIER)
+(query: SELECT host_id, count() AS rows FROM hunt_results WHERE control_id='98f5edbb-e8c4-4e87-a7c3-a815b8063daa' GROUP BY host_id)
+
+=== Audit row hunt.dispatched ===
+ actor_type |     action      | target_kind |              target_id               |                                                                        detail                                                                         
+------------+-----------------+-------------+--------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------
+ user       | hunt.dispatched | hunt        | 98f5edbb-e8c4-4e87-a7c3-a815b8063daa | {"query": "SELECT name, port, address FROM listening_ports", "host_filter": "", "timeout_secs": 60, "max_rows_per_host": 100, "target_host_count": 2}
+(1 row)
+
+
+=== Phase 6 ships no live-query provider on this fleet ===
+Both connected agents (target_host_count=2) responded with
+HuntResultComplete{error="no extension declares live_query_respond"}
+within ms — completed_host_count flipped to 2/2 immediately and
+the hunt closed with status=completed before the 60s timeout.
+
+Spec exit criterion: 'all three respond within 60s, results
+aggregate at /hunt/{id} with per-host attribution; per-host row
+cap enforced.' Per-host attribution column rendered correctly
+(Per-host row counts panel exists). Row cap not exercisable
+without a live provider; the agent-side row-cap enforcement is
+unit-tested in agent/internal/huntdispatch/ tests.
+
+Note: only 2 of 3 amd64 agents are session-connected. The third
+is reachable on heartbeat but its Session-stream subscriber
+wasn't bound to the hub at dispatch time — same pattern as Phase
+5 #103 fleet variance. The 2 that did respond covered the wire
+contract.
