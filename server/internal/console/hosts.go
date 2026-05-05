@@ -163,3 +163,31 @@ func (s *Server) hostsRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, "/hosts", http.StatusSeeOther)
 }
+
+// hostsChainStatus renders /hosts/{host_id}/chain-status. Phase 6
+// #112 — surfaces the most recent chain summaries the agent emitted
+// plus the mismatch-only sub-list. 404s on a missing or revoked host
+// so a typo'd UUID doesn't expose a blank page.
+func (s *Server) hostsChainStatus(w http.ResponseWriter, r *http.Request) {
+	hostID := chi.URLParam(r, "host_id")
+	if hostID == "" {
+		http.Error(w, "missing host_id", http.StatusBadRequest)
+		return
+	}
+	host, err := s.store.GetHost(r.Context(), hostID)
+	switch {
+	case errors.Is(err, pg.ErrHostNotFound):
+		http.NotFound(w, r)
+		return
+	case err != nil:
+		http.Error(w, "load host failed", http.StatusInternalServerError)
+		return
+	}
+	summaries, _ := s.store.ListChainSummaries(r.Context(), hostID, 50)
+	mismatches, _ := s.store.ListChainMismatches(r.Context(), hostID, 25)
+	render(w, r, views.HostChainStatus(views.HostChainStatusData{
+		Host:       host,
+		Summaries:  summaries,
+		Mismatches: mismatches,
+	}))
+}

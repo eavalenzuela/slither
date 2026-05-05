@@ -72,6 +72,15 @@ type HuntHub interface {
 	OnResult(ctx context.Context, hostID string, result *pb.HuntResult) error
 }
 
+// ChainVerifier is the Phase 6 #112 cross-checker. Verify takes one
+// ChainSummary from the agent, walks the equivalent CH/pg rows for
+// (host, summary's window), records the summary, and fires a
+// `chain.mismatch` audit event when the count diverges. nil disables
+// the cross-check (used in tests + dev configs without ClickHouse).
+type ChainVerifier interface {
+	Verify(ctx context.Context, hostID string, summary *pb.ChainSummary) error
+}
+
 // SessionService implements AgentService.Session. It embeds
 // UnimplementedAgentServiceServer so it satisfies AgentServiceServer
 // with Enroll left unimplemented — the two halves of AgentService run
@@ -89,6 +98,7 @@ type SessionService struct {
 	PolicyHub       PolicyHub       // optional; nil disables host-policy push
 	BackpressureHub BackpressureHub // optional; nil disables backpressure push
 	HuntHub         HuntHub         // optional; nil disables live-query hunt dispatch
+	ChainVerifier   ChainVerifier   // optional; nil disables Phase 6 #112 chain summary cross-check
 
 	// PeerHostIDExtractor is overridable for tests that route through
 	// bufconn without real client certs. Production leaves it nil and
@@ -347,6 +357,19 @@ func (s *SessionService) handle(ctx context.Context, hostID string, msg *pb.Clie
 				slog.Warn("hunt: result handling failed",
 					"host_id", hostID,
 					"hunt_id", k.HuntResult.GetControlId(),
+					"err", err)
+			}
+		}
+	case *pb.ClientMessage_ChainSummary:
+		// Phase 6 #112: tamper-chain cross-check. Verifier records
+		// the summary + counts equivalent rows for the host's
+		// [since, observed_at) window; mismatch fires a
+		// `chain.mismatch` audit event.
+		if s.ChainVerifier != nil && k.ChainSummary != nil {
+			if err := s.ChainVerifier.Verify(ctx, hostID, k.ChainSummary); err != nil {
+				slog.Warn("chain: cross-check failed",
+					"host_id", hostID,
+					"last_seq", k.ChainSummary.GetLastSeq(),
 					"err", err)
 			}
 		}

@@ -230,3 +230,72 @@ func keepLines(t *testing.T, path string, n int) {
 		t.Fatalf("write: %v", err)
 	}
 }
+
+// TestChainWriter_SnapshotAndReset asserts the Phase 6 #112 windowed
+// counter: Append ticks the in-window count for non-init records,
+// SnapshotAndReset returns the (last_seq, last_hash, count) triple
+// and rolls the window forward.
+func TestChainWriter_SnapshotAndReset(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "log.chain")
+
+	w, err := OpenChain(path)
+	if err != nil {
+		t.Fatalf("OpenChain: %v", err)
+	}
+	defer w.Close()
+
+	for i := 0; i < 4; i++ {
+		if err := w.Append("response_action", map[string]any{"i": i}); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if err := w.Append("detection_finding", map[string]any{"i": i}); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+
+	first := w.SnapshotAndReset()
+	if first.Count != 7 {
+		t.Errorf("first.Count = %d, want 7 (4 response + 3 finding)", first.Count)
+	}
+	// chain.init wrote seq=0; 7 reals follow at seq 1..7. last_seq=7.
+	if first.LastSeq != 7 {
+		t.Errorf("first.LastSeq = %d, want 7", first.LastSeq)
+	}
+	if first.LastHash == "" || first.LastHash == zeroHash {
+		t.Errorf("first.LastHash empty or zero: %q", first.LastHash)
+	}
+	if !first.ObservedAt.After(first.Since) {
+		t.Errorf("first window not forward-progressing: since=%v observed=%v",
+			first.Since, first.ObservedAt)
+	}
+
+	// Window should reset — a second snapshot with no new appends
+	// returns count=0.
+	time.Sleep(2 * time.Millisecond)
+	second := w.SnapshotAndReset()
+	if second.Count != 0 {
+		t.Errorf("second.Count = %d, want 0 (no appends since first snapshot)", second.Count)
+	}
+	if !second.Since.Equal(first.ObservedAt) {
+		t.Errorf("second.Since = %v, want first.ObservedAt %v", second.Since, first.ObservedAt)
+	}
+	if second.LastSeq != first.LastSeq {
+		t.Errorf("second.LastSeq = %d changed across empty window (want %d)", second.LastSeq, first.LastSeq)
+	}
+
+	// Append more, snapshot again → count covers only the new records.
+	for i := 0; i < 2; i++ {
+		_ = w.Append("response_action", map[string]any{"i": i})
+	}
+	third := w.SnapshotAndReset()
+	if third.Count != 2 {
+		t.Errorf("third.Count = %d, want 2", third.Count)
+	}
+	if third.LastSeq != first.LastSeq+2 {
+		t.Errorf("third.LastSeq = %d, want %d", third.LastSeq, first.LastSeq+2)
+	}
+}

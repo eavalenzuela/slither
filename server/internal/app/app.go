@@ -131,6 +131,11 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	sessionSvc.PolicyHub = policyHub
 	sessionSvc.BackpressureHub = bpHub
 	sessionSvc.HuntHub = huntHub
+	// Phase 6 #112: tamper-chain summary cross-check. Compares the
+	// agent's reported chain count against equivalent pg.response_actions
+	// + CH ocsf_detection_finding_2004 rows for that host + window.
+	// SkewSlack=1 absorbs one-row CH-batch flush races.
+	sessionSvc.ChainVerifier = detect.NewChainVerifier(pgStore, chStore, detect.ChainVerifierOptions{})
 
 	enrollSrv := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(mtls.ServerEnrollTLSConfig(serverCert))),

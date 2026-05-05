@@ -137,6 +137,12 @@ type Sink struct {
 	// queue of 64 absorbs that without blocking the dispatcher's
 	// inner loop on a slow stream.Send.
 	huntResults chan *pb.HuntResult
+
+	// chainSummaries carries Phase 6 #112 ChainSummary messages from
+	// the selfprotect chain ticker. Capacity is small — one summary
+	// every 5 minutes is the production cadence — but >1 keeps a
+	// blocked Session from stalling the ticker.
+	chainSummaries chan *pb.ChainSummary
 }
 
 // New constructs a Sink. Reads host_id from disk up-front — a sink
@@ -160,15 +166,21 @@ func New(opts Options, telem *telemetry.Counters) (*Sink, error) {
 	}
 
 	return &Sink{
-		opts:        opts,
-		telem:       telem,
-		hostID:      hostID,
-		buf:         make(chan *pb.Envelope, opts.BufferSize),
-		diags:       make(chan *pb.DiagReport, 8),
-		results:     make(chan *pb.ResponseResult, 16),
-		huntResults: make(chan *pb.HuntResult, 64),
+		opts:           opts,
+		telem:          telem,
+		hostID:         hostID,
+		buf:            make(chan *pb.Envelope, opts.BufferSize),
+		diags:          make(chan *pb.DiagReport, 8),
+		results:        make(chan *pb.ResponseResult, 16),
+		huntResults:    make(chan *pb.HuntResult, 64),
+		chainSummaries: make(chan *pb.ChainSummary, 4),
 	}, nil
 }
+
+// ChainSummaries returns the selfprotect → sink pipe for Phase 6 #112
+// chain summaries. The agent's chain ticker pushes one ChainSummary
+// every 5 minutes; the session goroutine fans onto stream.Send.
+func (s *Sink) ChainSummaries() chan<- *pb.ChainSummary { return s.chainSummaries }
 
 // HuntResults returns the dispatcher → sink pipe. Phase 6 #110 wires
 // this so the hunt dispatcher pushes HuntResult chunks here; the
@@ -408,6 +420,12 @@ func (s *Sink) runSession(ctx context.Context, client pb.AgentServiceClient) err
 			}); err != nil {
 				return err
 			}
+		case cs := <-s.chainSummaries:
+			if err := stream.Send(&pb.ClientMessage{
+				Kind: &pb.ClientMessage_ChainSummary{ChainSummary: cs},
+			}); err != nil {
+				return err
+			}
 		case <-hb.C:
 			if err := stream.Send(&pb.ClientMessage{
 				Kind: &pb.ClientMessage_Heartbeat{
@@ -547,9 +565,9 @@ func (s *Sink) dialOptions() ([]grpc.DialOption, error) {
 	}
 
 	var (
-		cert tls.Certificate
+		cert  tls.Certificate
 		caPEM []byte
-		err  error
+		err   error
 	)
 
 	if s.opts.KeystoreDir != "" {

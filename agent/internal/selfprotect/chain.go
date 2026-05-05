@@ -67,6 +67,14 @@ type ChainWriter struct {
 	file     *os.File
 	seq      uint64
 	prevHash string // hex sha256 of last record (or zeros if empty)
+
+	// Phase 6 #112 windowed counter — number of summary-eligible
+	// records appended since the last Snapshot() call (or since
+	// OpenChain when no snapshot has been taken yet). Reset by
+	// SnapshotAndReset so consecutive summaries cover disjoint
+	// windows.
+	windowCount uint64
+	windowSince time.Time
 }
 
 // zeroHash is the sentinel prev_hash for the first record in a chain.
@@ -80,8 +88,9 @@ const zeroHash = "00000000000000000000000000000000000000000000000000000000000000
 // new audit work.
 func OpenChain(path string) (*ChainWriter, error) {
 	w := &ChainWriter{
-		path:     path,
-		prevHash: zeroHash,
+		path:        path,
+		prevHash:    zeroHash,
+		windowSince: time.Now().UTC(),
 	}
 
 	// Recover state if the file exists. Best-effort: a malformed last
@@ -167,7 +176,60 @@ func (w *ChainWriter) append(kind string, summary json.RawMessage) error {
 
 	w.prevHash = rec.RecordHash
 	w.seq++
+	// Phase 6 #112: count summary-eligible records (everything except
+	// the synthetic chain.init anchor; the server has no equivalent
+	// row for that). Counted here under the same mutex Append holds
+	// so Snapshot() reads a consistent (last_seq, last_hash, count)
+	// triple.
+	if kind != "chain.init" {
+		w.windowCount++
+	}
 	return nil
+}
+
+// ChainSummarySnapshot is the Phase 6 #112 view of the chain writer's
+// state — last_seq, last_hash (hex sha256 of the most recent record),
+// the window's record count, and the [since, observed_at) bounds the
+// count covers. observed_at is set by SnapshotAndReset to the moment
+// the snapshot was taken.
+type ChainSummarySnapshot struct {
+	LastSeq    uint64
+	LastHash   string
+	Count      uint64
+	Since      time.Time
+	ObservedAt time.Time
+}
+
+// SnapshotAndReset returns the current chain summary and rolls the
+// internal window forward — the next call covers a fresh disjoint
+// window starting at this snapshot's observed_at. Phase 6 #112.
+//
+// Safe to call concurrently with Append; both share w.mu.
+func (w *ChainWriter) SnapshotAndReset() ChainSummarySnapshot {
+	if w == nil {
+		return ChainSummarySnapshot{}
+	}
+	now := time.Now().UTC()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	// last_seq is the seq of the most recent appended record. seq
+	// itself is the NEXT seq to use, so the most recent is seq-1
+	// (when seq>0) or 0 when nothing has been appended (shouldn't
+	// happen — OpenChain always writes chain.init).
+	var lastSeq uint64
+	if w.seq > 0 {
+		lastSeq = w.seq - 1
+	}
+	snap := ChainSummarySnapshot{
+		LastSeq:    lastSeq,
+		LastHash:   w.prevHash,
+		Count:      w.windowCount,
+		Since:      w.windowSince,
+		ObservedAt: now,
+	}
+	w.windowCount = 0
+	w.windowSince = now
+	return snap
 }
 
 // Close flushes + releases the chain file. Called by the agent on

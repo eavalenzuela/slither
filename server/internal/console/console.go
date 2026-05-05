@@ -181,6 +181,10 @@ func (s *Server) routes() {
 		if s.processTreeBuilder != nil {
 			r.Get("/hosts/{host_id}/process-tree", s.hostsProcessTree)
 		}
+		// Phase 6 #112 — chain-summary status page. Lists the most
+		// recent chain summaries the host emitted and any mismatch
+		// history. No role gate beyond viewer.
+		r.Get("/hosts/{host_id}/chain-status", s.hostsChainStatus)
 		r.With(s.RequireRole(pg.RoleAdmin)).
 			Post("/hosts/{host_id}/revoke", s.hostsRevoke)
 		// Phase 4 #74: per-host response policy editor (admin-only).

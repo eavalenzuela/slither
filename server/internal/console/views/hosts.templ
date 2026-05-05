@@ -1,6 +1,10 @@
 package views
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/t3rmit3/slither/server/internal/store/pg"
+)
 
 // Hosts is the host inventory list page.
 templ Hosts(d HostsPageData) {
@@ -121,4 +125,104 @@ templ ProcessTree(d ProcessTreeData) {
 			}
 		</div>
 	}
+}
+
+// HostChainStatusData drives /hosts/{id}/chain-status. Phase 6 #112.
+type HostChainStatusData struct {
+	Host       pg.HostRow
+	Summaries  []pg.ChainSummaryRow
+	Mismatches []pg.ChainSummaryRow
+}
+
+// HostChainStatus renders the chain-summary inventory + mismatch list
+// for one host. View-only; no buttons.
+templ HostChainStatus(d HostChainStatusData) {
+	@Layout("Chain status — " + hostLabel(d.Host)) {
+		<div class="card">
+			<h2>Chain status — { hostLabel(d.Host) }</h2>
+			<p class="muted">
+				Phase 6 #112 — every 5 minutes the agent emits a
+				ChainSummary covering the records it appended in the
+				preceding window. The server cross-checks the count
+				against equivalent <code>response_actions</code> +
+				detection-finding rows and records the result here.
+				A mismatch fires a <code>chain.mismatch</code> audit
+				event.
+			</p>
+
+			if len(d.Mismatches) > 0 {
+				<h3>Mismatches</h3>
+				@chainSummaryTable(d.Mismatches, true)
+			}
+
+			<h3>Recent summaries</h3>
+			if len(d.Summaries) == 0 {
+				<p class="muted">No chain summaries received yet. The agent emits its first summary 5 minutes after start.</p>
+			} else {
+				@chainSummaryTable(d.Summaries, false)
+			}
+		</div>
+	}
+}
+
+// chainSummaryTable renders one slice of ChainSummaryRow. highlight=true
+// lifts the mismatch styling so the operator scans the divergence list
+// without having to compare counts manually.
+templ chainSummaryTable(rows []pg.ChainSummaryRow, highlight bool) {
+	<table class="events-table">
+		<thead>
+			<tr>
+				<th>received</th>
+				<th>window</th>
+				<th>last_seq</th>
+				<th>observed</th>
+				<th>expected</th>
+				<th>delta</th>
+				<th>state</th>
+			</tr>
+		</thead>
+		<tbody>
+			for _, r := range rows {
+				<tr class={ chainSummaryRowClass(r.Mismatch, highlight) }>
+					<td class="muted">{ r.ReceivedAt.UTC().Format("2006-01-02 15:04:05 MST") }</td>
+					<td class="muted">
+						{ r.SinceAt.UTC().Format("15:04:05") }
+						→
+						{ r.ObservedAt.UTC().Format("15:04:05") }
+					</td>
+					<td class="muted">{ strconv.FormatUint(r.LastSeq, 10) }</td>
+					<td>{ strconv.FormatUint(r.CountObserved, 10) }</td>
+					<td>{ strconv.FormatUint(r.CountExpected, 10) }</td>
+					<td>{ chainDeltaLabel(r.CountObserved, r.CountExpected) }</td>
+					<td>
+						if r.Mismatch {
+							<span class="alert-status alert-status-failed">mismatch</span>
+						} else {
+							<span class="alert-status alert-status-ok">ok</span>
+						}
+					</td>
+				</tr>
+			}
+		</tbody>
+	</table>
+}
+
+// chainSummaryRowClass picks a row class based on (mismatch, highlight).
+// A row in the dedicated mismatch table is always highlighted; a row
+// in the recent-summaries table only lights up when its own mismatch
+// flag is set.
+func chainSummaryRowClass(mismatch, highlight bool) string {
+	if mismatch || highlight {
+		return "row-mismatch"
+	}
+	return ""
+}
+
+// chainDeltaLabel renders observed-expected as a signed number for the
+// table's quick-scan column.
+func chainDeltaLabel(observed, expected uint64) string {
+	if observed >= expected {
+		return "+" + strconv.FormatUint(observed-expected, 10)
+	}
+	return "-" + strconv.FormatUint(expected-observed, 10)
 }

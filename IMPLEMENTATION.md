@@ -1505,7 +1505,7 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
    no-provider path, fanout-and-submit path with two stub
    providers, and per-provider failure accounting.)*
 
-9. **#112 — Server-side tamper-chain cross-check.** New
+9. ✅ **#112 — Server-side tamper-chain cross-check.** New
    `pb.ClientMessage.chain_summary` (additive slither.v1 bump).
    Agent emits `ChainSummary{last_seq, last_hash, count, since}` to
    the server every 5 minutes (cheap; the chain is small). Server
@@ -1524,6 +1524,39 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
    emits valid summary → no mismatch; tamper a single audit row in
    pg → next summary fires `chain.mismatch`; doc-link from
    `/hosts/{id}` to the chain-status page.
+   *(Shipped 2026-05-05. Phase 6 lands the **count-based** form: the
+   agent's per-record hash includes a wall-clock TS the server can't
+   reconstruct from CH/pg rows, so a literal record-by-record
+   recompute would silently always mismatch. Server counts equivalent
+   rows in `pg.response_actions` (terminal status, completed_at in
+   window) + ClickHouse `ocsf_detection_finding_2004` (observed_at in
+   window) for (host, [since, observed_at)) and compares against the
+   agent's `count` field. SkewSlack=1 absorbs the one-row CH-batch
+   flush race; beyond that fires a `chain.mismatch` audit row at
+   severity 4. `last_hash` is stored verbatim for forensic compare,
+   not recomputed. Phase 7 carry-over (§9) picks between dropping
+   `ts` from hash inputs and stamping per-record hashes onto each
+   row so the chain can be replayed link-by-link. Wire (additive
+   slither.v1 per ADR-0011): `ClientMessage.chain_summary` carrying
+   `ChainSummary{last_seq, last_hash, count, since, observed_at}`.
+   Agent adds `ChainWriter.SnapshotAndReset()` (windowed counter
+   resets each tick) + `runChainSummaryTicker` (5min cadence,
+   non-blocking emit onto sink). Sink gains `chainSummaries chan` +
+   `ChainSummaries()` accessor; session goroutine multiplexes
+   `ClientMessage_ChainSummary` alongside hunt + response paths.
+   Server adds `detect.NewChainVerifier`, pg helpers
+   `RecordChainSummary` / `ListChainSummaries` /
+   `ListChainMismatches` / `CountResponseActionsForChain`, ch helper
+   `CountDetectionFindingsForChain`, and migration
+   `00018_chain_summaries.sql` with mismatch partial index. Console
+   page `/hosts/{id}/chain-status` lists recent summaries and a
+   dedicated mismatch sub-table; viewer-readable, no role gate
+   beyond auth. Tests: agent
+   `TestChainWriter_SnapshotAndReset` covers windowed counter +
+   reset-rolls-forward; server
+   `TestChainVerifier_{HappyPath,SkewSlackAbsorbs,MismatchFiresAudit,
+   CHErrorDegrades,InvertedWindowSkipsCount,PGErrorSurfaces}` cover
+   the audit-firing + degradation paths.)*
 
 10. **#113 — Console SSO (OIDC) backend (closes §10.7).** New
     `server/internal/console/oidc.go` with the standard
@@ -1860,6 +1893,19 @@ Secure Boot implementations).
 
 - macOS agent (Endpoint Security framework; Apple Developer ID required).
 - Windows agent (ETW-first; minifilter driver only if kernel-level file-write telemetry is needed; driver signing via EV cert).
+- **Tamper-chain hash recompute (carry-over from #112).** Phase 6 #112 ships
+  count-based cross-check only — the agent's per-record hash includes
+  `ts` (RFC3339Nano local wall-clock) which the server cannot reconstruct
+  from CH/pg rows, so a literal `record_hash` recompute is physically
+  impossible without changing the canonical hash inputs. Phase 7 picks
+  one of: (a) drop `ts` from the hash inputs and key on a server-derivable
+  field per record kind (OCSF `time` for findings, pg `created_at` for
+  response actions), or (b) carry the agent's per-record hash on each
+  CH/pg row so the server can replay the chain link-by-link without
+  re-deriving the fields. Either approach is an ADR + on-disk format
+  bump for `log.chain` + a migration. Until then, count-based detection
+  catches truncation + replay-then-extend; record-level edits remain
+  detectable only via on-agent `slither-agent verify-chain`.
 - Explicitly gated on demand + funding; not on the default trajectory.
 
 ---

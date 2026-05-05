@@ -65,7 +65,51 @@ message ClientMessage {
     // messages flow per HuntQuery — any number carrying rows then
     // exactly one carrying complete.
     HuntResult hunt_result = 6;
+    // Phase 6 #112: tamper-chain summary — emitted every 5 minutes
+    // by the agent's selfprotect ChainWriter so the server can
+    // cross-check against equivalent pg/CH rows for that host +
+    // window. Additive within slither.v1; v0 agents never emit.
+    ChainSummary chain_summary = 7;
   }
+}
+
+// ChainSummary is one periodic snapshot of the agent's tamper-evident
+// chain (Phase 5 #95). Phase 6 #112 — count-based cross-check only.
+// last_hash is stored verbatim by the server for forensic compare; the
+// server does NOT recompute it because the agent's per-record hash
+// includes a local wall-clock TS the server can't reconstruct from
+// CH/pg rows. Phase 7 may revisit (carry-over noted in
+// IMPLEMENTATION.md §9).
+//
+// `count` is the number of records appended since `since`, not the
+// total chain length — keeps a long-running agent's summary cheap.
+// Server compares this against equivalent rows in pg.response_actions
+// + ClickHouse detection_findings for (host_id, since..now); a delta
+// fires a `chain.mismatch` audit event with severity 4 (high).
+message ChainSummary {
+  // last_seq is the seq of the most recent record the agent appended.
+  // Monotonic-ish across restarts (recover() resumes from the last
+  // good record's seq+1).
+  uint64 last_seq = 1;
+
+  // last_hash is the hex sha256 of the most recent record. Opaque to
+  // the server in Phase 6 — stored verbatim for forensic comparison.
+  string last_hash = 2;
+
+  // count is the number of `response_action` + `detection_finding`
+  // records the agent appended in the [since, now) window. The
+  // synthetic `chain.init` anchor is excluded — server-side rows
+  // don't have an equivalent.
+  uint64 count = 3;
+
+  // since is the start of the window the count covers. Set to the
+  // last successfully-acknowledged summary's timestamp on subsequent
+  // runs; on first run after agent boot it equals chain-init time.
+  google.protobuf.Timestamp since = 4;
+
+  // observed_at is the agent wall-clock at summary build time —
+  // the [since, observed_at) window the server compares against.
+  google.protobuf.Timestamp observed_at = 5;
 }
 
 // ServerMessage is the union of everything a server may send during Session.

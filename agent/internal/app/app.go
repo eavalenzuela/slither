@@ -10,6 +10,9 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
+	"time"
+
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/t3rmit3/slither/agent/internal/collector"
 	"github.com/t3rmit3/slither/agent/internal/config"
@@ -157,6 +160,21 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	sink, err := newSink(ctx, cfg, telem, eng, iocStore, chain, bpCache, extMgr)
 	if err != nil {
 		return fmt.Errorf("app: output sink: %w", err)
+	}
+
+	// Phase 6 #112 — chain-summary ticker. Every 5 minutes the agent
+	// snapshots its tamper-evident chain (last_seq, last_hash,
+	// windowed count) and pushes a ChainSummary onto the gRPC sink so
+	// the server can cross-check against equivalent pg/CH rows.
+	// Skipped when the chain is disabled (locked-down container, etc.)
+	// or when the sink doesn't expose a summaries channel (stdout
+	// sink in dev/scenario tests).
+	if chain != nil {
+		if csSink, ok := sink.(interface {
+			ChainSummaries() chan<- *pb.ChainSummary
+		}); ok {
+			go runChainSummaryTicker(ctx, chain, csSink.ChainSummaries(), 5*time.Minute)
+		}
 	}
 
 	errs := make(chan error, 5)
@@ -533,4 +551,41 @@ func (a extMgrSnapshotAdapter) DispatchSnapshot(ctx context.Context, req *pb.Sna
 		})
 	}
 	return mapped, nil
+}
+
+// runChainSummaryTicker fires a Phase 6 #112 ChainSummary onto the
+// sink's chain-summary channel every interval. Drops on a wedged sink
+// (capacity 4) rather than blocking — losing one summary is preferable
+// to stalling the agent.
+//
+// On ctx cancellation the ticker exits without emitting a final
+// summary; the server's verifier handles a missing summary as the
+// "agent disconnected mid-window" case (no audit fired).
+func runChainSummaryTicker(ctx context.Context, chain *selfprotect.ChainWriter, out chan<- *pb.ChainSummary, interval time.Duration) {
+	if chain == nil || out == nil || interval <= 0 {
+		return
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			snap := chain.SnapshotAndReset()
+			msg := &pb.ChainSummary{
+				LastSeq:    snap.LastSeq,
+				LastHash:   snap.LastHash,
+				Count:      snap.Count,
+				Since:      timestamppb.New(snap.Since),
+				ObservedAt: timestamppb.New(snap.ObservedAt),
+			}
+			select {
+			case out <- msg:
+			default:
+				slog.Warn("selfprotect: chain summary dropped (sink full)",
+					"last_seq", snap.LastSeq, "count", snap.Count)
+			}
+		}
+	}
 }
