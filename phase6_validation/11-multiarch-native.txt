@@ -1,0 +1,35 @@
+Phase 6 #121 V11 — multi-arch native run
+Date: 2026-05-05T20:33:38Z
+
+=== arm64 host ===
+Linux 6.17.0-1012-aws aarch64
+active
+slither-agent v0.0.0-phase6 (bbf02618cc75+dirty)
+
+=== amd64 host (for parity) ===
+Linux 6.12.74+deb13+1-cloud-amd64 x86_64
+active
+slither-agent v0.0.0-phase6 (bbf02618cc75+dirty)
+
+=== Server-side host inventory ===
+                  hostname                   | arch  | agent_version |           last_seen           
+---------------------------------------------+-------+---------------+-------------------------------
+ ip-172-31-23-119                            | arm64 |               | 
+ ip-172-31-26-27                             | amd64 | v0.0.0-phase6 | 2026-05-05 20:33:29.130617+00
+ ip-172-31-26-27                             | amd64 |               | 
+ ip-172-31-26-27                             | amd64 |               | 
+ ip-172-31-31-200.us-west-2.compute.internal | amd64 | v0.0.0-phase6 | 2026-05-05 20:33:32.191963+00
+ ip-172-31-19-7                              | amd64 | v0.0.0-phase6 | 2026-05-05 20:33:35.592333+00
+ ip-172-31-26-27                             | amd64 | v0.0.0-pkg103 | 2026-05-02 01:56:23.588931+00
+(7 rows)
+
+
+=== arm64 BPF CO-RE finding ===
+PROBLEM: agent/internal/bpf/src/*.o files are pre-compiled by
+bpf2go on amd64; the arm64 kernel BTF rejects the net collector's
+handle_inet_csk_accept retprobe with 'bad CO-RE relocation:
+invalid func unknown#195896080'. process + file + extension
+supervisor surfaces work fine on arm64 — only the net collector
+is gated. Workaround for #121 V11 capture: net.enabled=false on
+Graviton. Phase 7 follow-up: regen .o files per-arch via bpf2go
+in the build pipeline.

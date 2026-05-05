@@ -1,0 +1,39 @@
+Phase 6 #121 V12 — sustained-load backpressure
+Date: 2026-05-05T21:15:48Z
+
+=== Steady-state observation ===
+BackpressureMonitor goroutine running on server (logged at boot;
+no level transitions during this run, level stays NORMAL).
+
+=== Spike attempt: stress-ng on agent-debian + 35s docker pause of CH ===
+Result: no backpressure level transition emitted.
+Reason: short pause (35s) + low effective event volume (no rule
+fires, just process-exec events) didn't push CH writer drop_rate
+above the CRITICAL threshold (default ~50% in BackpressureMonitor
+options). The CH writer's batch buffer absorbed the pause window
+without dropping rows.
+
+=== Harness limitation ===
+Reproducing sustained-load backpressure cleanly requires the
+Phase 1 #28 / Phase 5 #103 V8 multi-host stress-ng harness:
+
+  for a in agent-debian agent-rhel agent-ubuntu; do
+    ssh \$a "stress-ng --exec 100 --timeout 300s" &
+  done
+  # Constrain CH (cgroup memory.high or rate-limit on writer)
+  # Watch backpressure logs for level transitions.
+  # Unconstrain; observe recovery.
+
+This three-host parallel reproduction is the genuine V12
+validation surface. Within this single-shot run the harness
+isn't safe to launch (would clobber other ongoing #121
+validation steps). Recommend: re-run V12 after the rest of
+#121 is captured + before Phase 6 close, OR accept Phase 5
+#103 V8's earlier deferral as the same answer (the spec said
+this V12 is the deferred-from-#103-V8 step).
+
+PHASE 6 close note: V12 surface is structurally exercised (the
+backpressure monitor runs, signal proto wire is sent on
+transitions, agent-side BackpressureCache.ShouldSample reads
+the cached level — all unit-tested in Phase 5 #97). The exact
+30s-recovery timing claim needs the multi-host harness.

@@ -1,0 +1,46 @@
+Phase 6 #121 cloud-VM exit validation — pre-flight
+Date: 2026-05-05T20:00:19Z
+
+Fleet:
+----------------------------------------------------------------------------------------------------------------
+|                                               DescribeInstances                                              |
++-------------------------+----------------------+--------------+---------+------------------+-----------------+
+|  slither-p3-agent-debian|  i-03b468e20e802f163 |  c7i.xlarge  |  x86_64 |  54.200.207.154  |  172.31.26.27   |
+|  slither-p3-agent-ubuntu|  i-0338aaeebcbd42433 |  c7i.xlarge  |  x86_64 |  35.87.26.27     |  172.31.19.7    |
+|  slither-p3-agent-rhel  |  i-0fddb743cda81e679 |  c7i.xlarge  |  x86_64 |  44.250.226.151  |  172.31.31.200  |
+|  slither-p3-server      |  i-04a784fe98ecdb974 |  c7i.2xlarge |  x86_64 |  50.112.66.184   |  172.31.24.48   |
+|  phase6-tpm             |  i-076cf63cb408f5a1d |  m7a.large   |  x86_64 |  35.91.128.225   |  172.31.24.223  |
+|  phase6-graviton        |  i-0e51640f2e31bcac4 |  c7g.xlarge  |  arm64  |  34.211.219.18   |  172.31.23.119  |
++-------------------------+----------------------+--------------+---------+------------------+-----------------+
+
+Per-host kernel + distro:
+--- slither-server ---
+Warning: Permanently added '50.112.66.184' (ED25519) to the list of known hosts.
+Linux 6.12.74+deb13+1-cloud-amd64 x86_64
+PRETTY_NAME="Debian GNU/Linux 13 (trixie)"
+VERSION_ID="13"
+--- slither-agent-debian ---
+Warning: Permanently added '54.200.207.154' (ED25519) to the list of known hosts.
+Linux 6.12.74+deb13+1-cloud-amd64 x86_64
+PRETTY_NAME="Debian GNU/Linux 13 (trixie)"
+VERSION_ID="13"
+--- slither-agent-rhel ---
+Warning: Permanently added '44.250.226.151' (ED25519) to the list of known hosts.
+Linux 6.12.0-55.66.1.el10_0.x86_64 x86_64
+VERSION_ID="10.0"
+PRETTY_NAME="Red Hat Enterprise Linux 10.0 (Coughlan)"
+--- slither-agent-ubuntu ---
+Warning: Permanently added '35.87.26.27' (ED25519) to the list of known hosts.
+Linux 6.17.0-1012-aws x86_64
+PRETTY_NAME="Ubuntu 24.04.4 LTS"
+VERSION_ID="24.04"
+--- slither-agent-graviton ---
+Warning: Permanently added '34.211.219.18' (ED25519) to the list of known hosts.
+Linux 6.17.0-1012-aws aarch64
+PRETTY_NAME="Ubuntu 24.04.4 LTS"
+VERSION_ID="24.04"
+--- slither-tpm ---
+Warning: Permanently added '35.91.128.225' (ED25519) to the list of known hosts.
+Linux 6.17.0-1012-aws x86_64
+PRETTY_NAME="Ubuntu 24.04.4 LTS"
+VERSION_ID="24.04"

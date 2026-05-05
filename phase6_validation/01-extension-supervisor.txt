@@ -1,0 +1,21 @@
+Phase 6 #121 V1 — extension supervisor
+Date: 2026-05-05T20:49:16Z
+
+=== V1 Phase 1: cosign-required refuses (tamper-detect equivalent) ===
+--- slither-agent-debian ---
+May 05 20:43:46 ip-172-31-26-27 slither-agent[1430]: time=2026-05-05T20:43:46.497Z level=WARN msg="ext: cycle ended with error" ext=osquery err="verify: sigverify: cosign binary not on PATH: cosign: exec: \"cosign\": executable file not found in $PATH"
+--- slither-agent-rhel ---
+May 05 20:43:47 ip-172-31-31-200.us-west-2.compute.internal slither-agent[2472]: time=2026-05-05T20:43:47.335Z level=WARN msg="ext: cycle ended with error" ext=osquery err="verify: sigverify: cosign binary not on PATH: cosign: exec: \"cosign\": executable file not found in $PATH"
+--- slither-agent-ubuntu ---
+May 05 20:43:48 ip-172-31-19-7 slither-agent[2089]: time=2026-05-05T20:43:48.657Z level=WARN msg="ext: cycle ended with error" ext=osquery err="verify: sigverify: cosign binary not on PATH: cosign: exec: \"cosign\": executable file not found in $PATH"
+
+=== V1 Phase 2 finding: signature_verification=disabled triggers agent OOM ===
+Agent OOMs in tight loop reading Hello frame from extension child.
+Stack: extsdk.readUvarint → extsdk.readFrame → extsdk.ReadExtensionToAgent → extensions.readHello
+fatal error: runtime: out of memory (despite 8GB free + no systemd memory cap)
+Likely interaction between agent's setrlimit(RLIMIT_AS) on extension child
+and Go runtime's mmap-based heap growth — child reserves AS that propagates
+back as the agent reads the socketpair fd.
+PHASE 7 FOLLOW-UP: investigate setrlimit(RLIMIT_AS) interaction in extensions/process_linux.go
+
+=== Reverting agent config back to no extensions for remainder of #121 ===

@@ -1,0 +1,21 @@
+=== server: containers ===
+Warning: Permanently added '50.112.66.184' (ED25519) to the list of known hosts.
+slither-postgres: Up 16 minutes (healthy): postgres:16-alpine
+slither-clickhouse: Up 16 minutes (healthy): clickhouse/clickhouse-server:24.8-alpine
+
+=== server: slither-server version ===
+Warning: Permanently added '50.112.66.184' (ED25519) to the list of known hosts.
+
+=== agents: agent status ===
+--- slither-agent-debian ---
+Warning: Permanently added '54.200.207.154' (ED25519) to the list of known hosts.
+active
+slither-agent 17fd679-dirty (17fd679e0490+dirty)
+--- slither-agent-rhel ---
+Warning: Permanently added '44.250.226.151' (ED25519) to the list of known hosts.
+active
+slither-agent v0.0.0-pkg103 (17fd679e0490+dirty)
+--- slither-agent-ubuntu ---
+Warning: Permanently added '35.87.26.27' (ED25519) to the list of known hosts.
+active
+slither-agent v0.0.0-pkg103 (17fd679e0490+dirty)

@@ -1,0 +1,13 @@
+Phase 6 #121 V3 — snapshot-on-alert empty path
+Date: 2026-05-05T21:21:00Z
+
+=== Test rule inserted ===
+rule_uid: 8b7c4d00-0099-4000-8000-000000000099
+trigger: ls (process exec); slither.snapshot: true
+
+=== 6 finding rows in CH; every one carries x_snapshot_no_providers=true ===
+true	6
+
+=== Result: every triggered finding stamps SnapshotNoProviders=true ===
+Console alert detail page renders the '(no snapshot extensions
+configured)' note when this flag is true and no provider is wired.

@@ -1,0 +1,31 @@
+Phase 6 #121 V4 — server-side tamper-chain cross-check
+Date: 2026-05-05T21:26:23Z
+
+=== Happy-path baseline (pre-tamper) ===
+Chain summaries flowing on every host every 5 min, all OK:
+               host_id                | count 
+--------------------------------------+-------
+ 56f4dd23-b1d3-44eb-9c58-4cadfc2214c5 |    11
+ 910638e1-5a1c-498c-bf6a-aaa22458d512 |     1
+ ba4ac61d-664c-4438-930e-6b479492c4d5 |    11
+ bcd9c963-60ea-421c-8b2f-71ce29fcf29c |     7
+(4 rows)
+
+
+=== Tamper: 4 phantom response_actions inserted on host ba4ac61d ===
+  Phantom 1 at 21:16:35 (delta 1, within skew slack 1)
+  Phantoms 2-4 at 21:23:10 (cumulative delta > slack)
+
+=== Mismatch fired at 21:25:33 (next 5-min chain summary) ===
+ last_seq | count_observed | count_expected | mismatch |           since_at            |          observed_at          |          received_at          
+----------+----------------+----------------+----------+-------------------------------+-------------------------------+-------------------------------
+       20 |              0 |              3 | t        | 2026-05-05 21:20:29.076818+00 | 2026-05-05 21:25:29.077818+00 | 2026-05-05 21:25:29.081413+00
+(1 row)
+
+
+=== Audit log: chain.mismatch row at severity 4 ===
+ actor_type |     action     |  target_kind  |              target_id               |                                                                                                                       detail                                                                                                                       |          created_at           
+------------+----------------+---------------+--------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------
+ agent      | chain.mismatch | chain_summary | 5c383237-9114-4d22-8143-9db4c1e7eeb7 | {"since": "2026-05-05T21:20:29.076818832Z", "host_id": "ba4ac61d-664c-4438-930e-6b479492c4d5", "last_seq": 20, "severity": 4, "observed_at": "2026-05-05T21:25:29.077818608Z", "count_expected": 3, "count_observed": 0, "ch_count_present": true} | 2026-05-05 21:25:29.083209+00
+(1 row)
+
