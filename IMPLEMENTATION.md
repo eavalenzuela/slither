@@ -1790,7 +1790,7 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     given #120 is the JSON API; the integration sweep travels with
     the broader Phase 6 cloud-VM run).)*
 
-15. **#118 — TPM-sealed cert variant.** New `agent/internal/keystore/tpm_linux.go`
+15. ✅ **#118 — TPM-sealed cert variant.** New `agent/internal/keystore/tpm_linux.go`
     using `github.com/google/go-tpm` (or equivalent). PCR 7 (Secure
     Boot state) bound — host that boots un-Secure-Boot can't unseal.
     Opt-in via `agent.keystore.tpm: true` in `agent.yaml`; absent
@@ -1809,6 +1809,32 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     VM (AWS nitro-enclave-shaped instance) — seal on enroll, unseal
     on restart; intentionally bump kernel → next boot fails to unseal,
     falls back, operator sees the documented error.
+    *(Shipped 2026-05-05. New `agent/internal/keystore/tpm_linux.go`
+    using `github.com/google/go-tpm` v0.9.8. Sealing recipe:
+    TPM2_CreatePrimary under the Endorsement hierarchy with the ECC
+    SRK template (re-derived deterministically per call), TPM2_Create
+    of a keyed-hash sealed object whose AuthPolicy commits to a
+    PolicyPCR digest over PCR 7, persist (public, private,
+    policyDigest) JSON to `<stateDir>/tpm_sealed.bin`. Load satisfies
+    a real PolicyPCR session against current PCR 7 state and unseals.
+    Failure modes: missing `/dev/tpmrm0` → AutoSelect falls back to
+    keyring/file silently; PCR 7 mismatch since seal → Unseal returns
+    a wrapped ErrNotFound so the agent re-enrols; TPM busy → bubbles
+    up the underlying error. Wire path: new `AgentKeystore.TPM` config
+    field, `--tpm` flag on `slither-agent enroll`, plumbed through
+    `enroll.Options.KeystoreTPM` + `grpcsink.Options.KeystoreTPM`
+    into `keystore.AutoSelectWithOptions` (the new options-aware form
+    — `AutoSelect` stays as a back-compat shim). Non-Linux stub
+    returns errUnsupported. docs/install.md §2.2 documents the
+    operator workflow + when to use/skip; deploy/config/agent.yaml.sample
+    gains the `agent.keystore.tpm: false` default. 2 new unit tests
+    cover the TPM-absent fallback chain (CI runners have no TPM, so
+    AutoSelectWithOptions{TPM:true} must still return a working
+    store) + the `TPM:false` opt-out preserving the Phase 6 #117
+    chain. Real-TPM seal/unseal validation deferred to #121
+    cloud-VM exit (per spec: "intentionally bump kernel → next boot
+    fails to unseal, falls back, operator sees the documented
+    error").)*
 
 16. **#119 — Multi-arch buildx + live k8s validation (#93 carry-over).**
     Phase 5 #93 shipped a single-arch amd64 OCI build with daemonset

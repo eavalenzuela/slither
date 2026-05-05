@@ -76,6 +76,12 @@ type Options struct {
 	// FingerprintProvider, when set, overrides the runtime fingerprint
 	// collector. Tests stub this; production leaves it nil.
 	FingerprintProvider func() (HostFingerprint, error)
+
+	// KeystoreTPM opts the enrol path into Phase 6 #118's TPM-sealed
+	// store. AutoSelect probes /dev/tpmrm0 + PCR 7; on probe failure
+	// it degrades to the keyring → file chain. Default false
+	// preserves the Phase 6 #117 chain.
+	KeystoreTPM bool
 }
 
 // Result is what Enroll wrote to disk on success.
@@ -195,7 +201,9 @@ func Enroll(ctx context.Context, opts Options) (*Result, error) {
 	}
 	// Best-effort additive keyring write. Failure here is non-fatal
 	// because the file path above is the operational fallback.
-	store := keystore.AutoSelect(opts.StateDir)
+	store := keystore.AutoSelectWithOptions(opts.StateDir, keystore.AutoSelectOptions{
+		TPM: opts.KeystoreTPM,
+	})
 	res.StoreName = store.Name()
 	_ = store.Save(keystore.Material{
 		ClientKey:  keyPEM,

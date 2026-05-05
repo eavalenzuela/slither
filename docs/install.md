@@ -204,31 +204,75 @@ For dev / docker-compose against an ephemeral CA, pass
 `--insecure-skip-verify` instead of `--ca-cert`. Never use it against a
 production server.
 
-### 2.1 Cert storage: kernel keyring vs file (Phase 5 #98)
+### 2.1 Cert storage: kernel keyring vs file (Phase 5 #98 / Phase 6 #117)
 
 `slither-agent enroll` calls `keystore.AutoSelect` to persist the
 client cert + key + CA bundle. On Linux with a usable kernel
-keyring (the default for systemd-managed agents on Debian 12+,
-RHEL 10, Ubuntu 22.04+) the three PEM blobs land as `user`-typed
-keys under the agent's session keyring — they don't touch the
-filesystem.
+keyring the three PEM blobs land as `user`-typed keys under the
+per-uid keyring (`KEY_SPEC_USER_KEYRING`, `@u`) — they don't touch
+the filesystem. The file store at `$StateDir/{client.key,client.crt,ca.crt}`
+stays populated as the durable belt-and-braces so a host with a
+purged keyring still has the material on disk for re-load.
+
+Phase 6 #117 (ADR-0038) moved the keyring target from `@s`
+(per-PAM-session — got reaped at the enrol→service boundary in
+the Phase 5 #98 design) to `@u`. This is a no-op upgrade for
+existing fleets: the first Save after a Phase 6 upgrade lands in
+`@u` and the stale `@s` keys go inert.
 
 Containers without `/proc/keys` access (some k8s distros, older
-CRI runtimes) fall through to the file path: the same blobs land
-at `$StateDir/{client.key,client.crt,ca.crt}`. The `enroll` stderr
+CRI runtimes) fall through to the file path. The `enroll` stderr
 reports which store was chosen via `Result.StoreName`.
 
-To force the file path explicitly (long-uptime fleets that don't
-want to re-enrol on every reboot, or operator policies requiring
-on-disk material for backup workflows), set
-`output.grpc.keystore_dir: ""` in `agent.yaml` — empty falls back
-to the legacy `ca_path`/`cert_path`/`key_path` triplet shape Phase 2
-shipped. To force the keystore path (and let it fall back to file
-under the same dir if the keyring isn't usable), set
+To force the file path explicitly, leave `output.grpc.keystore_dir`
+empty in `agent.yaml` — falls back to the legacy
+`ca_path`/`cert_path`/`key_path` triplet. To force the keystore
+path (with file fallback under the same dir), set
 `output.grpc.keystore_dir: /var/lib/slither`.
 
-TPM-sealed cert storage is explicitly out of scope here — Phase 6+
-work gated on hardware availability.
+### 2.2 TPM-sealed cert storage (Phase 6 #118, opt-in)
+
+Hosts with TPM 2.0 + Secure Boot can opt into PCR-bound sealing.
+The agent stores the cert material as a TPM-sealed blob at
+`$StateDir/tpm_sealed.bin`; the seal is bound to the boot-time
+value of PCR 7 (Secure Boot policy). A host that boots
+un-Secure-Boot — or one that updates its kernel and changes the
+PCR 7 measurement — fails the unseal at the next start with a
+clear `tpm: PCR 7 mismatch (kernel/Secure-Boot change?)` log line.
+Recovery is to re-run `slither-agent enroll --tpm` so the seal
+re-bakes against the current PCR state.
+
+Opt in by setting `agent.keystore.tpm: true` in `agent.yaml` and
+passing `--tpm` to the enrol subcommand:
+
+```bash
+sudo /usr/local/bin/slither-agent enroll \
+  --server slither-server.acme.io:9444 \
+  --token "${TOKEN}" \
+  --ca /etc/slither/ca.crt \
+  --tpm
+```
+
+When the platform doesn't satisfy the probe (no `/dev/tpmrm0`,
+unreadable PCR 7), AutoSelect degrades to the keyring → file
+chain — the agent does not refuse to start. The fallback fires
+once at boot with a `keystore: tpm probe failed; falling back to
+keyring` line.
+
+When to use TPM:
+
+- Bare-metal hosts with Secure Boot enforced + a stable boot chain.
+- Threat models where "another root process on the same host
+  reading `@u`" is in scope.
+
+When to skip TPM:
+
+- Container hosts (no `/dev/tpmrm0`).
+- Fleets with frequent kernel updates (PCR 7 churns; operators
+  end up re-enrolling on every kernel bump). The configuration
+  matrix grows fast and the ROI without measured boot is small.
+- Anything where the keyring + file stores already meet the
+  threat model.
 
 ## 3. Write the config
 

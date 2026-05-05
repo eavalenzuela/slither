@@ -69,8 +69,26 @@ type Extension struct {
 
 // Agent holds host-level agent settings.
 type Agent struct {
-	HostIDFile string `yaml:"host_id_file"`
-	LogLevel   string `yaml:"log_level"`
+	HostIDFile string        `yaml:"host_id_file"`
+	LogLevel   string        `yaml:"log_level"`
+	Keystore   AgentKeystore `yaml:"keystore"`
+}
+
+// AgentKeystore tunes the cert-storage strategy. Phase 6 #118 adds
+// the opt-in TPM-sealed variant; absent flags preserve the Phase 5
+// #98 / Phase 6 #117 default of keyring-on-`@u` with file fallback.
+type AgentKeystore struct {
+	// TPM, when true, opts the agent into the PCR-bound TPM-sealed
+	// store. AutoSelect probes for `/dev/tpmrm0` + a readable PCR 7;
+	// on success the sealed blob lives under the agent's state dir
+	// and the keyring/file stores are bypassed. On any probe failure
+	// (no device, unreadable PCR, sealed-blob unseal failure on a
+	// PCR-changed host) the agent degrades to the keyring → file
+	// chain so a kernel update doesn't lock operators out — the
+	// failure is logged with a "tpm: …" prefix the operator can grep
+	// for and react to (typically: re-run `slither-agent enroll` to
+	// re-seal against the new PCR state).
+	TPM bool `yaml:"tpm"`
 }
 
 // Collectors toggles individual collectors on or off.

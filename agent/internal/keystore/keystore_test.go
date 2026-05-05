@@ -146,3 +146,53 @@ func TestAutoSelect_ReturnsAStore(t *testing.T) {
 		t.Error("AutoSelect round-trip lost ClientCert content")
 	}
 }
+
+// TestAutoSelectWithOptions_TPMAbsentFallsBack asserts that the
+// Phase 6 #118 opt-in degrades cleanly when the platform has no TPM.
+// CI runners don't expose /dev/tpmrm0, so the probe always fails;
+// the chain must still return a working store ("kernel-keyring" or
+// "file") rather than nil.
+func TestAutoSelectWithOptions_TPMAbsentFallsBack(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	s := AutoSelectWithOptions(tmp, AutoSelectOptions{TPM: true})
+	if s == nil {
+		t.Fatal("AutoSelectWithOptions returned nil with TPM probe failure")
+	}
+	// On a host with no TPM we expect to fall through to keyring or
+	// file. The "tpm" name only surfaces when the probe succeeds AND
+	// the device is available — neither is true on a generic CI box.
+	if name := s.Name(); name == "tpm" {
+		// Real-TPM environment — the integration test for #121 will
+		// exercise the seal/unseal path. Skip the round-trip here so
+		// we don't write a sealed blob to a real device under unit
+		// tests.
+		t.Skip("real TPM detected; defer Save/Load to the #121 integration sweep")
+	}
+	// Verify the store still works.
+	if err := s.Save(samplePEMs); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := s.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !bytes.Equal(got.ClientCert, samplePEMs.ClientCert) {
+		t.Error("round-trip lost ClientCert")
+	}
+}
+
+// TestAutoSelect_TPMOptOutPreservesDefault asserts the existing
+// chain keeps working when the new TPM flag is left at its default.
+// Belt-and-braces against a future regression that accidentally
+// flips the default.
+func TestAutoSelect_TPMOptOutPreservesDefault(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	a := AutoSelect(tmp)
+	b := AutoSelectWithOptions(tmp, AutoSelectOptions{TPM: false})
+	if a.Name() != b.Name() {
+		t.Errorf("AutoSelect (%q) != AutoSelectWithOptions{TPM:false} (%q)",
+			a.Name(), b.Name())
+	}
+}

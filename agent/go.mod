@@ -14,6 +14,7 @@ require (
 )
 
 require (
+	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	go.opentelemetry.io/otel v1.41.0 // indirect
 	golang.org/x/net v0.52.0 // indirect

@@ -90,7 +90,39 @@ var ErrNotFound = errors.New("keystore: not found")
 // (containers without /proc/keys, kernels < 3.5 without
 // KEYCTL_GET_KEYRING_ID, sandbox profiles dropping CAP_SYSADMIN
 // from CRIU/seccomp) it falls back to File at stateDir.
+//
+// AutoSelect remains a single-arg shim for backward compat. Phase 6
+// #118 callers wanting the TPM opt-in use AutoSelectWithOptions.
 func AutoSelect(stateDir string) Store {
+	return AutoSelectWithOptions(stateDir, AutoSelectOptions{})
+}
+
+// AutoSelectOptions tunes the auto-select chain. Phase 6 #118 added
+// the TPM opt-in; future Phase 7+ knobs (e.g. force-file, force-
+// keyring) land here without re-shaping the call sites.
+type AutoSelectOptions struct {
+	// TPM, when true, attempts the Phase 6 #118 PCR-bound store
+	// before the keyring → file fallback chain. False (the default)
+	// preserves the Phase 6 #117 chain: keyring → file.
+	TPM bool
+}
+
+// AutoSelectWithOptions is the configurable form. Resolution order:
+//
+//  1. TPM (when opts.TPM is true and the platform satisfies the probe)
+//  2. Keyring (when add_key against `@u` succeeds — Phase 6 #117)
+//  3. File at stateDir (always succeeds)
+//
+// Each fallback is silent at the package level — the agent's
+// startup path logs the picked store name once via the existing
+// `keystore: <Name>` slog line so operators can verify the
+// effective store post-enrol without inspecting probe internals.
+func AutoSelectWithOptions(stateDir string, opts AutoSelectOptions) Store {
+	if opts.TPM {
+		if t, err := tryTPM(stateDir); err == nil && t != nil {
+			return t
+		}
+	}
 	if k, err := tryKeyring(); err == nil && k != nil {
 		return k
 	}

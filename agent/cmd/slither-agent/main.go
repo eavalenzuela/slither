@@ -100,6 +100,7 @@ func enrollCmd(args []string) error {
 	insecure := fs.Bool("insecure-skip-verify", false, "Skip server-cert verification (dev only)")
 	serverName := fs.String("server-name", "", "Override SNI hostname (defaults to host portion of --server)")
 	timeout := fs.Duration("timeout", 30*time.Second, "Overall RPC timeout")
+	tpm := fs.Bool("tpm", false, "Seal cert material to the TPM (Phase 6 #118; opt-in, falls back to keyring/file when absent)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -114,6 +115,7 @@ func enrollCmd(args []string) error {
 		CAPath:             *caCert,
 		InsecureSkipVerify: *insecure,
 		ServerName:         *serverName,
+		KeystoreTPM:        *tpm,
 	})
 	if err != nil {
 		return err

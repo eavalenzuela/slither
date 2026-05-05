@@ -10,6 +10,15 @@
 agent:
   host_id_file: /var/lib/slither/host_id
   log_level: info
+  # keystore.tpm opts the agent into Phase 6 #118 PCR-bound TPM
+  # sealing. Default false → keystore.AutoSelect picks keyring (@u)
+  # → file. When true, AutoSelect probes /dev/tpmrm0 + PCR 7 first;
+  # probe failure degrades to the same keyring → file chain rather
+  # than blocking boot. Operators switching to TPM also pass --tpm
+  # to `slither-agent enroll` so the first seal happens against the
+  # right PCR state. See docs/install.md §2.2 + ADR-0038.
+  keystore:
+    tpm: false
 
 collectors:
   process:

@@ -46,10 +46,16 @@ type Options struct {
 
 	// KeystoreDir, when non-empty, takes precedence over the
 	// CAPath/CertPath/KeyPath triplet. The sink calls
-	// keystore.AutoSelect(KeystoreDir) and loads cert material via
-	// the resulting Store — kernel keyring on Linux when usable,
-	// file under this dir otherwise (Phase 5 #98).
+	// keystore.AutoSelectWithOptions(KeystoreDir, …) and loads cert
+	// material via the resulting Store — Phase 6 #118 TPM-sealed
+	// when KeystoreTPM is true and the platform satisfies the probe,
+	// otherwise kernel keyring on Linux (Phase 6 #117 / @u) or file
+	// under this dir.
 	KeystoreDir string
+
+	// KeystoreTPM opts the sink's load path into Phase 6 #118's
+	// TPM-sealed store. Plumbed from agent.keystore.tpm at app.go.
+	KeystoreTPM bool
 
 	// Dialer is an optional gRPC dial-options list. Tests inject
 	// bufconn-backed dial options here; production leaves it nil and
@@ -574,7 +580,9 @@ func (s *Sink) dialOptions() ([]grpc.DialOption, error) {
 		// Keystore path. Same AutoSelect logic enroll used to
 		// persist the material — picks kernel keyring on Linux when
 		// available, file under KeystoreDir otherwise.
-		store := keystore.AutoSelect(s.opts.KeystoreDir)
+		store := keystore.AutoSelectWithOptions(s.opts.KeystoreDir, keystore.AutoSelectOptions{
+			TPM: s.opts.KeystoreTPM,
+		})
 		mat, loadErr := store.Load()
 		if loadErr != nil {
 			return nil, fmt.Errorf("client cert: keystore.Load (%s): %w", store.Name(), loadErr)

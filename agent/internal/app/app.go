@@ -315,6 +315,7 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 			BufferSize:        g.BufferSize,
 			AgentVersion:      version.Version,
 			KeystoreDir:       g.KeystoreDir,
+			KeystoreTPM:       cfg.Agent.Keystore.TPM,
 			Buffer:            diskBuf,
 			// emit is filled in below — applyRuleSetTo holds the
 			// indirection so the callback closes over the variable
