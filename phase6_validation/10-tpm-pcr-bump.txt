@@ -1,0 +1,56 @@
+Phase 6 #121 V10 — TPM-sealed cert variant
+Date: 2026-05-05T21:33:18Z
+
+=== AWS NitroTPM provisioning blocker ===
+First attempt: m7a.large with --enclave-options Enabled=false.
+Result: dmesg reported 'No TPM chip found, activating TPM-bypass!'
+        no /dev/tpm* device created.
+
+Root cause: AWS Nitro TPM 2.0 requires a custom AMI with
+TpmSupport=v2.0 attribute set. Canonical's stock Ubuntu 24.04
+amd64 AMI ships with TpmSupport=None (no NitroTPM enablement).
+Boot mode is uefi-preferred but the AMI doesn't surface the
+vTPM device to the guest.
+
+Workaround for full hardware seal/unseal validation: register-image
+from the Canonical snapshot with --tpm-support v2.0 OR use a
+Marketplace AMI that ships TPM-enabled. Multi-hour follow-up;
+deferred to Phase 7.
+
+=== V10 partial validation: no-TPM fallback chain ===
+
+Test host: slither-agent-rhel (RHEL 10, no /dev/tpm*)
+Action: slither-agent enroll --tpm with no TPM device present.
+Expected per ADR-0038: AutoSelect probes /dev/tpmrm0, finds it
+absent, falls back to keyring → file. enrolment succeeds via
+file store; no tpm_sealed.bin produced.
+
+Result: PASS
+  - enroll output confirms host UUID 24b86d69-...beb0 issued
+  - state dir shows ca.crt + client.crt + client.key + host_id
+    via the file path (no tpm_sealed.bin, expected)
+  - agent restart -> active, file material loaded cleanly
+
+=== Code path exercised ===
+  enroll.Options.KeystoreTPM=true
+  → keystore.AutoSelectWithOptions(stateDir, {TPM: true})
+  → tryTPM(stateDir) returns (nil, errOpenTPM) on no /dev/tpmrm0
+  → tryKeyring() probes @u, falls back per V9 finding
+  → NewFile(stateDir) wins
+
+Identical path documented in agent/internal/keystore/keystore.go
+AutoSelectWithOptions; the no-TPM-fallback unit test
+TestAutoSelectWithOptions_TPMAbsentFallsBack covers this exact
+code path in CI on every PR.
+
+=== PHASE 7 follow-up #5 ===
+Add a NitroTPM-enabled AMI provisioning step to the Phase 6
+validation runbook for #121-style runs. Either:
+  (a) docs: register-image from Canonical snapshot with
+      --tpm-support v2.0, capture the AMI ID for reuse
+  (b) ship a Packer template under deploy/cloud/aws/ that
+      builds a NitroTPM-enabled AMI per release
+
+Without (a) or (b), full hardware seal/unseal + PCR-bump
+validation can only run on bare-metal hosts with TPM 2.0,
+which is outside the standard cloud-VM validation surface.
