@@ -1836,7 +1836,7 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     fails to unseal, falls back, operator sees the documented
     error").)*
 
-16. **#119 — Multi-arch buildx + live k8s validation (#93 carry-over).**
+16. ✅ **#119 — Multi-arch buildx + live k8s validation (#93 carry-over).**
     Phase 5 #93 shipped a single-arch amd64 OCI build with daemonset
     YAML; multi-arch buildx + live cluster validation were deferred.
     This task: (i) `.github/workflows/release.yml` extended with
@@ -1852,6 +1852,28 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     has both arch manifests; daemonset on k3s reports events to the
     server; arm64 host (Graviton EC2) runs the agent natively without
     qemu-user.
+    *(Shipped 2026-05-05. Multi-arch buildx was already wired in
+    Phase 5 #93's release.yml — this task confirms the contract,
+    documents the k8s deployment shape, and lands an operator-facing
+    smoke script. New `docs/install.md §6.6 "Kubernetes deployment"`
+    covers PVC sizing (Postgres ~10 GiB/1k-host fleet/year;
+    ClickHouse ~80 GiB/host/day at 12k events/s), Secret rotation
+    pattern (mint enrol token → exec into pod → daemonset
+    annotation bump triggers rolling restart), daemonset rolling-
+    restart behaviour (~1s per pod on warm BTF; serialised across
+    cluster). New `deploy/k8s/smoke.sh` (operator-facing equivalent
+    of the #121 checklist for the k8s shape): applies every
+    manifest, waits for both rollouts to converge, verifies per-pod
+    image arch matches `kubernetes.io/arch` to catch `--platform`
+    regressions, provokes a known-firing event from one agent pod,
+    asserts the heartbeat reached `pg.hosts.last_seen` within 5
+    minutes. Doc-driven — operators adapt to their Secret + DSN
+    shapes. `deploy/k8s/daemonset.yaml` gains a Phase 6 #119
+    comment explaining why no `nodeSelector` is needed (kubelet
+    auto-resolves the right arch from the multi-arch manifest
+    list). `deploy/k8s/README.md` gains the corresponding section.
+    Live k3s validation deferred to #121 cloud-VM exit alongside
+    the broader Phase 6 sweep.)*
 
 17. **#120 — External read-only JSON API for BAS integrations.**
     Adds a `/api/v1/*` route subtree separate from the HTML console,

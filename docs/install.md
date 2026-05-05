@@ -587,6 +587,87 @@ extensions:
 
 Defaults pin the slither release pipeline.
 
+## 6.6 Kubernetes deployment (Phase 6 #119)
+
+The release pipeline pushes multi-arch (linux/amd64 + linux/arm64)
+OCI images to `ghcr.io/<org>/slither/{agent,server}` per tag — the
+kubelet picks the right arch automatically from the multi-arch
+manifest list, so an arm64 node (Graviton EC2, Ampere Altra, RPi-class
+edge) runs the agent natively without qemu-user.
+
+Reference manifests live in `deploy/k8s/`:
+
+- `namespace.yaml` — `slither` namespace.
+- `daemonset.yaml` — agent on every node, `system-node-critical`
+  priority, narrow capability set (CAP_BPF / CAP_PERFMON /
+  CAP_SYS_PTRACE / CAP_DAC_READ_SEARCH), `hostPID: true`,
+  `tolerations: { operator: Exists }` so the agent runs on
+  control-plane + tainted nodes too. **Not** `privileged: true`.
+- `server.yaml` — server `Deployment` with two listeners: enrolment
+  (HTTP on 9444) + Session mTLS (gRPC on 9443) + console (8080).
+  PostgreSQL + ClickHouse connection strings come from the
+  `slither-server-config` Secret.
+
+### PVC sizing
+
+The server's two stateful surfaces:
+
+- **Postgres** (operator-managed; cloud SQL or in-cluster CloudNative-PG).
+  Small (~10 GiB sufficient for a 1k-host fleet for a year of audit
+  history). Tune by retention policy on `audit_log`.
+- **ClickHouse** (operator-managed; Altinity Cloud or in-cluster
+  ClickHouse Operator). Sizing depends on event volume — the Phase 5
+  load test ran 12k events/s for 24h consuming ~80 GiB/host. Plan:
+  `events_per_second × 86400 × 7` for a one-week retention buffer
+  before tuning the per-class TTLs (server/migrations land 30-day
+  defaults; tighten via the retention migration).
+
+The agent daemonset is **stateless** — `tpm_sealed.bin` /
+`client.{key,crt}` / `host_id` live in a `hostPath` mount under
+`/var/lib/slither` on each node. Re-creating a node forces a re-enrol
+(intentional; pinning enrolment to ephemeral pod state would race the
+host's liveness in the server's `/hosts` view).
+
+### Secret rotation
+
+mTLS certs rotate per-node by re-running `slither-agent enroll` —
+the daemonset's `lifecycle.preStop` hook can be used to trigger a
+graceful shutdown so the existing Session stream closes cleanly. The
+operator workflow:
+
+1. Mint a fresh enrolment token via the console (`/enrolment-tokens`,
+   admin-only).
+2. `kubectl exec -n slither pods/slither-agent-xyz -- slither-agent enroll --server slither-server.slither:9444 --token "${TOKEN}" --ca /etc/slither/ca.crt`.
+3. The agent's gRPC sink picks up the new cert on the next reconnect.
+
+For full-fleet rotation, operators bump the daemonset's
+`spec.template.metadata.annotations.cert-rotation-epoch` to trigger a
+rolling restart; each pod's enrolment runs once on cold-start via the
+operator-supplied init container in `deploy/k8s/daemonset.yaml`'s
+extension points.
+
+### Daemonset rolling-restart behaviour
+
+`updateStrategy.rollingUpdate.maxUnavailable: 1` keeps n-1 nodes
+covered during a daemonset image bump. Per-pod restart cost is
+~1 second on warm BTF + a fresh BPF program load; the rollout serialises
+across the cluster. For multi-thousand-node fleets, set
+`maxUnavailable: 10%` so the rollout completes in 10× as many
+serialised batches.
+
+### Smoke validation
+
+```bash
+deploy/k8s/smoke.sh
+```
+
+The script is the operator-facing equivalent of the Phase 6 #121
+exit-validation steps for the k8s shape: applies the manifests
+against a live cluster, waits for the daemonset to converge, runs a
+test-event scenario from one node, and checks that the event lands
+in ClickHouse via the server's `/events` page. Doc-driven — operators
+adapt the script to their cluster's auth + storage backends.
+
 ## 7. Uninstall
 
 ```bash

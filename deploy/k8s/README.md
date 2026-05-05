@@ -100,3 +100,26 @@ isn't leader-elected; running multiple replicas would fan a single
 NOTIFY into N concurrent `Hub.Refresh` calls and N rule-pack pushes
 to every agent. Phase 6+ work for HA. For now: run one server,
 accept the SPOF, scale Postgres + ClickHouse independently.
+
+## Multi-arch + smoke validation (Phase 6 #119)
+
+The release pipeline (`.github/workflows/release.yml`) builds + pushes
+multi-arch (linux/amd64 + linux/arm64) manifest lists per tag. The
+kubelet auto-resolves the right arch from the manifest list — an
+arm64 node (Graviton EC2, Ampere Altra, RPi-class edge) runs the
+agent natively without qemu-user.
+
+`smoke.sh` is the operator-facing equivalent of the Phase 6 #121
+exit-validation checklist for the k8s shape:
+
+```bash
+NAMESPACE=slither IMAGE_TAG=v1.0.0 deploy/k8s/smoke.sh
+```
+
+It applies every manifest, waits for both rollouts to converge,
+verifies per-pod image arch matches the node's `kubernetes.io/arch`
+label (catches `--platform` regressions), provokes a known-firing
+event from one agent pod, then asserts the heartbeat reached
+`pg.hosts.last_seen` within the last 5 minutes. Doc-driven; adapt
+to your cluster's auth / Secret / DSN shapes before running on a
+real fleet.

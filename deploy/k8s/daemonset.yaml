@@ -52,6 +52,10 @@ spec:
       # required — the agent's network collector reads via BPF, not
       # the host netns directly.
       hostPID: true
+      # Phase 6 #119 — multi-arch images. The kubelet auto-selects
+      # the right arch from the manifest list, so we don't pin a
+      # nodeSelector. If you build for additional architectures,
+      # constrain via spec.template.spec.nodeSelector.
       # Ensure the agent runs even when node pressure is high; it's
       # the audit trail for whatever's causing the pressure.
       priorityClassName: system-node-critical
