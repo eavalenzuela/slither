@@ -64,6 +64,13 @@ type Options struct {
 	// per-host send queues (Phase 6 #110). Optional — when nil the
 	// /hunt POST returns 503 and the page renders read-only history.
 	HuntHub *hunt.Hub
+
+	// ArtefactDir is the same dir the response dispatcher writes
+	// COLLECT_ARTIFACTS + Phase 6 #111 snapshot blobs to. The alert
+	// detail page lists per-extension snapshots under
+	// <ArtefactDir>/<alert_id>/*.tgz. Empty disables the listing
+	// (alerts still render; the snapshot block is hidden).
+	ArtefactDir string
 }
 
 // Server is the chi.Router built around Options. New returns a stdlib
@@ -81,6 +88,7 @@ type Server struct {
 	processTreeBuilder  *detect.ProcessTreeBuilder
 	responseHub         *respond.Hub
 	huntHub             *hunt.Hub
+	artefactDir         string
 }
 
 // New constructs the console router. Panics on misconfiguration — a
@@ -119,6 +127,7 @@ func New(opts Options) *Server {
 		graphCache:          opts.GraphCache,
 		responseHub:         opts.ResponseHub,
 		huntHub:             opts.HuntHub,
+		artefactDir:         opts.ArtefactDir,
 	}
 	if opts.GraphCache != nil && opts.ChStore != nil {
 		s.graphBuilder = &detect.FlowGraphBuilder{Lookup: opts.ChStore}
@@ -196,6 +205,13 @@ func (s *Server) routes() {
 			Post("/alerts/{id}/transition", s.alertTransition)
 		if s.graphBuilder != nil {
 			r.Get("/alerts/{id}/graph.svg", s.alertGraph)
+		}
+		// Phase 6 #111 — per-extension snapshot blob download. Reads
+		// from <artefactDir>/<alert_id>/<extension>.tgz; 404s if the
+		// dir or file is missing or if either path component fails
+		// the safe-name check.
+		if s.artefactDir != "" {
+			r.Get("/alerts/{id}/snapshots/{extension}", s.alertSnapshotDownload)
 		}
 		// Phase 4 #76: forensics drill-down for the response chain
 		// against an action. Reads audit_log filtered to

@@ -21,7 +21,9 @@ const stateCapDefault uint32 = 1024
 // CompileArtefacts is the response-intent-aware sibling of CompileRules.
 // Each EdgeArtefact carries an optional ResponseIntent; the resulting
 // CompiledRule remembers the intent so the engine can hand it to the
-// AutoRespondHook on a match. Phase 4 #83.
+// AutoRespondHook on a match. Phase 4 #83. Phase 6 #111 also stamps
+// the artefact's Snapshot bit so the hook can fan a SnapshotRequest
+// out to extensions.
 //
 // Rules whose artefact is nil are skipped silently (the upstream
 // compiler classified them server-only). Other failures map 1:1 to
@@ -29,19 +31,22 @@ const stateCapDefault uint32 = 1024
 func CompileArtefacts(arts []*ruleast.EdgeArtefact, telem *telemetry.Counters, ioc ruleast.IOCEnv) ([]CompiledRule, error) {
 	rules := make([]*ruleast.Rule, 0, len(arts))
 	intents := make([]*ruleast.ResponseIntent, 0, len(arts))
+	snapshots := make([]bool, 0, len(arts))
 	for _, a := range arts {
 		if a == nil || a.Rule == nil {
 			continue
 		}
 		rules = append(rules, a.Rule)
 		intents = append(intents, a.Response)
+		snapshots = append(snapshots, a.Snapshot)
 	}
 	out, err := CompileRules(rules, telem, ioc)
 	if err != nil {
 		return nil, err
 	}
-	// CompileRules preserves order. Stamp intents back onto the
-	// concrete sigmaCompiledRule type (the only implementation today).
+	// CompileRules preserves order. Stamp intents + snapshot bits back
+	// onto the concrete sigmaCompiledRule type (the only implementation
+	// today).
 	if len(out) != len(intents) {
 		// CompileRules dropped a nil — re-walk to align indices.
 		j := 0
@@ -51,6 +56,7 @@ func CompileArtefacts(arts []*ruleast.EdgeArtefact, telem *telemetry.Counters, i
 			}
 			if scr, ok := out[j].(*sigmaCompiledRule); ok && scr.r == r {
 				scr.response = intents[i]
+				scr.snapshot = snapshots[i]
 				j++
 			}
 		}
@@ -59,6 +65,7 @@ func CompileArtefacts(arts []*ruleast.EdgeArtefact, telem *telemetry.Counters, i
 	for i, r := range out {
 		if scr, ok := r.(*sigmaCompiledRule); ok {
 			scr.response = intents[i]
+			scr.snapshot = snapshots[i]
 		}
 	}
 	return out, nil
@@ -119,6 +126,12 @@ type sigmaCompiledRule struct {
 	// Phase 4 #83 — engine reads this when a rule fires and forwards
 	// the intent to its AutoRespondHook.
 	response *ruleast.ResponseIntent
+
+	// snapshot mirrors the artefact's Snapshot bit. When true, the
+	// engine's AutoRespondHook fans a SnapshotRequest out to every
+	// extension declaring CAPABILITY_SNAPSHOT_PROVIDE alongside any
+	// response action. Phase 6 #111.
+	snapshot bool
 }
 
 func (s *sigmaCompiledRule) ID() string                { return s.r.ID }
@@ -127,6 +140,7 @@ func (s *sigmaCompiledRule) Cost() int                 { return s.r.Cost() }
 func (s *sigmaCompiledRule) Response() *ruleast.ResponseIntent {
 	return s.response
 }
+func (s *sigmaCompiledRule) Snapshot() bool             { return s.snapshot }
 func (s *sigmaCompiledRule) Category() ruleast.Category { return s.r.Category }
 
 func (s *sigmaCompiledRule) Match(e ocsf.Event) bool {

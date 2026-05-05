@@ -50,6 +50,17 @@ func Compile(src []byte, opts ...CompileOption) (*EdgeArtefact, *ServerPlan, Cla
 			plan.Response = intent
 		}
 	}
+	// Phase 6 #111: snapshot is independent of response — a rule can
+	// declare snapshot=true with no response block. Stamp it on
+	// whichever artefact the classifier produced.
+	if doc.Slither != nil && doc.Slither.Snapshot {
+		if art != nil {
+			art.Snapshot = true
+		}
+		if plan != nil {
+			plan.Snapshot = true
+		}
+	}
 	return art, plan, class, nil
 }
 

@@ -61,6 +61,33 @@ func (s *Store) ListEnabledRules(ctx context.Context) ([]Rule, error) {
 	return out, rows.Err()
 }
 
+// GetRuleByUID returns one rule row keyed on uid. Returns
+// ErrRuleNotFound when the row is absent, so callers (the alert detail
+// page in Phase 6 #111) can render a "rule deleted" placeholder rather
+// than 500.
+func (s *Store) GetRuleByUID(ctx context.Context, uid string) (Rule, error) {
+	var r Rule
+	var planRaw []byte
+	err := s.pool.QueryRow(ctx, `
+		SELECT uid, name, source_yaml, updated_at,
+		       classification, server_plan, force_edge
+		FROM rules
+		WHERE uid = $1
+	`, uid).Scan(&r.UID, &r.Name, &r.SourceYAML, &r.UpdatedAt,
+		&r.Classification, &planRaw, &r.ForceEdge)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Rule{}, ErrRuleNotFound
+	}
+	if err != nil {
+		return Rule{}, fmt.Errorf("pg.GetRuleByUID: %w", err)
+	}
+	r.ServerPlanJSON = planRaw
+	return r, nil
+}
+
+// ErrRuleNotFound — sentinel for GetRuleByUID's no-row path.
+var ErrRuleNotFound = errors.New("pg: rule not found")
+
 // InsertRule stores a new rule row. Used by the operator CLI / admin
 // RPC; tests use it to drive the LISTEN/NOTIFY path. updatedBy may be
 // empty for system-driven inserts.

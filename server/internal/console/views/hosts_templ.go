@@ -86,7 +86,7 @@ func Hosts(d HostsPageData) templ.Component {
 					var templ_7745c5c3_Var4 string
 					templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var3).String())
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 1, Col: 0}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 1, Col: 0}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 					if templ_7745c5c3_Err != nil {
@@ -99,7 +99,7 @@ func Hosts(d HostsPageData) templ.Component {
 					var templ_7745c5c3_Var5 string
 					templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(string(status))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 41, Col: 91}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 41, Col: 91}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 					if templ_7745c5c3_Err != nil {
@@ -112,7 +112,7 @@ func Hosts(d HostsPageData) templ.Component {
 					var templ_7745c5c3_Var6 string
 					templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(h.Hostname)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 42, Col: 24}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 42, Col: 24}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 					if templ_7745c5c3_Err != nil {
@@ -125,7 +125,7 @@ func Hosts(d HostsPageData) templ.Component {
 					var templ_7745c5c3_Var7 string
 					templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(h.OSName)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 43, Col: 22}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 43, Col: 22}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 					if templ_7745c5c3_Err != nil {
@@ -138,7 +138,7 @@ func Hosts(d HostsPageData) templ.Component {
 					var templ_7745c5c3_Var8 string
 					templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(h.OSVersion)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 43, Col: 38}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 43, Col: 38}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 					if templ_7745c5c3_Err != nil {
@@ -151,7 +151,7 @@ func Hosts(d HostsPageData) templ.Component {
 					var templ_7745c5c3_Var9 string
 					templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(h.KernelVersion)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 44, Col: 43}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 44, Col: 43}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 					if templ_7745c5c3_Err != nil {
@@ -164,7 +164,7 @@ func Hosts(d HostsPageData) templ.Component {
 					var templ_7745c5c3_Var10 string
 					templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(h.Arch)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 45, Col: 20}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 45, Col: 20}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 					if templ_7745c5c3_Err != nil {
@@ -183,7 +183,7 @@ func Hosts(d HostsPageData) templ.Component {
 						var templ_7745c5c3_Var11 string
 						templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(h.AgentVersion)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 50, Col: 26}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 50, Col: 26}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 						if templ_7745c5c3_Err != nil {
@@ -197,7 +197,7 @@ func Hosts(d HostsPageData) templ.Component {
 					var templ_7745c5c3_Var12 string
 					templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(FormatEnrolledAt(h))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 53, Col: 47}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 53, Col: 47}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 					if templ_7745c5c3_Err != nil {
@@ -210,7 +210,7 @@ func Hosts(d HostsPageData) templ.Component {
 					var templ_7745c5c3_Var13 string
 					templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(FormatLastSeen(h))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 54, Col: 45}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 54, Col: 45}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 					if templ_7745c5c3_Err != nil {
@@ -223,7 +223,7 @@ func Hosts(d HostsPageData) templ.Component {
 					var templ_7745c5c3_Var14 templ.SafeURL
 					templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL("/hosts/" + h.ID + "/process-tree"))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 55, Col: 81}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 55, Col: 81}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 					if templ_7745c5c3_Err != nil {
@@ -241,7 +241,7 @@ func Hosts(d HostsPageData) templ.Component {
 						var templ_7745c5c3_Var15 templ.SafeURL
 						templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL("/hosts/" + h.ID + "/policy"))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 57, Col: 76}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 57, Col: 76}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 						if templ_7745c5c3_Err != nil {
@@ -259,7 +259,7 @@ func Hosts(d HostsPageData) templ.Component {
 							var templ_7745c5c3_Var16 templ.SafeURL
 							templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/hosts/" + h.ID + "/revoke"))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 60, Col: 83}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 60, Col: 83}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 							if templ_7745c5c3_Err != nil {
@@ -355,7 +355,7 @@ func ProcessTree(d ProcessTreeData) templ.Component {
 			var templ_7745c5c3_Var19 string
 			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(d.Depth))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 96, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 96, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 			if templ_7745c5c3_Err != nil {
@@ -368,7 +368,7 @@ func ProcessTree(d ProcessTreeData) templ.Component {
 			var templ_7745c5c3_Var20 string
 			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.FormatUint(uint64(d.Pid), 10))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 96, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 96, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 			if templ_7745c5c3_Err != nil {
@@ -381,7 +381,7 @@ func ProcessTree(d ProcessTreeData) templ.Component {
 			var templ_7745c5c3_Var21 string
 			templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(d.Host)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 97, Col: 18}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 97, Col: 18}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 			if templ_7745c5c3_Err != nil {
@@ -394,7 +394,7 @@ func ProcessTree(d ProcessTreeData) templ.Component {
 			var templ_7745c5c3_Var22 templ.SafeURL
 			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL("/hosts/" + d.HostID + "/process-tree"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 100, Col: 80}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 100, Col: 80}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 			if templ_7745c5c3_Err != nil {
@@ -407,7 +407,7 @@ func ProcessTree(d ProcessTreeData) templ.Component {
 			var templ_7745c5c3_Var23 string
 			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.FormatUint(uint64(d.Pid), 10))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 103, Col: 82}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 103, Col: 82}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 			if templ_7745c5c3_Err != nil {
@@ -420,7 +420,7 @@ func ProcessTree(d ProcessTreeData) templ.Component {
 			var templ_7745c5c3_Var24 string
 			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(d.Depth))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 107, Col: 68}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 107, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 			if templ_7745c5c3_Err != nil {
@@ -438,7 +438,7 @@ func ProcessTree(d ProcessTreeData) templ.Component {
 				var templ_7745c5c3_Var25 string
 				templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(d.Error)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `hosts.templ`, Line: 113, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 113, Col: 30}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 				if templ_7745c5c3_Err != nil {

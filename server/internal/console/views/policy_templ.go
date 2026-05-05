@@ -56,7 +56,7 @@ func HostPolicy(d HostPolicyData) templ.Component {
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(hostLabel(d.Host))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `policy.templ`, Line: 14, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/policy.templ`, Line: 14, Col: 43}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
@@ -74,7 +74,7 @@ func HostPolicy(d HostPolicyData) templ.Component {
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(d.Flash)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `policy.templ`, Line: 23, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/policy.templ`, Line: 23, Col: 30}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -93,7 +93,7 @@ func HostPolicy(d HostPolicyData) templ.Component {
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(d.Error)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `policy.templ`, Line: 26, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/policy.templ`, Line: 26, Col: 30}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -111,7 +111,7 @@ func HostPolicy(d HostPolicyData) templ.Component {
 			var templ_7745c5c3_Var6 templ.SafeURL
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL("/hosts/" + d.Host.ID + "/policy"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `policy.templ`, Line: 29, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/policy.templ`, Line: 29, Col: 76}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {

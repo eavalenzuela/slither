@@ -626,6 +626,9 @@ func compileGolden(art *EdgeArtefact, plan *ServerPlan, class Classification) ma
 		if art.Response != nil {
 			out["response"] = responseGolden(art.Response)
 		}
+		if art.Snapshot {
+			out["snapshot"] = true
+		}
 	}
 	if plan != nil {
 		out["server_plan"] = serverPlanGolden(plan)
@@ -669,6 +672,9 @@ func serverPlanGolden(p *ServerPlan) map[string]any {
 	}
 	if p.Response != nil {
 		out["response"] = responseGolden(p.Response)
+	}
+	if p.Snapshot {
+		out["snapshot"] = true
 	}
 	return out
 }
@@ -758,4 +764,43 @@ func ruleGolden(r *Rule) map[string]any {
 		out["aggregation"] = aggregationGolden(r.Aggregation)
 	}
 	return out
+}
+
+// TestCompile_SnapshotFlag ensures the Phase 6 #111 `slither.snapshot:
+// true` top-level key flows onto EdgeArtefact.Snapshot. Independent of
+// the response block — a rule can carry only snapshot=true.
+func TestCompile_SnapshotFlag(t *testing.T) {
+	src := []byte(`title: snapshot-only
+id: 99999999-9999-4999-8999-999999999999
+description: snapshot but no response
+level: high
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: /id
+  condition: selection
+slither:
+  snapshot: true
+`)
+	art, plan, class, err := Compile(src)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if class != ClassificationEdgeOnly {
+		t.Errorf("classification = %s, want EdgeOnly", class)
+	}
+	if art == nil {
+		t.Fatal("art is nil")
+	}
+	if !art.Snapshot {
+		t.Error("art.Snapshot = false; want true")
+	}
+	if art.Response != nil {
+		t.Error("response intent set on snapshot-only rule")
+	}
+	if plan != nil {
+		t.Errorf("plan = %+v, want nil for edge-only rule", plan)
+	}
 }

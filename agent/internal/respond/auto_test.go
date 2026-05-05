@@ -93,7 +93,7 @@ func TestAutoResponder_DetectOnlyStampsWouldHaveExecuted(t *testing.T) {
 		Action:      ruleast.ResponseActionKillProcess,
 		TargetField: "Image",
 	}
-	ar.OnFinding(context.Background(), intent, fakeProcessEvent("/bin/sh", "curl http://x"), finding, ruleast.CategoryProcessCreation)
+	ar.OnFinding(context.Background(), intent, false, fakeProcessEvent("/bin/sh", "curl http://x"), finding, ruleast.CategoryProcessCreation)
 
 	if finding.AutoResponseExecuted {
 		t.Error("AutoResponseExecuted = true on detect-only host")
@@ -134,7 +134,7 @@ func TestAutoResponder_PermissivePolicySubmitsToExecutor(t *testing.T) {
 		TargetField: "Image",
 	}
 	ev := fakeProcessEvent("/usr/bin/curl", "curl http://x")
-	ar.OnFinding(context.Background(), intent, ev, finding, ruleast.CategoryProcessCreation)
+	ar.OnFinding(context.Background(), intent, false, ev, finding, ruleast.CategoryProcessCreation)
 
 	if !finding.AutoResponseExecuted {
 		t.Error("AutoResponseExecuted = false on permissive host")
@@ -166,7 +166,7 @@ func TestAutoResponder_UnresolvableFieldStampsWouldHaveExecuted(t *testing.T) {
 		TargetField: "FieldThatDoesNotExist",
 	}
 	ev := fakeProcessEvent("/bin/sh", "curl")
-	ar.OnFinding(context.Background(), intent, ev, finding, ruleast.CategoryProcessCreation)
+	ar.OnFinding(context.Background(), intent, false, ev, finding, ruleast.CategoryProcessCreation)
 
 	if finding.AutoResponseExecuted {
 		t.Error("Executed = true with unresolvable target")
@@ -204,14 +204,14 @@ func TestAutoResponder_DedupesDuplicateFiresWithinWindow(t *testing.T) {
 
 	// First fire — submits.
 	first := &ocsf.DetectionFinding{RuleInfo: ocsf.Rule{UID: "rule-uid-A"}}
-	ar.OnFinding(context.Background(), intent, ev, first, ruleast.CategoryProcessCreation)
+	ar.OnFinding(context.Background(), intent, false, ev, first, ruleast.CategoryProcessCreation)
 	if !first.AutoResponseExecuted {
 		t.Error("first finding: AutoResponseExecuted = false, want true")
 	}
 
 	// Second fire on the same rule + target — should be deduped.
 	second := &ocsf.DetectionFinding{RuleInfo: ocsf.Rule{UID: "rule-uid-A"}}
-	ar.OnFinding(context.Background(), intent, ev, second, ruleast.CategoryProcessCreation)
+	ar.OnFinding(context.Background(), intent, false, ev, second, ruleast.CategoryProcessCreation)
 	if second.AutoResponseExecuted {
 		t.Error("dedupe: second AutoResponseExecuted = true, want false")
 	}
@@ -221,7 +221,7 @@ func TestAutoResponder_DedupesDuplicateFiresWithinWindow(t *testing.T) {
 
 	// Different rule_uid should NOT dedupe.
 	third := &ocsf.DetectionFinding{RuleInfo: ocsf.Rule{UID: "rule-uid-B"}}
-	ar.OnFinding(context.Background(), intent, ev, third, ruleast.CategoryProcessCreation)
+	ar.OnFinding(context.Background(), intent, false, ev, third, ruleast.CategoryProcessCreation)
 	if !third.AutoResponseExecuted {
 		t.Error("different rule_uid: AutoResponseExecuted = false, want true (no dedupe)")
 	}
@@ -267,7 +267,7 @@ func TestAutoResponder_DedupeExpiresAfterWindow(t *testing.T) {
 	ev := fakeProcessEvent("/usr/bin/curl", "curl http://x")
 
 	first := &ocsf.DetectionFinding{RuleInfo: ocsf.Rule{UID: "rule-uid-A"}}
-	ar.OnFinding(context.Background(), intent, ev, first, ruleast.CategoryProcessCreation)
+	ar.OnFinding(context.Background(), intent, false, ev, first, ruleast.CategoryProcessCreation)
 	if !first.AutoResponseExecuted {
 		t.Fatal("first fire didn't execute")
 	}
@@ -276,7 +276,7 @@ func TestAutoResponder_DedupeExpiresAfterWindow(t *testing.T) {
 	clock = t0.Add(dedupeWindow + 100*time.Millisecond)
 
 	second := &ocsf.DetectionFinding{RuleInfo: ocsf.Rule{UID: "rule-uid-A"}}
-	ar.OnFinding(context.Background(), intent, ev, second, ruleast.CategoryProcessCreation)
+	ar.OnFinding(context.Background(), intent, false, ev, second, ruleast.CategoryProcessCreation)
 	if !second.AutoResponseExecuted {
 		t.Error("post-window fire: AutoResponseExecuted = false, dedupe should have expired")
 	}
@@ -287,8 +287,184 @@ func TestAutoResponder_NilSafe(t *testing.T) {
 	var ar *AutoResponder
 	finding := &ocsf.DetectionFinding{}
 	// Nil receiver should not panic + should leave finding untouched.
-	ar.OnFinding(context.Background(), &ruleast.ResponseIntent{}, nil, finding, ruleast.CategoryProcessCreation)
+	ar.OnFinding(context.Background(), &ruleast.ResponseIntent{}, false, nil, finding, ruleast.CategoryProcessCreation)
 	if finding.AutoResponseAction != "" || finding.AutoResponseExecuted || finding.AutoResponseWouldHaveExecuted {
 		t.Errorf("nil responder mutated finding: %+v", finding)
 	}
+}
+
+// --- Phase 6 #111 snapshot dispatch tests -------------------------------
+
+// stubSnapshotDispatcher satisfies SnapshotDispatcher for tests. The
+// fanout returns one preconfigured set of provider channels per
+// DispatchSnapshot call; nilOnNoProviders mirrors the real manager's
+// "no provider declared" sentinel.
+type stubSnapshotDispatcher struct {
+	providers     []string
+	feedChunks    [][]byte // chunks each provider streams (one entry per provider)
+	failProviders map[string]bool
+	noProviders   bool
+}
+
+func (s *stubSnapshotDispatcher) DispatchSnapshot(_ context.Context, req *pb.SnapshotRequest) ([]SnapshotProviderReplies, error) {
+	if s.noProviders {
+		return nil, ErrNoSnapshotProvider
+	}
+	out := make([]SnapshotProviderReplies, 0, len(s.providers))
+	for i, name := range s.providers {
+		ch := make(chan *pb.ExtensionToAgent, 4)
+		var chunkBytes []byte
+		if i < len(s.feedChunks) {
+			chunkBytes = s.feedChunks[i]
+		}
+		if len(chunkBytes) > 0 {
+			// Empty Sha256 → responder skips verify. Tests cover the
+			// happy path without re-implementing the rolling hash.
+			ch <- &pb.ExtensionToAgent{
+				Payload: &pb.ExtensionToAgent_SnapshotChunk{
+					SnapshotChunk: &pb.SnapshotChunk{
+						SnapshotId: req.GetSnapshotId(),
+						Bytes:      chunkBytes,
+					},
+				},
+			}
+		}
+		errStr := ""
+		if s.failProviders[name] {
+			errStr = "stub-failure"
+		}
+		ch <- &pb.ExtensionToAgent{
+			Payload: &pb.ExtensionToAgent_SnapshotComplete{
+				SnapshotComplete: &pb.SnapshotComplete{
+					SnapshotId: req.GetSnapshotId(),
+					Manifest:   "stub-manifest",
+					Error:      errStr,
+				},
+			},
+		}
+		close(ch)
+		out = append(out, SnapshotProviderReplies{ExtensionName: name, Replies: ch})
+	}
+	return out, nil
+}
+
+func TestAutoResponder_SnapshotNoProviders(t *testing.T) {
+	t.Parallel()
+	results := make(chan *pb.ResponseResult, 4)
+	exec := New(Options{Results: results, Telem: telemetry.NewCounters()})
+	ar := NewAutoResponder(exec, func() *pb.HostPolicy { return nil })
+	ar.SetSnapshotDispatcher(&stubSnapshotDispatcher{noProviders: true}, telemetry.NewCounters())
+
+	finding := &ocsf.DetectionFinding{Finding: ocsf.Finding{UID: "alert-1"}}
+	ar.OnFinding(context.Background(), nil, true, fakeProcessEvent("/bin/sh", "x"), finding, ruleast.CategoryProcessCreation)
+
+	if !finding.SnapshotNoProviders {
+		t.Error("SnapshotNoProviders = false; want true")
+	}
+	if finding.SnapshotRequested {
+		t.Error("SnapshotRequested = true with no providers")
+	}
+	select {
+	case r := <-results:
+		t.Errorf("unexpected result %+v on no-provider path", r)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestAutoResponder_SnapshotFanoutSubmits(t *testing.T) {
+	t.Parallel()
+	results := make(chan *pb.ResponseResult, 4)
+	telem := telemetry.NewCounters()
+	exec := New(Options{Results: results, Telem: telem})
+	ar := NewAutoResponder(exec, func() *pb.HostPolicy { return nil })
+	ar.SetSnapshotDispatcher(&stubSnapshotDispatcher{
+		providers:  []string{"ext-a", "ext-b"},
+		feedChunks: [][]byte{[]byte("blob-A"), []byte("blob-B")},
+	}, telem)
+
+	finding := &ocsf.DetectionFinding{Finding: ocsf.Finding{UID: "alert-1"}, RuleInfo: ocsf.Rule{UID: "rule-1"}}
+	ar.OnFinding(context.Background(), nil, true, fakeProcessEvent("/bin/sh", "x"), finding, ruleast.CategoryProcessCreation)
+
+	if !finding.SnapshotRequested {
+		t.Error("SnapshotRequested = false")
+	}
+	if finding.SnapshotNoProviders {
+		t.Error("SnapshotNoProviders = true on success path")
+	}
+
+	got := drainResults(t, results, 2, 2*time.Second)
+	gotByExt := map[string]*pb.ResponseResult{}
+	for _, r := range got {
+		gotByExt[r.GetSnapshotExtensionName()] = r
+	}
+	for _, ext := range []string{"ext-a", "ext-b"} {
+		r, ok := gotByExt[ext]
+		if !ok {
+			t.Fatalf("no ResponseResult for ext %q", ext)
+		}
+		if r.GetAction() != pb.ResponseAction_RESPONSE_ACTION_COLLECT_ARTIFACTS {
+			t.Errorf("ext %q action = %v, want COLLECT_ARTIFACTS", ext, r.GetAction())
+		}
+		if r.GetSnapshotAlertId() != "alert-1" {
+			t.Errorf("ext %q SnapshotAlertId = %q", ext, r.GetSnapshotAlertId())
+		}
+		if r.GetRuleUid() != "rule-1" {
+			t.Errorf("ext %q RuleUid = %q", ext, r.GetRuleUid())
+		}
+		if len(r.GetResultBlob()) == 0 {
+			t.Errorf("ext %q result_blob empty", ext)
+		}
+	}
+
+	snap := telem.Snapshot()
+	if snap.ExtSnapshotsCompleted != 2 {
+		t.Errorf("ExtSnapshotsCompleted = %d, want 2", snap.ExtSnapshotsCompleted)
+	}
+}
+
+func TestAutoResponder_SnapshotFailedTerminalCounts(t *testing.T) {
+	t.Parallel()
+	results := make(chan *pb.ResponseResult, 4)
+	telem := telemetry.NewCounters()
+	exec := New(Options{Results: results, Telem: telem})
+	ar := NewAutoResponder(exec, func() *pb.HostPolicy { return nil })
+	ar.SetSnapshotDispatcher(&stubSnapshotDispatcher{
+		providers:     []string{"ext-bad"},
+		feedChunks:    [][]byte{[]byte("ignored")},
+		failProviders: map[string]bool{"ext-bad": true},
+	}, telem)
+
+	finding := &ocsf.DetectionFinding{Finding: ocsf.Finding{UID: "alert-2"}, RuleInfo: ocsf.Rule{UID: "rule-2"}}
+	ar.OnFinding(context.Background(), nil, true, fakeProcessEvent("/bin/sh", "x"), finding, ruleast.CategoryProcessCreation)
+
+	// Wait for the goroutine.
+	deadline := time.After(2 * time.Second)
+	for telem.Snapshot().ExtSnapshotsFailed == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("ExtSnapshotsFailed never ticked")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	select {
+	case r := <-results:
+		t.Errorf("unexpected result %+v on failed-terminal path", r)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func drainResults(t *testing.T, ch <-chan *pb.ResponseResult, n int, d time.Duration) []*pb.ResponseResult {
+	t.Helper()
+	out := make([]*pb.ResponseResult, 0, n)
+	deadline := time.After(d)
+	for len(out) < n {
+		select {
+		case r := <-ch:
+			out = append(out, r)
+		case <-deadline:
+			t.Fatalf("drainResults: got %d, want %d before %s", len(out), n, d)
+		}
+	}
+	return out
 }

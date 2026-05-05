@@ -42,6 +42,18 @@ type DetectionFinding struct {
 	AutoResponseAction            string `json:"x_auto_response_action,omitempty"`
 	AutoResponseExecuted          bool   `json:"x_auto_response_executed,omitempty"`
 	AutoResponseWouldHaveExecuted bool   `json:"x_auto_response_would_have_executed,omitempty"`
+
+	// Phase 6 #111: snapshot-on-alert markers. Populated only for
+	// findings whose rule carries a `slither.snapshot: true` top-level
+	// key.
+	//
+	// SnapshotRequested is true when the agent dispatched at least
+	// one SnapshotRequest to a CAPABILITY_SNAPSHOT_PROVIDE extension.
+	// SnapshotNoProviders is true when the rule asked for a snapshot
+	// but no loaded extension declares the capability — drives the
+	// alert-detail page's "(no snapshot extensions configured)" note.
+	SnapshotRequested   bool `json:"x_snapshot_requested,omitempty"`
+	SnapshotNoProviders bool `json:"x_snapshot_no_providers,omitempty"`
 }
 
 type FindingActivityID uint8

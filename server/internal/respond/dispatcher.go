@@ -452,11 +452,27 @@ func (h *Hub) OnResult(ctx context.Context, hostID string, result *pb.ResponseRe
 	// the configured artefact dir so an analyst can `tar tf` them
 	// without round-tripping through pg. The pg copy stays
 	// authoritative; the disk copy is a convenience.
+	//
+	// Phase 6 #111: snapshot blobs (rule-driven via
+	// AutoResponder.dispatchSnapshot) carry SnapshotAlertId +
+	// SnapshotExtensionName hints — those land under
+	// <artefactDir>/<alert_id>/<extension>.tgz so the alert detail
+	// page can list per-extension snapshots without scanning every
+	// action_id. Operator-initiated COLLECT_ARTIFACTS keeps the v0
+	// <action_id>.tgz layout (both hint fields empty).
 	if h.artefactDir != "" &&
 		current.Action == pg.ResponseActionCollectArtifacts &&
 		to == pg.ResponseStatusDone &&
 		len(result.GetResultBlob()) > 0 {
-		if perr := h.persistArtefact(actionID, result.GetResultBlob()); perr != nil {
+		alertID := result.GetSnapshotAlertId()
+		extName := result.GetSnapshotExtensionName()
+		var perr error
+		if alertID != "" && extName != "" {
+			perr = h.persistSnapshotArtefact(alertID, extName, result.GetResultBlob())
+		} else {
+			perr = h.persistArtefact(actionID, result.GetResultBlob())
+		}
+		if perr != nil {
 			// Disk persistence is best-effort: the audit row + pg blob
 			// are already committed. Log and move on so a wedged disk
 			// can't fail the action retroactively.
@@ -480,6 +496,49 @@ func (h *Hub) persistArtefact(actionID string, blob []byte) error {
 		return fmt.Errorf("write %s: %w", path, wErr)
 	}
 	return nil
+}
+
+// persistSnapshotArtefact writes a Phase 6 #111 snapshot blob to
+// <artefactDir>/<alertID>/<extName>.tgz. alertID and extName are
+// validated against safeArtefactName so a malformed extension name
+// can't escape the configured dir; both must be non-empty (the caller
+// already verified this). Existing files are overwritten so a re-fired
+// rule replaces a stale snapshot rather than collecting siblings.
+func (h *Hub) persistSnapshotArtefact(alertID, extName string, blob []byte) error {
+	if !safeArtefactName(alertID) || !safeArtefactName(extName) {
+		return fmt.Errorf("snapshot: refusing unsafe path component (alert=%q ext=%q)", alertID, extName)
+	}
+	dir := filepath.Join(h.artefactDir, alertID)
+	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
+		return fmt.Errorf("mkdir snapshot dir: %w", mkErr)
+	}
+	path := filepath.Join(dir, extName+".tgz")
+	if wErr := os.WriteFile(path, blob, 0o600); wErr != nil {
+		return fmt.Errorf("write %s: %w", path, wErr)
+	}
+	return nil
+}
+
+// safeArtefactName accepts an alphanumeric, dash, underscore, or dot
+// path component. Rejects empty strings, slashes, and `..` traversal
+// shapes so persistSnapshotArtefact can't be steered outside its
+// configured dir.
+func safeArtefactName(s string) bool {
+	if s == "" || s == "." || s == ".." {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r == '-', r == '_', r == '.':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // enqueue tries to push req onto the per-host channel. Returns false

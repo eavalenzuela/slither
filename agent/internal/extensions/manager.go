@@ -80,6 +80,78 @@ func (m *Manager) DispatchLiveQuery(ctx context.Context, req *pb.LiveQueryReques
 // no-op rather than a hung hunt.
 var ErrNoLiveQueryProvider = errors.New("ext: no extension declares live_query_respond")
 
+// SnapshotDispatch is one provider's per-extension reassembly channel
+// returned by DispatchSnapshot. ExtensionName is the operator-visible
+// name (lifted from config.Extension.Name) so the AutoResponder can
+// key the eventual upload under <alert_id>/<extension_name>.tgz.
+//
+// Replies is the same shape as DispatchLiveQuery's result channel:
+// SnapshotChunk envelopes followed by exactly one SnapshotComplete,
+// then closed. Closed without a Complete iff the extension cycle
+// ended unexpectedly — caller treats that as a Failed snapshot.
+type SnapshotDispatch struct {
+	ExtensionName string
+	Replies       <-chan *pb.ExtensionToAgent
+}
+
+// DispatchSnapshot fans the SnapshotRequest out to every loaded
+// extension declaring CAPABILITY_SNAPSHOT_PROVIDE and returns one
+// SnapshotDispatch per provider. Returns nil + ErrNoSnapshotProvider
+// when no extension declares the capability — the AutoResponder maps
+// that to a finding stamped with x_snapshot_no_providers=true so the
+// console can show "(no snapshot extensions configured)".
+//
+// Each provider receives its OWN snapshot_id (req.SnapshotId becomes a
+// prefix; per-provider IDs land as "<base>:<extension_name>"). That
+// keeps the supervisor-level snapshot map keyed unambiguously per
+// provider while preserving alert_id correlation for the on-disk
+// layout.
+//
+// Phase 6 ships no extension that provides snapshots; this method is
+// wired so a Phase 7 extension can light up without further plumbing.
+func (m *Manager) DispatchSnapshot(ctx context.Context, req *pb.SnapshotRequest) ([]SnapshotDispatch, error) {
+	if req == nil || req.GetSnapshotId() == "" {
+		return nil, errors.New("ext: DispatchSnapshot: snapshot_id required")
+	}
+	var out []SnapshotDispatch
+	for _, p := range m.exts {
+		if !p.HasCapability(pb.Capability_CAPABILITY_SNAPSHOT_PROVIDE) {
+			continue
+		}
+		// Per-provider snapshot_id keeps the per-Process snapshots map
+		// keys unique even when one alert fans out to N extensions.
+		// The base id stays in alert_id (already passed verbatim).
+		perProvider := &pb.SnapshotRequest{
+			SnapshotId: req.GetSnapshotId() + ":" + p.cfg.Name,
+			AlertId:    req.GetAlertId(),
+			Target:     req.GetTarget(),
+		}
+		ch, err := p.DispatchSnapshot(ctx, perProvider)
+		if err != nil {
+			// One bad provider doesn't fail the whole fanout — the
+			// AutoResponder will emit a Failed audit row for this
+			// extension and continue with the rest.
+			slog.Warn("ext: DispatchSnapshot failed",
+				"ext", p.cfg.Name, "err", err)
+			m.telem.IncExtSnapshotFailed()
+			continue
+		}
+		m.telem.IncExtSnapshotRequested()
+		out = append(out, SnapshotDispatch{ExtensionName: p.cfg.Name, Replies: ch})
+	}
+	if len(out) == 0 {
+		return nil, ErrNoSnapshotProvider
+	}
+	return out, nil
+}
+
+// ErrNoSnapshotProvider signals no loaded extension declares
+// CAPABILITY_SNAPSHOT_PROVIDE at dispatch time. The AutoResponder
+// stamps the finding with x_snapshot_no_providers=true on this error
+// so the alert-detail page renders the operator-facing "(no snapshot
+// extensions configured)" note.
+var ErrNoSnapshotProvider = errors.New("ext: no extension declares snapshot_provide")
+
 // Run starts every Process supervisor goroutine and blocks until ctx
 // is cancelled. Closes Events on return so downstream merging
 // goroutines see the close cleanly. Per-Process errors log but never

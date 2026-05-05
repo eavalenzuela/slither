@@ -82,6 +82,20 @@ message ResponseRequest {
   // the server's OnResult can insert a fresh row for an unknown
   // control_id without ambiguity.
   string rule_uid = 7;
+
+  // Phase 6 #111 snapshot-on-alert hints. Populated only for
+  // synthetic agent-side COLLECT_ARTIFACTS submissions emitted by
+  // the AutoResponder when a `slither.snapshot: true` rule fires
+  // and an extension declaring CAPABILITY_SNAPSHOT_PROVIDE supplied
+  // a reassembled tarball. snapshot_alert_id keys the on-disk
+  // layout `<artefactDir>/<alert_id>/<extension>.tgz`;
+  // snapshot_extension_name names the extension that produced the
+  // blob. Both fields stay empty for every non-snapshot path —
+  // server's persistArtefact falls back to the v0 `<action_id>.tgz`
+  // layout when either is empty, preserving Phase 4 #81's
+  // behaviour. Additive within slither.v1 per ADR-0011.
+  string snapshot_alert_id = 8;
+  string snapshot_extension_name = 9;
 }
 
 enum ResponseAction {
@@ -121,6 +135,16 @@ message ResponseResult {
   string rule_uid = 6;
   ResponseAction action = 7;
   string target = 8;
+
+  // Phase 6 #111 snapshot hints. Echoed from
+  // ResponseRequest.snapshot_* by the agent's snapshot fast path
+  // (Executor.EmitSnapshotResult). The server's persistArtefact
+  // reads these to land the blob under
+  // <artefactDir>/<alert_id>/<extension>.tgz. Both fields stay
+  // empty for every non-snapshot result — server falls back to the
+  // v0 <action_id>.tgz layout when either is empty.
+  string snapshot_alert_id = 9;
+  string snapshot_extension_name = 10;
 }
 
 enum ResponseStatus {

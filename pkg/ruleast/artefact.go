@@ -95,6 +95,14 @@ type EdgeArtefact struct {
 	// has no response block. Phase 4 #82 lands this field; Phase 4
 	// #83 wires the agent's edge auto-respond engine that consumes it.
 	Response *ResponseIntent
+
+	// Snapshot opts the rule into Phase 6 #111's snapshot-on-alert
+	// path. When true, AutoResponder fans a SnapshotRequest out to
+	// every loaded extension declaring CAPABILITY_SNAPSHOT_PROVIDE
+	// alongside (or independent of) the Response action. Independent
+	// of Response — a rule may carry Snapshot=true with no response
+	// intent.
+	Snapshot bool
 }
 
 // IsStateful reports whether the artefact carries non-zero state
@@ -205,6 +213,13 @@ type ServerPlan struct {
 	// reads this when a server-only rule fires and routes the
 	// resulting ResponseRequest with rule_uid set. Phase 4 #82.
 	Response *ResponseIntent `json:"response,omitempty"`
+
+	// Snapshot mirrors EdgeArtefact.Snapshot. Phase 6 #111 ships the
+	// edge-side path only — server-only rules get the field plumbed
+	// through the plan so a Phase 7 server-side dispatcher can
+	// consume it without a wire bump. No server-side code reads this
+	// in Phase 6.
+	Snapshot bool `json:"snapshot,omitempty"`
 }
 
 // TemporalJoin is the wire form of a Sigma `near` join.

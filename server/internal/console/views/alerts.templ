@@ -162,7 +162,45 @@ templ AlertDetail(d AlertDetailData) {
 			if len(d.ResponseHistory) > 0 {
 				@responseHistoryTable(d.ResponseHistory)
 			}
+
+			if d.SnapshotRequested || len(d.Snapshots) > 0 {
+				@snapshotsBlock(d)
+			}
 		</div>
+	}
+}
+
+// snapshotsBlock renders the Phase 6 #111 per-extension snapshot
+// inventory. Three states:
+//
+//   - rule asked + at least one extension delivered → list with sizes.
+//   - rule asked + no providers (or none delivered yet) → render the
+//     "(no snapshot extensions configured)" no-op note.
+//   - rule didn't ask + nothing on disk → block omitted at the call
+//     site (this template is only invoked when one of those is true).
+templ snapshotsBlock(d AlertDetailData) {
+	<h3>Forensic snapshots</h3>
+	if len(d.Snapshots) == 0 {
+		<p class="muted">(no snapshot extensions configured)</p>
+	} else {
+		<table class="response-history">
+			<thead>
+				<tr>
+					<th>extension</th>
+					<th>size</th>
+					<th>captured</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, s := range d.Snapshots {
+					<tr>
+						<td><a href={ snapshotDownloadURL(d.Alert.ID, s.Extension) } download>{ s.Extension }</a></td>
+						<td class="muted">{ snapshotSizeLabel(s.SizeBytes) }</td>
+						<td class="muted">{ s.ModTime.Format("2006-01-02 15:04:05 MST") }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
 	}
 }
 
@@ -290,6 +328,31 @@ func alertRuleLabel(a pg.AlertRow) string {
 		return a.RuleName
 	}
 	return a.RuleUID
+}
+
+// snapshotDownloadURL builds the per-extension snapshot blob URL the
+// templ links into. Phase 6 #111. Path components are pre-validated
+// by the handler with the same allow list, but templ.URL escapes for
+// safety regardless.
+func snapshotDownloadURL(alertID, extension string) templ.SafeURL {
+	return templ.URL("/alerts/" + alertID + "/snapshots/" + extension)
+}
+
+// snapshotSizeLabel renders a byte count in the closest IEC unit so
+// the alert-detail page shows "12.4 MiB" rather than "13002752".
+// Phase 6 #111.
+func snapshotSizeLabel(n int64) string {
+	const k = 1024
+	switch {
+	case n < k:
+		return strconv.FormatInt(n, 10) + " B"
+	case n < k*k:
+		return fmt.Sprintf("%.1f KiB", float64(n)/float64(k))
+	case n < k*k*k:
+		return fmt.Sprintf("%.1f MiB", float64(n)/float64(k*k))
+	default:
+		return fmt.Sprintf("%.2f GiB", float64(n)/float64(k*k*k))
+	}
 }
 
 func alertHostLabel(a pg.AlertRow) string {

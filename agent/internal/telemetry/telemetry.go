@@ -52,6 +52,14 @@ type Counters struct {
 	extSignatureFailures    atomic.Uint64
 	extCapabilityViolations atomic.Uint64
 	extEventsEmitted        atomic.Uint64
+
+	// Phase 6 #111 snapshot-on-alert metrics. Requested ticks per
+	// extension targeted at dispatch time (so a fanout to two
+	// providers is two requests). Completed and Failed are terminal
+	// counters; together they sum to Requested for finished runs.
+	extSnapshotsRequested atomic.Uint64
+	extSnapshotsCompleted atomic.Uint64
+	extSnapshotsFailed    atomic.Uint64
 }
 
 // NewCounters returns a zero-valued Counters.
@@ -168,6 +176,22 @@ func (c *Counters) IncExtCapabilityViolation() { c.extCapabilityViolations.Add(1
 // it.
 func (c *Counters) IncExtEventEmitted() { c.extEventsEmitted.Add(1) }
 
+// IncExtSnapshotRequested ticks once per snapshot dispatched to an
+// extension. A fanout to two snapshot providers ticks twice. Phase 6
+// #111.
+func (c *Counters) IncExtSnapshotRequested() { c.extSnapshotsRequested.Add(1) }
+
+// IncExtSnapshotCompleted ticks when an extension delivered a complete
+// snapshot (chunks + SnapshotComplete with empty error) and the
+// reassembled tarball survived rolling-SHA256 verification.
+func (c *Counters) IncExtSnapshotCompleted() { c.extSnapshotsCompleted.Add(1) }
+
+// IncExtSnapshotFailed ticks for any non-success terminal: extension
+// returned SnapshotComplete with error set, the cycle ended before
+// completion, the chunk SHA-256 chain diverged, or the per-snapshot
+// timeout elapsed.
+func (c *Counters) IncExtSnapshotFailed() { c.extSnapshotsFailed.Add(1) }
+
 // Snapshot captures the current counter values.
 type Snapshot struct {
 	EventsProduced   uint64
@@ -194,6 +218,10 @@ type Snapshot struct {
 	ExtSignatureFailures    uint64
 	ExtCapabilityViolations uint64
 	ExtEventsEmitted        uint64
+
+	ExtSnapshotsRequested uint64
+	ExtSnapshotsCompleted uint64
+	ExtSnapshotsFailed    uint64
 }
 
 // Snapshot returns a point-in-time view of the counters.
@@ -221,5 +249,8 @@ func (c *Counters) Snapshot() Snapshot {
 		ExtSignatureFailures:      c.extSignatureFailures.Load(),
 		ExtCapabilityViolations:   c.extCapabilityViolations.Load(),
 		ExtEventsEmitted:          c.extEventsEmitted.Load(),
+		ExtSnapshotsRequested:     c.extSnapshotsRequested.Load(),
+		ExtSnapshotsCompleted:     c.extSnapshotsCompleted.Load(),
+		ExtSnapshotsFailed:        c.extSnapshotsFailed.Load(),
 	}
 }

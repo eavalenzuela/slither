@@ -1460,7 +1460,7 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
    aggregate at `/hunt/{id}` with per-host source attribution; row
    cap enforced (synthetic 100k-row response truncated to 10k).
 
-8. **#111 — Snapshot-on-alert wire + alert-detail UX.** Optional
+8. ✅ **#111 — Snapshot-on-alert wire + alert-detail UX.** Optional
    per-rule top-level YAML key `slither.snapshot: true` (parsed in
    `pkg/ruleast` alongside `slither.response`). When the rule fires,
    AutoResponder (#83) submits a synthetic `SnapshotRequest` to every
@@ -1481,6 +1481,29 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
    shows an "(no snapshot extensions configured)" note when the
    alert's rule has snapshot=true but no extension declares the
    capability — operator never sees a silent no-op.
+   *(Shipped 2026-05-05. `slither.snapshot: true` parses through
+   `pkg/ruleast` onto both `EdgeArtefact.Snapshot` and
+   `ServerPlan.Snapshot`. ResponseRequest + ResponseResult gained
+   additive `snapshot_alert_id` + `snapshot_extension_name` fields
+   (slither.v1 wire-freeze preserved per ADR-0011). Agent supervisor
+   gained `Process.DispatchSnapshot` + `Manager.DispatchSnapshot`
+   fanout; reassembly runs in the AutoResponder with a rolling
+   SHA-256 chain verify and a 60 s per-provider deadline. Reassembled
+   blobs ride the existing collect_artifacts result path via
+   `Executor.EmitSnapshotResult`; the server's
+   `Hub.persistSnapshotArtefact` lands them under
+   `<artefactDir>/<alert_id>/<extension>.tgz`. Console alert detail
+   surfaces per-extension blobs with size + capture-time and exposes
+   downloads at `/alerts/{id}/snapshots/{extension}`; rules with
+   `snapshot=true` and no providers render the "(no snapshot
+   extensions configured)" no-op note. Phase 6 ships **no extension
+   that provides snapshots** — the wire + UX land empty so Phase 7
+   slots in without a wire bump. New telemetry counters
+   `ext_snapshots_requested`, `ext_snapshots_completed`,
+   `ext_snapshots_failed`. New OCSF finding markers
+   `x_snapshot_requested`, `x_snapshot_no_providers`. Tests cover
+   no-provider path, fanout-and-submit path with two stub
+   providers, and per-provider failure accounting.)*
 
 9. **#112 — Server-side tamper-chain cross-check.** New
    `pb.ClientMessage.chain_summary` (additive slither.v1 bump).

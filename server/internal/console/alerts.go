@@ -1,15 +1,20 @@
 package console
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/t3rmit3/slither/pkg/ruleast"
 	"github.com/t3rmit3/slither/server/internal/console/views"
 	"github.com/t3rmit3/slither/server/internal/graph"
 	"github.com/t3rmit3/slither/server/internal/store/pg"
@@ -138,16 +143,137 @@ func (s *Server) alertDetail(w http.ResponseWriter, r *http.Request) {
 		history = nil
 	}
 
+	// Phase 6 #111: enumerate per-extension snapshot blobs that
+	// dispatcher persistSnapshotArtefact wrote under
+	// <artefactDir>/<alert_id>/*.tgz, plus surface the
+	// "(no snapshot extensions configured)" hint when the alert's
+	// rule asked for a snapshot but no extension delivered one.
+	snapshots, snapshotRequested := s.loadSnapshotInventory(r.Context(), row.ID, row.RuleUID)
+
 	render(w, r, views.AlertDetail(views.AlertDetailData{
-		Alert:           row,
-		AllowedNext:     allowedNextStatuses(row.Status),
-		IsAnalyst:       role == pg.RoleAnalyst || role == pg.RoleAdmin,
-		IsAdmin:         role == pg.RoleAdmin,
-		Flash:           flash,
-		ShowGraph:       s.graphBuilder != nil && len(row.EventIDs) > 0,
-		HostPolicy:      policy,
-		ResponseHistory: history,
+		Alert:             row,
+		AllowedNext:       allowedNextStatuses(row.Status),
+		IsAnalyst:         role == pg.RoleAnalyst || role == pg.RoleAdmin,
+		IsAdmin:           role == pg.RoleAdmin,
+		Flash:             flash,
+		ShowGraph:         s.graphBuilder != nil && len(row.EventIDs) > 0,
+		HostPolicy:        policy,
+		ResponseHistory:   history,
+		Snapshots:         snapshots,
+		SnapshotRequested: snapshotRequested,
 	}))
+}
+
+// loadSnapshotInventory lists per-extension snapshot blobs the
+// dispatcher landed under <artefactDir>/<alertID>/*.tgz and
+// independently checks whether the alert's rule declares
+// `slither.snapshot: true`. The two pieces drive the alert-detail
+// page's snapshot block:
+//
+//   - len(snapshots) > 0 → list them with download links.
+//   - snapshotRequested && len(snapshots) == 0 → render the
+//     "(no snapshot extensions configured)" no-op note.
+//   - !snapshotRequested && len(snapshots) == 0 → omit the block
+//     entirely.
+//
+// Best-effort: a missing rule row, a YAML parse failure, or a stat()
+// error all degrade to "no snapshot UX" rather than 500'ing the page.
+func (s *Server) loadSnapshotInventory(ctx context.Context, alertID, ruleUID string) ([]views.AlertSnapshot, bool) {
+	requested := false
+	if ruleUID != "" {
+		rule, err := s.store.GetRuleByUID(ctx, ruleUID)
+		if err == nil {
+			art, plan, _, cerr := ruleast.Compile([]byte(rule.SourceYAML))
+			if cerr == nil {
+				if art != nil && art.Snapshot {
+					requested = true
+				}
+				if plan != nil && plan.Snapshot {
+					requested = true
+				}
+			}
+		}
+	}
+	var out []views.AlertSnapshot
+	if s.artefactDir != "" && alertID != "" {
+		dir := filepath.Join(s.artefactDir, alertID)
+		entries, err := os.ReadDir(dir)
+		if err == nil {
+			for _, e := range entries {
+				if e.IsDir() || !strings.HasSuffix(e.Name(), ".tgz") {
+					continue
+				}
+				info, ierr := e.Info()
+				if ierr != nil {
+					continue
+				}
+				out = append(out, views.AlertSnapshot{
+					Extension: strings.TrimSuffix(e.Name(), ".tgz"),
+					SizeBytes: info.Size(),
+					ModTime:   info.ModTime().UTC(),
+				})
+			}
+			sort.Slice(out, func(i, j int) bool { return out[i].Extension < out[j].Extension })
+		}
+	}
+	return out, requested
+}
+
+// alertSnapshotDownload serves <artefactDir>/<alert_id>/<extension>.tgz
+// as application/gzip. 404s on missing files OR when either path
+// component fails the safe-name check (defence against
+// directory-traversal in the URL). Phase 6 #111.
+func (s *Server) alertSnapshotDownload(w http.ResponseWriter, r *http.Request) {
+	if s.artefactDir == "" {
+		http.NotFound(w, r)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	ext := chi.URLParam(r, "extension")
+	if !safeAlertPathComponent(id) || !safeAlertPathComponent(ext) {
+		http.NotFound(w, r)
+		return
+	}
+	path := filepath.Join(s.artefactDir, id, ext+".tgz")
+	// #nosec G304,G703 -- id and ext are validated by
+	// safeAlertPathComponent above; the path is rooted in
+	// s.artefactDir.
+	f, err := os.Open(path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf(`attachment; filename="%s-%s.tgz"`, id, ext))
+	http.ServeContent(w, r, ext+".tgz", info.ModTime(), f)
+}
+
+// safeAlertPathComponent rejects empty strings, traversal shapes, and
+// any character outside [A-Za-z0-9._-] so a crafted URL can't escape
+// artefactDir.
+func safeAlertPathComponent(s string) bool {
+	if s == "" || s == "." || s == ".." {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r == '-', r == '_', r == '.':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // alertGraph renders the detection flow graph for one alert as SVG.

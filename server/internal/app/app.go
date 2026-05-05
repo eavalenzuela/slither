@@ -187,6 +187,10 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		GraphCache:          graphCache,
 		ResponseHub:         responseHub,
 		HuntHub:             huntHub,
+		// Phase 6 #111 — alert detail page enumerates per-extension
+		// snapshot blobs under <ArtefactDir>/<alert_id>/*.tgz. Same
+		// dir the dispatcher writes to.
+		ArtefactDir: artefactsDir(cfg.Console.ArtefactsDir),
 	})
 	consoleSrv := &http.Server{
 		Addr:              cfg.Listeners.Console,

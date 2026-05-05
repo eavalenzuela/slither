@@ -71,6 +71,15 @@ type Process struct {
 	// teardown closes every outstanding channel.
 	liveQueriesMu sync.Mutex
 	liveQueries   map[string]chan *pb.ExtensionToAgent
+
+	// snapshots tracks per-snapshot reassembly state for outstanding
+	// SnapshotRequest dispatches. The Recv loop pushes SnapshotChunk +
+	// SnapshotComplete envelopes into the channel keyed by
+	// snapshot_id. Cycle teardown closes every outstanding channel
+	// without delivering a Complete — callers see the closed channel
+	// and treat it as a Failed dispatch (Phase 6 #111).
+	snapshotsMu sync.Mutex
+	snapshots   map[string]chan *pb.ExtensionToAgent
 }
 
 // NewProcess assembles a supervisor instance. out receives stamped
@@ -84,6 +93,7 @@ func NewProcess(cfg config.Extension, verifier SignatureVerifier, device ocsf.De
 		telem:       telem,
 		out:         out,
 		liveQueries: make(map[string]chan *pb.ExtensionToAgent),
+		snapshots:   make(map[string]chan *pb.ExtensionToAgent),
 	}
 }
 
@@ -290,6 +300,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 		}
 		<-writerDone
 		p.failAllPendingQueries()
+		p.failAllPendingSnapshots()
 	}()
 
 	// Phase 2: read events forever. Live-query replies (#110) route
@@ -335,6 +346,10 @@ func (p *Process) runOnce(ctx context.Context) error {
 			p.routeLiveQueryReply(payload.LiveQueryRow.GetQueryId(), msg, false)
 		case *pb.ExtensionToAgent_LiveQueryComplete:
 			p.routeLiveQueryReply(payload.LiveQueryComplete.GetQueryId(), msg, true)
+		case *pb.ExtensionToAgent_SnapshotChunk:
+			p.routeSnapshotReply(payload.SnapshotChunk.GetSnapshotId(), msg, false)
+		case *pb.ExtensionToAgent_SnapshotComplete:
+			p.routeSnapshotReply(payload.SnapshotComplete.GetSnapshotId(), msg, true)
 		}
 	}
 }
@@ -448,8 +463,116 @@ func (p *Process) cancelLiveQuery(queryID string) {
 	}
 }
 
-// ErrExtensionUnavailable is returned by DispatchLiveQuery (and future
-// SendSnapshot in #111) when no extension cycle is currently active.
+// routeSnapshotReply forwards a Chunk/Complete envelope to the per-
+// snapshot result channel registered by DispatchSnapshot. complete=true
+// closes + deletes the entry. Unknown snapshot_ids are dropped + logged
+// — the dispatcher may have torn down (e.g. timeout) before the
+// extension's response landed.
+func (p *Process) routeSnapshotReply(snapshotID string, msg *pb.ExtensionToAgent, complete bool) {
+	if snapshotID == "" {
+		slog.Warn("ext: snapshot reply with empty snapshot_id", "ext", p.cfg.Name)
+		return
+	}
+	p.snapshotsMu.Lock()
+	ch, ok := p.snapshots[snapshotID]
+	if complete && ok {
+		delete(p.snapshots, snapshotID)
+	}
+	p.snapshotsMu.Unlock()
+	if !ok {
+		slog.Debug("ext: snapshot reply for unknown snapshot_id",
+			"ext", p.cfg.Name, "snapshot_id", snapshotID, "complete", complete)
+		return
+	}
+	// Best-effort send; drop on a wedged consumer rather than block
+	// the supervisor's Recv loop. The dispatcher's reader is sized
+	// large enough for a typical reassembly.
+	select {
+	case ch <- msg:
+	default:
+		slog.Warn("ext: snapshot result channel full; dropping",
+			"ext", p.cfg.Name, "snapshot_id", snapshotID)
+	}
+	if complete {
+		close(ch)
+	}
+}
+
+// failAllPendingSnapshots closes every outstanding snapshot reassembly
+// channel without delivering a Complete — callers see a closed channel
+// and treat it as a Failed dispatch.
+func (p *Process) failAllPendingSnapshots() {
+	p.snapshotsMu.Lock()
+	defer p.snapshotsMu.Unlock()
+	for id, ch := range p.snapshots {
+		close(ch)
+		delete(p.snapshots, id)
+	}
+}
+
+// snapshotChanCap bounds the per-snapshot reassembly channel capacity.
+// Sized for a typical forensic blob (a few thousand 4 KiB chunks +
+// one Complete). An extension that streams more than this caps out and
+// the supervisor drops chunks; the dispatcher's rolling-SHA verifier
+// catches the discontinuity and the snapshot fails cleanly.
+const snapshotChanCap = 8192
+
+// DispatchSnapshot sends a SnapshotRequest to the extension and
+// returns a result channel that receives every SnapshotChunk followed
+// by exactly one SnapshotComplete envelope, then closes. Closes
+// without a Complete iff the extension's cycle ended unexpectedly.
+//
+// Returns ErrExtensionUnavailable when no cycle is active or
+// ErrCapabilityViolation when the extension didn't declare
+// CAPABILITY_SNAPSHOT_PROVIDE. Phase 6 #111.
+func (p *Process) DispatchSnapshot(ctx context.Context, req *pb.SnapshotRequest) (<-chan *pb.ExtensionToAgent, error) {
+	if req == nil || req.GetSnapshotId() == "" {
+		return nil, errors.New("ext: DispatchSnapshot: snapshot_id required")
+	}
+	if !p.HasCapability(pb.Capability_CAPABILITY_SNAPSHOT_PROVIDE) {
+		return nil, ErrCapabilityViolation
+	}
+	p.mu.Lock()
+	send := p.sendCh
+	p.mu.Unlock()
+	if send == nil {
+		return nil, ErrExtensionUnavailable
+	}
+	resultCh := make(chan *pb.ExtensionToAgent, snapshotChanCap)
+	p.snapshotsMu.Lock()
+	if _, dup := p.snapshots[req.GetSnapshotId()]; dup {
+		p.snapshotsMu.Unlock()
+		close(resultCh)
+		return nil, fmt.Errorf("ext: DispatchSnapshot: duplicate snapshot_id %s", req.GetSnapshotId())
+	}
+	p.snapshots[req.GetSnapshotId()] = resultCh
+	p.snapshotsMu.Unlock()
+
+	envelope := &pb.AgentToExtension{
+		Payload: &pb.AgentToExtension_SnapshotRequest{SnapshotRequest: req},
+	}
+	select {
+	case <-ctx.Done():
+		p.cancelSnapshot(req.GetSnapshotId())
+		return nil, ctx.Err()
+	case send <- envelope:
+		return resultCh, nil
+	}
+}
+
+// cancelSnapshot removes a per-snapshot result channel. Used when
+// DispatchSnapshot fails before the request lands on the wire.
+func (p *Process) cancelSnapshot(snapshotID string) {
+	p.snapshotsMu.Lock()
+	defer p.snapshotsMu.Unlock()
+	if ch, ok := p.snapshots[snapshotID]; ok {
+		close(ch)
+		delete(p.snapshots, snapshotID)
+	}
+}
+
+// ErrExtensionUnavailable is returned by DispatchLiveQuery and
+// DispatchSnapshot when no extension cycle is currently active.
 var ErrExtensionUnavailable = errors.New("ext: extension not currently spawned")
 
 // stampAndDecode parses the extension's OCSF JSON payload, stamps the

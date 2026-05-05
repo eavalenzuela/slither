@@ -23,12 +23,17 @@ package respond
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/t3rmit3/slither/agent/internal/telemetry"
 	"github.com/t3rmit3/slither/pkg/ocsf"
 	"github.com/t3rmit3/slither/pkg/ruleast"
 	"github.com/t3rmit3/slither/pkg/ruleeval"
@@ -54,12 +59,48 @@ const dedupeWindow = 2 * time.Second
 // atomic-load fast (no mutex on the engine hot path).
 type PolicyProvider func() *pb.HostPolicy
 
+// SnapshotDispatcher is the AutoResponder's view of the extension
+// manager's snapshot fanout. Implementations return one
+// extensions.SnapshotDispatch per provider, or
+// extensions.ErrNoSnapshotProvider when no extension declares the
+// capability. Phase 6 #111 wires *extensions.Manager as the production
+// implementation; tests pass an in-memory stub.
+//
+// The interface mirrors the manager's signature without importing it,
+// keeping the respond package free of an extensions dependency that
+// would otherwise pull in cosign/sigverify on every test build.
+type SnapshotDispatcher interface {
+	DispatchSnapshot(ctx context.Context, req *pb.SnapshotRequest) ([]SnapshotProviderReplies, error)
+}
+
+// SnapshotProviderReplies is one provider's per-extension reassembly
+// channel. Mirrors extensions.SnapshotDispatch shape.
+type SnapshotProviderReplies struct {
+	ExtensionName string
+	Replies       <-chan *pb.ExtensionToAgent
+}
+
+// ErrNoSnapshotProvider mirrors extensions.ErrNoSnapshotProvider so
+// the AutoResponder can distinguish "fanout had no providers" (a clean
+// no-op the operator should see in the UX) from any other dispatch
+// failure. The extensions package's sentinel value is wrapped on the
+// dispatcher's adapter into this one.
+var ErrNoSnapshotProvider = errors.New("respond: no extension declares snapshot_provide")
+
+// snapshotPerProviderTimeout bounds how long the AutoResponder waits
+// for one extension to deliver SnapshotComplete. 60 s is generous —
+// real forensic snapshots (process memory, file dumps) take seconds
+// not minutes — but caps a wedged extension cleanly.
+const snapshotPerProviderTimeout = 60 * time.Second
+
 // AutoResponder is the engine→executor bridge. Construct via
 // NewAutoResponder and pass the resulting *AutoResponder to the
 // engine's Options.AutoRespondHook.
 type AutoResponder struct {
-	executor *Executor
-	policy   PolicyProvider
+	executor  *Executor
+	policy    PolicyProvider
+	snapshots SnapshotDispatcher
+	telem     *telemetry.Counters
 
 	// now is overridable for tests; defaults to time.Now.
 	now func() time.Time
@@ -83,6 +124,23 @@ func NewAutoResponder(executor *Executor, policy PolicyProvider) *AutoResponder 
 		now:      time.Now,
 		recent:   make(map[string]time.Time),
 	}
+}
+
+// SetSnapshotDispatcher installs the optional Phase 6 #111 snapshot
+// fanout. Calling with nil keeps the responder in detect-only mode for
+// snapshot=true rules — findings are stamped with x_snapshot_no_providers
+// so the alert detail page surfaces the no-op note.
+//
+// telem is plumbed alongside so the dispatcher's per-provider
+// completed/failed accounting lands on the agent's standard counters.
+// Both calls are race-free with hook firing because the engine
+// installs the hook after wiring.
+func (a *AutoResponder) SetSnapshotDispatcher(d SnapshotDispatcher, telem *telemetry.Counters) {
+	if a == nil {
+		return
+	}
+	a.snapshots = d
+	a.telem = telem
 }
 
 // shouldDedupe returns true when (ruleUID, target) was submitted to
@@ -119,12 +177,27 @@ func (a *AutoResponder) shouldDedupe(ruleUID, target string) bool {
 // responder resolves intent.TargetField against it to produce the
 // ResponseRequest's Target string.
 //
+// Phase 6 #111 added the `snapshot` flag. When true the responder
+// fans a SnapshotRequest out to every CAPABILITY_SNAPSHOT_PROVIDE
+// extension, reassembles the per-extension tarball, and submits a
+// synthetic COLLECT_ARTIFACTS ResponseRequest carrying the result blob
+// + alert/extension hints so the server's persistArtefact lands the
+// blob under <artefactDir>/<alert_id>/<extension_name>.tgz. Snapshot
+// dispatch is independent of the response intent — a rule may carry
+// snapshot=true and no response, which is still a valid hook call.
+//
 // Returns nothing — failures (no policy, target unresolved, executor
 // queue full) all surface either as a stamped would_have_executed=true
 // or, for queue-full, a synthetic FAILED ResponseResult the executor
 // itself emits. The engine doesn't need to know the difference.
-func (a *AutoResponder) OnFinding(ctx context.Context, intent *ruleast.ResponseIntent, trigger ocsf.Event, finding *ocsf.DetectionFinding, category ruleast.Category) {
-	if a == nil || intent == nil || finding == nil {
+func (a *AutoResponder) OnFinding(ctx context.Context, intent *ruleast.ResponseIntent, snapshot bool, trigger ocsf.Event, finding *ocsf.DetectionFinding, category ruleast.Category) {
+	if a == nil || finding == nil {
+		return
+	}
+	if snapshot {
+		a.dispatchSnapshot(ctx, finding)
+	}
+	if intent == nil {
 		return
 	}
 	finding.AutoResponseAction = string(intent.Action)
@@ -225,6 +298,180 @@ func policyAllows(p *pb.HostPolicy, action ruleast.ResponseAction) bool {
 		return p.GetAllowCollect()
 	}
 	return false
+}
+
+// dispatchSnapshot fans a SnapshotRequest to every loaded extension
+// declaring CAPABILITY_SNAPSHOT_PROVIDE, reassembles the per-extension
+// tarball, and submits a synthetic COLLECT_ARTIFACTS ResponseRequest
+// carrying the blob + alert/extension hints. The server's
+// persistArtefact reads the hints to write the blob under
+// <artefactDir>/<alert_id>/<extension_name>.tgz.
+//
+// Stamps the finding's snapshot markers regardless of dispatch
+// outcome:
+//
+//   - x_snapshot_no_providers when the manager returns
+//     ErrNoSnapshotProvider — alert-detail page renders "(no snapshot
+//     extensions configured)".
+//   - x_snapshot_requested when at least one provider was reached.
+//
+// Per-provider reassembly runs in a goroutine bounded by
+// snapshotPerProviderTimeout. Best-effort: a single extension's wedge
+// or SHA-mismatch fails its own audit row but doesn't block the others.
+func (a *AutoResponder) dispatchSnapshot(ctx context.Context, finding *ocsf.DetectionFinding) {
+	if a.snapshots == nil {
+		// Detect-only baseline — no fanout target wired. Still mark
+		// the finding so the operator sees the rule asked for a
+		// snapshot but the agent had nowhere to ask.
+		finding.SnapshotNoProviders = true
+		return
+	}
+	alertID := finding.Finding.UID
+	if alertID == "" {
+		// Defensive — findings without a UID can't key on-disk layout.
+		// The compiler enforces UID at engine emit time, but the
+		// AutoResponder mustn't assume.
+		slog.Warn("respond: snapshot dispatch skipped: finding has no uid",
+			"rule_uid", finding.RuleInfo.UID)
+		return
+	}
+	req := &pb.SnapshotRequest{
+		SnapshotId: uuid.NewString(),
+		AlertId:    alertID,
+		// Target is left empty in Phase 6 — no extension consumes it.
+		// Phase 7 extensions can read finding.x_triggering_event_ids /
+		// rule.uid to infer a target if needed.
+	}
+	dispatches, err := a.snapshots.DispatchSnapshot(ctx, req)
+	if errors.Is(err, ErrNoSnapshotProvider) {
+		finding.SnapshotNoProviders = true
+		return
+	}
+	if err != nil {
+		slog.Warn("respond: snapshot dispatch failed",
+			"rule_uid", finding.RuleInfo.UID, "alert_id", alertID, "err", err)
+		finding.SnapshotNoProviders = true
+		return
+	}
+	finding.SnapshotRequested = true
+	// Per-extension reassembly runs concurrently. The hook returns as
+	// soon as fanout has launched; the executor submission lands
+	// asynchronously when reassembly completes.
+	for _, d := range dispatches {
+		d := d
+		go a.reassembleAndSubmit(ctx, alertID, finding.RuleInfo.UID, d)
+	}
+}
+
+// reassembleAndSubmit consumes one provider's reply channel until
+// SnapshotComplete arrives (or the channel closes / timeout fires),
+// verifies the rolling SHA-256 chain, and submits a
+// RESPONSE_ACTION_COLLECT_ARTIFACTS ResponseRequest carrying the
+// tarball + path hints. Best-effort throughout: chunk drops, SHA
+// mismatch, and timeout each tick the failed counter and return.
+func (a *AutoResponder) reassembleAndSubmit(ctx context.Context, alertID, ruleUID string, d SnapshotProviderReplies) {
+	deadline := time.NewTimer(snapshotPerProviderTimeout)
+	defer deadline.Stop()
+
+	hasher := sha256.New()
+	var buf []byte
+	manifest := ""
+
+	for {
+		select {
+		case <-ctx.Done():
+			a.tickSnapshotFailed()
+			return
+		case <-deadline.C:
+			slog.Warn("respond: snapshot reassembly timeout",
+				"ext", d.ExtensionName, "alert_id", alertID, "rule_uid", ruleUID)
+			a.tickSnapshotFailed()
+			return
+		case msg, ok := <-d.Replies:
+			if !ok {
+				// Channel closed without a Complete — extension
+				// teardown counts as a failure. The success branch
+				// below returns directly, so reaching this path means
+				// the channel closed mid-stream.
+				a.tickSnapshotFailed()
+				return
+			}
+			switch payload := msg.Payload.(type) {
+			case *pb.ExtensionToAgent_SnapshotChunk:
+				chunk := payload.SnapshotChunk
+				buf = append(buf, chunk.GetBytes()...)
+				hasher.Write(chunk.GetBytes())
+				got := hex.EncodeToString(hasher.Sum(nil))
+				if want := chunk.GetSha256(); want != "" && want != got {
+					slog.Warn("respond: snapshot sha mismatch",
+						"ext", d.ExtensionName, "alert_id", alertID,
+						"want", want, "got", got)
+					a.tickSnapshotFailed()
+					return
+				}
+			case *pb.ExtensionToAgent_SnapshotComplete:
+				if e := payload.SnapshotComplete.GetError(); e != "" {
+					slog.Warn("respond: snapshot terminal error",
+						"ext", d.ExtensionName, "alert_id", alertID, "err", e)
+					a.tickSnapshotFailed()
+					return
+				}
+				manifest = payload.SnapshotComplete.GetManifest()
+				a.submitSnapshotBlob(alertID, ruleUID, d.ExtensionName, buf, manifest)
+				a.tickSnapshotCompleted()
+				return
+			}
+		}
+	}
+}
+
+// submitSnapshotBlob hands the reassembled tarball off to the executor
+// as a synthetic COLLECT_ARTIFACTS request. The server's persistArtefact
+// reads SnapshotAlertId + SnapshotExtensionName to land the blob
+// under <artefactDir>/<alert_id>/<extension_name>.tgz; missing hints
+// fall back to the v0 <action_id>.tgz layout.
+//
+// The blob round-trips on the executor because that's the wire path
+// already audited (#75 OnResult inserts a response_actions row keyed
+// by rule_uid for agent-initiated actions). Snapshot blobs land as
+// rule-driven COLLECT_ARTIFACTS rows with a fresh control_id; the
+// _ = manifest stays unused in v1 — operator-visible manifest UX is a
+// Phase 7 concern.
+func (a *AutoResponder) submitSnapshotBlob(alertID, ruleUID, extName string, blob []byte, manifest string) {
+	if a.executor == nil {
+		return
+	}
+	_ = manifest
+	req := &pb.ResponseRequest{
+		ControlId:             uuid.NewString(),
+		Action:                pb.ResponseAction_RESPONSE_ACTION_COLLECT_ARTIFACTS,
+		Target:                "snapshot:" + extName,
+		RuleUid:               ruleUID,
+		SnapshotAlertId:       alertID,
+		SnapshotExtensionName: extName,
+	}
+	// The executor's COLLECT_ARTIFACTS handler runs the standard
+	// /var/lib/slither inventory tar — but for snapshot dispatches the
+	// agent already has the blob in hand. We bypass the handler by
+	// wiring a snapshot-specific direct emit: the executor's regular
+	// flow doesn't accept a pre-built blob, so we synthesise the
+	// ResponseResult here and feed it directly into the result channel.
+	//
+	// emitSnapshotResult sits behind the same outbound channel the
+	// executor uses, preserving #75 OnResult's row-creation contract.
+	a.executor.EmitSnapshotResult(req, blob)
+}
+
+func (a *AutoResponder) tickSnapshotCompleted() {
+	if a.telem != nil {
+		a.telem.IncExtSnapshotCompleted()
+	}
+}
+
+func (a *AutoResponder) tickSnapshotFailed() {
+	if a.telem != nil {
+		a.telem.IncExtSnapshotFailed()
+	}
 }
 
 // actionToProto converts the ruleast string enum to the proto enum.

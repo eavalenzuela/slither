@@ -191,12 +191,13 @@ report:
 	// the line shape stays stable across log_level changes.
 	snap := telem.Snapshot()
 	fmt.Fprintf(os.Stderr,
-		"telemetry: events=%d dropped=%d (collector=%d dispatch=%d enricher=%d engine=%d output=%d) detections=%d ringbuf_overflows=%d output_reconnects=%d heartbeats_sent=%d ext_spawned=%d ext_restarts=%d ext_signature_failures=%d ext_capability_violations=%d ext_events_emitted=%d\n",
+		"telemetry: events=%d dropped=%d (collector=%d dispatch=%d enricher=%d engine=%d output=%d) detections=%d ringbuf_overflows=%d output_reconnects=%d heartbeats_sent=%d ext_spawned=%d ext_restarts=%d ext_signature_failures=%d ext_capability_violations=%d ext_events_emitted=%d ext_snapshots_requested=%d ext_snapshots_completed=%d ext_snapshots_failed=%d\n",
 		snap.EventsProduced, snap.EventsDropped,
 		snap.DropsCollector, snap.DropsDispatch, snap.DropsEnricher, snap.DropsEngine, snap.DropsOutput,
 		snap.DetectionsFired, snap.RingbufOverflows,
 		snap.OutputReconnects, snap.HeartbeatsSent,
-		snap.ExtSpawned, snap.ExtRestarts, snap.ExtSignatureFailures, snap.ExtCapabilityViolations, snap.ExtEventsEmitted)
+		snap.ExtSpawned, snap.ExtRestarts, snap.ExtSignatureFailures, snap.ExtCapabilityViolations, snap.ExtEventsEmitted,
+		snap.ExtSnapshotsRequested, snap.ExtSnapshotsCompleted, snap.ExtSnapshotsFailed)
 	return runErr
 }
 
@@ -371,7 +372,14 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 		// intent fires; the responder consults the cached HostPolicy
 		// (Phase 4 #84) and either submits to the executor or stamps
 		// the finding's would_have_executed marker.
-		eng.SetAutoRespondHook(respond.NewAutoResponder(executor, policyCache.Provider()))
+		// Phase 6 #111: snapshot fanout. The AutoResponder also routes
+		// `slither.snapshot: true` rules to extensions declaring
+		// CAPABILITY_SNAPSHOT_PROVIDE. extMgrSnapshotAdapter shims the
+		// extensions.Manager into respond.SnapshotDispatcher so the
+		// respond package stays free of an extensions dependency.
+		ar := respond.NewAutoResponder(executor, policyCache.Provider())
+		ar.SetSnapshotDispatcher(extMgrSnapshotAdapter{m: extMgr}, telem)
+		eng.SetAutoRespondHook(ar)
 		submitResponse = func(req *pb.ResponseRequest) {
 			// Submit is non-blocking; recv goroutine never stalls.
 			// Handlers inherit the agent-process context so a Run
@@ -493,4 +501,36 @@ func deviceIdentity(_ *config.Config) ocsf.Device {
 		OSName:   runtime.GOOS,
 		Arch:     runtime.GOARCH,
 	}
+}
+
+// extMgrSnapshotAdapter shims an *extensions.Manager into the
+// respond.SnapshotDispatcher interface. The respond package stays free
+// of an extensions dependency this way (avoids pulling cosign /
+// sigverify into every test build that imports respond).
+//
+// Phase 6 #111. The adapter only translates types — error mapping
+// + per-provider channel handoff happen on the manager side.
+type extMgrSnapshotAdapter struct {
+	m *extensions.Manager
+}
+
+func (a extMgrSnapshotAdapter) DispatchSnapshot(ctx context.Context, req *pb.SnapshotRequest) ([]respond.SnapshotProviderReplies, error) {
+	if a.m == nil {
+		return nil, respond.ErrNoSnapshotProvider
+	}
+	out, err := a.m.DispatchSnapshot(ctx, req)
+	if err != nil {
+		if err == extensions.ErrNoSnapshotProvider {
+			return nil, respond.ErrNoSnapshotProvider
+		}
+		return nil, err
+	}
+	mapped := make([]respond.SnapshotProviderReplies, 0, len(out))
+	for _, d := range out {
+		mapped = append(mapped, respond.SnapshotProviderReplies{
+			ExtensionName: d.ExtensionName,
+			Replies:       d.Replies,
+		})
+	}
+	return mapped, nil
 }

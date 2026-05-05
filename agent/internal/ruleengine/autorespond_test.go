@@ -21,16 +21,17 @@ type recordingHook struct {
 }
 
 type hookCall struct {
-	intent  *ruleast.ResponseIntent
-	trigger ocsf.Event
-	finding *ocsf.DetectionFinding
-	cat     ruleast.Category
+	intent   *ruleast.ResponseIntent
+	snapshot bool
+	trigger  ocsf.Event
+	finding  *ocsf.DetectionFinding
+	cat      ruleast.Category
 }
 
-func (h *recordingHook) OnFinding(_ context.Context, intent *ruleast.ResponseIntent, trigger ocsf.Event, finding *ocsf.DetectionFinding, cat ruleast.Category) {
+func (h *recordingHook) OnFinding(_ context.Context, intent *ruleast.ResponseIntent, snapshot bool, trigger ocsf.Event, finding *ocsf.DetectionFinding, cat ruleast.Category) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.calls = append(h.calls, hookCall{intent: intent, trigger: trigger, finding: finding, cat: cat})
+	h.calls = append(h.calls, hookCall{intent: intent, snapshot: snapshot, trigger: trigger, finding: finding, cat: cat})
 	if h.stamp != nil {
 		h.stamp(finding)
 	}

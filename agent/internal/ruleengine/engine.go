@@ -61,8 +61,14 @@ type CompiledRule interface {
 // agent's cached HostPolicy whether to actually invoke the local
 // Executor. The hook may mutate finding.AutoResponse* fields before
 // the finding ships to the sink.
+//
+// Phase 6 #111 added the `snapshot` flag. Engine calls the hook
+// whenever a rule fires AND any of (intent != nil, snapshot == true)
+// holds; the hook decides whether to dispatch a response action, a
+// snapshot fanout, both, or neither (e.g. policy-denied + no
+// providers).
 type AutoRespondHook interface {
-	OnFinding(ctx context.Context, intent *ruleast.ResponseIntent, trigger ocsf.Event, finding *ocsf.DetectionFinding, category ruleast.Category)
+	OnFinding(ctx context.Context, intent *ruleast.ResponseIntent, snapshot bool, trigger ocsf.Event, finding *ocsf.DetectionFinding, category ruleast.Category)
 }
 
 // ChainAppender is the engine's view of selfprotect.ChainWriter.
@@ -245,8 +251,8 @@ func (e *engine) processEvent(ctx context.Context, ev ocsf.Event) error {
 		// x_auto_response_would_have_executed land on the same
 		// payload the server logs as the alert.
 		if e.autoHook != nil {
-			if intent, cat, ok := responseIntentOf(r); ok {
-				e.autoHook.OnFinding(ctx, intent, ev, finding, cat)
+			if intent, snapshot, cat, ok := ruleHookInfo(r); ok {
+				e.autoHook.OnFinding(ctx, intent, snapshot, ev, finding, cat)
 			}
 		}
 		if err := e.emitDetection(ctx, finding); err != nil {
@@ -274,23 +280,36 @@ func (e *engine) processEvent(ctx context.Context, ev ocsf.Event) error {
 	return nil
 }
 
-// responseIntentOf extracts the rule's response intent + category if
-// the underlying type exposes them (sigmaCompiledRule does). External
-// CompiledRule implementations without these accessors skip the hook.
-func responseIntentOf(r CompiledRule) (*ruleast.ResponseIntent, ruleast.Category, bool) {
+// ruleHookInfo extracts the rule's response intent, snapshot flag, and
+// category if the underlying type exposes them (sigmaCompiledRule
+// does). Returns ok=true when the rule warrants a hook call —
+// i.e., any of intent != nil OR snapshot == true. External CompiledRule
+// implementations without these accessors skip the hook.
+//
+// Phase 4 #83 lit up the response side; Phase 6 #111 added the
+// snapshot side. The hook receives both regardless so a rule with
+// snapshot=true and no response still dispatches.
+func ruleHookInfo(r CompiledRule) (*ruleast.ResponseIntent, bool, ruleast.Category, bool) {
 	type withResponse interface {
 		Response() *ruleast.ResponseIntent
 		Category() ruleast.Category
 	}
+	type withSnapshot interface {
+		Snapshot() bool
+	}
 	wr, ok := r.(withResponse)
 	if !ok {
-		return nil, "", false
+		return nil, false, "", false
 	}
 	intent := wr.Response()
-	if intent == nil {
-		return nil, "", false
+	var snapshot bool
+	if ws, ok := r.(withSnapshot); ok {
+		snapshot = ws.Snapshot()
 	}
-	return intent, wr.Category(), true
+	if intent == nil && !snapshot {
+		return nil, false, "", false
+	}
+	return intent, snapshot, wr.Category(), true
 }
 
 // isFollowup reports whether ev carries the "followup" metadata label. The

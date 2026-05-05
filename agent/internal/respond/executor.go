@@ -254,6 +254,52 @@ func (e *Executor) emit(r *pb.ResponseResult) {
 	}
 }
 
+// EmitSnapshotResult is the Phase 6 #111 fast path for the
+// AutoResponder's snapshot fanout. The reassembled tarball is already
+// in hand by the time the responder calls in, so the regular handler
+// dispatch (which would re-tar /var/lib/slither) would be wrong.
+// EmitSnapshotResult synthesises the ResponseResult directly,
+// preserving the executor's audit-chain + telemetry contract while
+// short-circuiting the tar handler.
+//
+// The req's SnapshotAlertId + SnapshotExtensionName ride through to
+// the result so the server's persistArtefact lands the blob under
+// <artefactDir>/<alert_id>/<extension_name>.tgz. RuleUid + Action +
+// Target are echoed exactly like the standard handler path so OnResult
+// inserts a response_actions row identically.
+func (e *Executor) EmitSnapshotResult(req *pb.ResponseRequest, blob []byte) {
+	if req == nil {
+		return
+	}
+	status := pb.ResponseStatus_RESPONSE_STATUS_DONE
+	detail := fmt.Sprintf("snapshot from extension %q (%d bytes)",
+		req.GetSnapshotExtensionName(), len(blob))
+	e.emit(&pb.ResponseResult{
+		ControlId:             req.GetControlId(),
+		Status:                status,
+		Detail:                detail,
+		ResultBlob:            blob,
+		RuleUid:               req.GetRuleUid(),
+		Action:                req.GetAction(),
+		Target:                req.GetTarget(),
+		SnapshotAlertId:       req.GetSnapshotAlertId(),
+		SnapshotExtensionName: req.GetSnapshotExtensionName(),
+	})
+	e.telem.IncResponseExecDone()
+	if e.chain != nil {
+		_ = e.chain.Append("response_action", map[string]any{
+			"control_id":     req.GetControlId(),
+			"rule_uid":       req.GetRuleUid(),
+			"action":         req.GetAction().String(),
+			"target":         req.GetTarget(),
+			"status":         status.String(),
+			"detail":         truncateChainDetail(detail),
+			"snapshot_alert": req.GetSnapshotAlertId(),
+			"snapshot_ext":   req.GetSnapshotExtensionName(),
+		})
+	}
+}
+
 // notImplementedHandler returns a handler that fails cleanly with a
 // useful detail. Used as the default for every action class; #78-#81
 // replace these via SetHandler.

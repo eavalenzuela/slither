@@ -49,6 +49,28 @@ type AlertDetailData struct {
 	// IsAdmin gates the visibility of the admin-only policy edit
 	// link in the host info section.
 	IsAdmin bool
+
+	// Snapshots is the per-extension snapshot inventory the agent's
+	// AutoResponder collected for this alert (Phase 6 #111). Empty
+	// when no extension declared CAPABILITY_SNAPSHOT_PROVIDE OR when
+	// the rule didn't carry `slither.snapshot: true`.
+	Snapshots []AlertSnapshot
+
+	// SnapshotRequested is true when the alert's rule declared
+	// `slither.snapshot: true`. Drives the "(no snapshot extensions
+	// configured)" note when len(Snapshots) == 0 — operators see the
+	// rule asked for evidence but the agent had nowhere to ask.
+	SnapshotRequested bool
+}
+
+// AlertSnapshot is one per-extension snapshot blob the dispatcher
+// landed under <artefactDir>/<alert_id>/<extension>.tgz. Phase 6 #111.
+// Download URL is built by the templ from the alert id + extension
+// name; the handler doesn't pre-format it.
+type AlertSnapshot struct {
+	Extension string
+	SizeBytes int64
+	ModTime   time.Time
 }
 
 // AlertsCursorLayout is the time format the /alerts pagination

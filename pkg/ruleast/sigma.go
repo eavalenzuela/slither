@@ -52,11 +52,20 @@ type sigmaYAML struct {
 }
 
 // slitherYAML is the namespaced container for slither-specific
-// extensions on a Sigma rule. Today it only carries `response`; future
-// per-rule knobs (rate-limits, suppression windows) land here so the
-// `slither.*` namespace stays a single decode struct.
+// extensions on a Sigma rule. Phase 4 #82 added `response`; Phase 6
+// #111 adds `snapshot` for forensic snapshot-on-alert routing.
+// Future per-rule knobs (rate-limits, suppression windows) land here
+// so the `slither.*` namespace stays a single decode struct.
 type slitherYAML struct {
 	Response *responseYAML `yaml:"response"`
+
+	// Snapshot opts the rule into Phase 6 #111's snapshot-on-alert
+	// path. When true, the agent's AutoResponder emits a SnapshotRequest
+	// to every loaded extension declaring CAPABILITY_SNAPSHOT_PROVIDE
+	// in addition to (or instead of) the response action. Independent
+	// of `response`: a rule may carry snapshot=true with no response
+	// block at all.
+	Snapshot bool `yaml:"snapshot"`
 }
 
 type responseYAML struct {
