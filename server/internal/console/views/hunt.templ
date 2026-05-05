@@ -43,6 +43,7 @@ templ HuntList(d HuntListData) {
 			} else {
 				<p>Viewer-role accounts can review hunt history but cannot dispatch new hunts.</p>
 			}
+			@SaveCurrentFilter("hunts", d.RawQuery)
 		</div>
 		<div class="card">
 			<h3>History</h3>

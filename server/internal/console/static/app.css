@@ -297,3 +297,30 @@ button.danger:hover { background: #ff9c9c; }
 }
 .process-tree-svg { display: block; }
 .process-tree-menu button:focus { outline: 2px solid #82aaff; }
+
+/* Phase 6 #115 — saved queries + dashboards. */
+.save-query-form {
+    margin-top: 0.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px dashed #3a4a5e;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.save-query-form label { font-size: 0.85rem; color: #8a99b3; }
+.save-query-form input[type="text"] { width: 14rem; }
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+.dashboard-card {
+    background: #262d3a;
+    border: 1px solid #3a4a5e;
+    border-radius: 4px;
+    padding: 0.75rem;
+}
+.dashboard-card h4 { margin: 0 0 0.5rem 0; font-size: 0.95rem; }
+.dashboard-card p { margin: 0.2rem 0; font-size: 0.8rem; }

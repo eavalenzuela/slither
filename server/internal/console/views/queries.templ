@@ -1,0 +1,242 @@
+package views
+
+import (
+	"net/url"
+	"strings"
+
+	"github.com/t3rmit3/slither/server/internal/store/pg"
+)
+
+// SaveCurrentFilter renders the small "Save current filter as…" form
+// the /events, /alerts, and /hunt list pages embed below their
+// existing filter forms. surface picks the saved-query's surface;
+// rawQuery is r.URL.RawQuery captured by the parent handler so the
+// save round-trips exactly what the operator currently has applied.
+// Phase 6 #115.
+templ SaveCurrentFilter(surface, rawQuery string) {
+	<form method="post" action="/queries" class="save-query-form">
+		<input type="hidden" name="surface" value={ surface }/>
+		<input type="hidden" name="params" value={ rawQuery }/>
+		<label>
+			Save filter as
+			<input type="text" name="name" maxlength="200" placeholder="my filter"/>
+		</label>
+		<button type="submit">Save</button>
+	</form>
+}
+
+// SavedQueries renders /queries — the user's saved-query inventory.
+// Phase 6 #115.
+templ SavedQueries(d SavedQueriesData) {
+	@Layout("Saved queries") {
+		<div class="card">
+			<h2>Saved queries</h2>
+			<p class="muted">Filter forms on /events, /alerts, and /hunt have a Save button that captures the current URL parameters here. Click a name to re-run the query on its source page.</p>
+			if d.Flash != "" {
+				<p class="flash">{ d.Flash }</p>
+			}
+			if len(d.Queries) == 0 {
+				<p class="muted">No saved queries yet. Filter on /events, /alerts, or /hunt and click Save.</p>
+			} else {
+				<table class="events-table">
+					<thead>
+						<tr>
+							<th>name</th>
+							<th>surface</th>
+							<th>params</th>
+							<th>created</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, q := range d.Queries {
+							<tr>
+								<td><a href={ templ.URL(savedQueryURL(q)) }>{ q.Name }</a></td>
+								<td class="muted">{ string(q.Surface) }</td>
+								<td class="muted">{ savedQueryParamsLabel(q) }</td>
+								<td class="muted">{ q.CreatedAt.UTC().Format("2006-01-02 15:04 MST") }</td>
+								<td>
+									<form method="post" action={ templ.URL("/queries/" + q.ID + "/delete") } class="response-form">
+										<button type="submit" class="response-btn destructive">Delete</button>
+									</form>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	}
+}
+
+// savedQueryURL builds the round-trip URL for a saved query — the
+// surface-specific list page with the captured params re-encoded.
+// Mirrors console.EncodeSavedQueryURL but lives in views so the templ
+// doesn't reach into the console package.
+func savedQueryURL(q pg.SavedQuery) string {
+	v := url.Values{}
+	for k, val := range q.Params {
+		v.Set(k, val)
+	}
+	enc := v.Encode()
+	base := "/" + string(q.Surface)
+	if enc == "" {
+		return base
+	}
+	return base + "?" + enc
+}
+
+// savedQueryParamsLabel renders a short preview of the saved params
+// for the inventory table's params column. Stops at 80 chars to keep
+// the row a single line.
+func savedQueryParamsLabel(q pg.SavedQuery) string {
+	if len(q.Params) == 0 {
+		return "(none)"
+	}
+	parts := make([]string, 0, len(q.Params))
+	for k, v := range q.Params {
+		if v == "" {
+			parts = append(parts, k)
+			continue
+		}
+		parts = append(parts, k+"="+v)
+	}
+	out := strings.Join(parts, " ")
+	if len(out) > 80 {
+		out = out[:77] + "..."
+	}
+	return out
+}
+
+// DashboardsList renders /dashboards — the user's dashboard inventory.
+templ DashboardsList(d DashboardsListData) {
+	@Layout("Dashboards") {
+		<div class="card">
+			<h2>Dashboards</h2>
+			<p class="muted">Per-user collections of saved-query cards. v1 supports card-add and card-remove; reorder + resize are Phase 7 if there's demand.</p>
+			if d.Flash != "" {
+				<p class="flash">{ d.Flash }</p>
+			}
+
+			<form method="post" action="/dashboards" class="response-form">
+				<label>
+					Name
+					<input type="text" name="name" required maxlength="200"/>
+				</label>
+				<button type="submit">Create dashboard</button>
+			</form>
+
+			if len(d.Dashboards) == 0 {
+				<p class="muted">No dashboards yet.</p>
+			} else {
+				<table class="events-table">
+					<thead>
+						<tr>
+							<th>name</th>
+							<th>cards</th>
+							<th>created</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, dash := range d.Dashboards {
+							<tr>
+								<td><a href={ templ.URL("/dashboards/" + dash.ID) }>{ dash.Name }</a></td>
+								<td class="muted">{ dashboardCardCountLabel(dash) }</td>
+								<td class="muted">{ dash.CreatedAt.UTC().Format("2006-01-02 15:04 MST") }</td>
+								<td>
+									<form method="post" action={ templ.URL("/dashboards/" + dash.ID + "/delete") } class="response-form">
+										<button type="submit" class="response-btn destructive">Delete</button>
+									</form>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	}
+}
+
+func dashboardCardCountLabel(d pg.Dashboard) string {
+	switch len(d.Cards) {
+	case 0:
+		return "(empty)"
+	case 1:
+		return "1 card"
+	}
+	return cardCountStr(len(d.Cards))
+}
+
+func cardCountStr(n int) string {
+	// Inline formatter to avoid pulling strconv into the templ.
+	digits := []byte{}
+	if n == 0 {
+		return "0 cards"
+	}
+	for n > 0 {
+		digits = append([]byte{byte('0' + n%10)}, digits...)
+		n /= 10
+	}
+	return string(digits) + " cards"
+}
+
+// DashboardDetail renders /dashboards/{id} — the per-dashboard layout
+// + add-card picker + card-remove buttons.
+templ DashboardDetail(d DashboardDetailData) {
+	@Layout("Dashboard — " + d.Dashboard.Name) {
+		<div class="card">
+			<h2>{ d.Dashboard.Name }</h2>
+			if d.Flash != "" {
+				<p class="flash">{ d.Flash }</p>
+			}
+
+			<form method="post" action={ templ.URL("/dashboards/" + d.Dashboard.ID + "/cards") } class="response-form">
+				<label>
+					Add card
+					<select name="query_id">
+						for _, q := range d.AvailableSQs {
+							<option value={ q.ID }>{ q.Name } ({ string(q.Surface) })</option>
+						}
+					</select>
+				</label>
+				<label>
+					Label override (optional)
+					<input type="text" name="label" maxlength="200"/>
+				</label>
+				<button type="submit">Add card</button>
+			</form>
+
+			if len(d.Cards) == 0 {
+				<p class="muted">No cards yet. Use the picker above to add one.</p>
+			} else {
+				<div class="dashboard-grid">
+					for _, c := range d.Cards {
+						<div class="dashboard-card">
+							if c.Deleted {
+								<h4>(query deleted)</h4>
+								<p class="muted">The saved query this card referenced has been deleted.</p>
+							} else {
+								<h4>
+									<a href={ templ.URL(c.URL) }>{ dashboardCardLabel(c) }</a>
+								</h4>
+								<p class="muted">{ string(c.Query.Surface) }</p>
+								<p class="muted">{ savedQueryParamsLabel(c.Query) }</p>
+							}
+							<form method="post" action={ templ.URL("/dashboards/" + d.Dashboard.ID + "/cards/" + c.QueryID + "/delete") } class="response-form">
+								<button type="submit" class="response-btn destructive">Remove</button>
+							</form>
+						</div>
+					}
+				</div>
+			}
+		</div>
+	}
+}
+
+func dashboardCardLabel(c DashboardCardResolved) string {
+	if c.Label != "" {
+		return c.Label
+	}
+	return c.Query.Name
+}

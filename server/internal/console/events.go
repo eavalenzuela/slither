@@ -44,6 +44,7 @@ func (s *Server) eventsList(w http.ResponseWriter, r *http.Request) {
 		Rows:       rows,
 		Filter:     viewFilter,
 		NextCursor: next.String(),
+		RawQuery:   r.URL.RawQuery,
 	}))
 }
 

@@ -14,6 +14,10 @@ type EventsPageData struct {
 	Rows       []ch.EventRow
 	Filter     EventsFilter
 	NextCursor string
+	// RawQuery is r.URL.RawQuery passed through so the Phase 6 #115
+	// "Save filter" partial can capture exactly what the operator
+	// has applied. Empty string is fine — saves a no-filter view.
+	RawQuery string
 }
 
 // EventsFilter mirrors the query params accepted by the page so the

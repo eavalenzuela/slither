@@ -111,6 +111,7 @@ func (s *Server) alertsList(w http.ResponseWriter, r *http.Request) {
 		NextCursorURL:  nextCursorURL(viewFilters, next),
 		Flash:          flash,
 		IsAnalyst:      role == pg.RoleAnalyst || role == pg.RoleAdmin,
+		RawQuery:       r.URL.RawQuery,
 	}))
 }
 

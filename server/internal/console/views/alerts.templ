@@ -61,6 +61,8 @@ templ AlertsList(d AlertsListData) {
 				<a class="muted" href="/alerts">Reset</a>
 			</form>
 
+			@SaveCurrentFilter("alerts", d.RawQuery)
+
 			if len(d.Alerts) == 0 {
 				<p class="muted">No alerts match the current filter.</p>
 			} else {

@@ -30,10 +30,11 @@ func (s *Server) huntList(w http.ResponseWriter, r *http.Request) {
 	flashErr, _ := s.sm.Pop(r.Context(), "flash_error").(string)
 	role := s.role(r)
 	render(w, r, views.HuntList(views.HuntListData{
-		Hunts:  rows,
-		CanRun: role == pg.RoleAnalyst || role == pg.RoleAdmin,
-		Flash:  flash,
-		Error:  flashErr,
+		Hunts:    rows,
+		CanRun:   role == pg.RoleAnalyst || role == pg.RoleAdmin,
+		Flash:    flash,
+		Error:    flashErr,
+		RawQuery: r.URL.RawQuery,
 	}))
 }
 

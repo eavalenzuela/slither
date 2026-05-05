@@ -13,6 +13,11 @@ type HuntListData struct {
 	Flash  string // post-redirect message
 	Error  string // form-error display
 	Form   HuntForm
+	// RawQuery is r.URL.RawQuery for the Phase 6 #115 "Save filter"
+	// partial. /hunt has no list filter today; the field is plumbed
+	// for symmetry with /events + /alerts so the partial can render
+	// consistently.
+	RawQuery string
 }
 
 // HuntForm holds the dispatch form state. Empty in normal renders;

@@ -1659,7 +1659,7 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     render, fanout-cap signalling, depth bound respected, empty/zero
     input rejection.)*
 
-12. **#115 — Saved queries + per-user dashboards.** New pg tables:
+12. ✅ **#115 — Saved queries + per-user dashboards.** New pg tables:
     `saved_queries` (id, user_id, name, surface ∈ {events, alerts,
     hunts}, params jsonb, created_at, updated_at) and `dashboards`
     (id, user_id, name, layout jsonb, created_at, updated_at).
@@ -1678,6 +1678,35 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     two cards, refresh persists; delete a saved-query that's referenced
     by a dashboard card → card surfaces a "(query deleted)" placeholder
     instead of erroring.
+    *(Shipped 2026-05-05. Migrations 00020_saved_queries.sql +
+    00021_dashboards.sql; pg helpers
+    `InsertSavedQuery`/`ListSavedQueries`/`GetSavedQuery`/
+    `DeleteSavedQuery` and
+    `InsertDashboard`/`ListDashboards`/`GetDashboard`/
+    `UpdateDashboardLayout`/`DeleteDashboard`. Unique constraints:
+    saved_queries on (user_id, surface, name) — same name can
+    coexist across surfaces; dashboards on (user_id, name). Card →
+    saved_query refs are intentionally NOT a pg FK so deleting a
+    referenced query leaves a dangling id the renderer surfaces as
+    "(query deleted)" rather than blocking the delete or silently
+    cascading away the card. Filter forms on /events, /alerts, and
+    /hunt embed a `SaveCurrentFilter` partial that POSTs the page's
+    `r.URL.RawQuery` + a user-supplied name to /queries; the partial
+    is shared across all three surfaces. /queries lists rows
+    newest-first with delete buttons and clickable names that
+    re-encode params onto the source URL via `EncodeSavedQueryURL`.
+    /dashboards lists per-user dashboards; create-form takes a name;
+    /dashboards/{id} renders cards in a CSS auto-fill grid with
+    add-card picker (drop-down sourced from the user's saved
+    queries) and per-card remove buttons. Audit events:
+    query.saved / query.deleted / dashboard.created /
+    dashboard.card_added / dashboard.card_removed /
+    dashboard.deleted. Console nav gains "Hunt", "Queries",
+    "Dashboards" entries. 3 unit tests cover URL encoding round-trip
+    + flattenParams; 2 pg integration tests cover
+    saved-query lifecycle + collisions + cross-user isolation, and
+    dashboard layout round-trip + dangling-card semantics on
+    saved-query delete.)*
 
 13. **#116 — Search refinements + reopen-alert.** Two sub-deliverables
     bundled because both are small UX wins on existing pages:

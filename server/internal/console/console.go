@@ -318,6 +318,19 @@ func (s *Server) routes() {
 			r.Post("/enrolment-tokens/{token_id}/revoke", s.enrolmentTokensRevoke)
 		})
 
+		// Phase 6 #115 — saved queries + dashboards. Per-user; no
+		// role gate beyond auth (every user sees only their own
+		// rows).
+		r.Get("/queries", s.queriesList)
+		r.Post("/queries", s.queriesCreate)
+		r.Post("/queries/{id}/delete", s.queriesDelete)
+		r.Get("/dashboards", s.dashboardsList)
+		r.Post("/dashboards", s.dashboardsCreate)
+		r.Get("/dashboards/{id}", s.dashboardsDetail)
+		r.Post("/dashboards/{id}/cards", s.dashboardsAddCard)
+		r.Post("/dashboards/{id}/cards/{query_id}/delete", s.dashboardsRemoveCard)
+		r.Post("/dashboards/{id}/delete", s.dashboardsDelete)
+
 		// IOC feeds (#66) — admin-only CRUD.
 		r.With(s.RequireRole(pg.RoleAdmin)).Group(func(r chi.Router) {
 			r.Get("/iocs", s.iocsList)

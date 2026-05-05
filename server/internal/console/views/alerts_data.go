@@ -23,6 +23,9 @@ type AlertsListData struct {
 	NextCursorURL  string
 	Flash          string
 	IsAnalyst      bool
+	// RawQuery is r.URL.RawQuery passed through so the Phase 6 #115
+	// "Save filter" partial captures what's currently applied.
+	RawQuery string
 }
 
 // AlertDetailData drives the /alerts/{id} detail page. Allowed

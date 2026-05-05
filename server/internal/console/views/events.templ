@@ -31,6 +31,8 @@ templ Events(d EventsPageData) {
 				<button type="submit">Apply</button>
 			</form>
 
+			@SaveCurrentFilter("events", d.RawQuery)
+
 			if len(d.Rows) == 0 {
 				<p class="muted">No events match.</p>
 			} else {
