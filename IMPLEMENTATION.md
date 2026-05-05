@@ -1993,7 +1993,7 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     apiauth middleware tests (missing header, bad scheme, not-
     found, revoked, success, bearer-extract canon).)*
 
-18. **#121 — Phase 6 exit validation.** Doc-backed manual run on the
+18. ⏳ **#121 — Phase 6 exit validation.** Doc-backed manual run on the
     Phase 3/4/5 cloud fleet (existing stopped instances —
     `start-instances` brings them back; allocate one Graviton instance
     for arm64 coverage from #119). Validates:
@@ -2046,6 +2046,21 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     `docs/phase6-validation.md`. **Exit:** all green; Phase 6
     closed; Phase 7 (platform expansion) opens or stays parked
     pending demand per ADR-0037.
+    *(Runbook + automation landed 2026-05-05. Status stays ⏳ until
+    the operator's captures land under `phase6_validation/` —
+    mirroring Phase 1 #29 / Phase 2 #46 / Phase 5 #103's pattern.
+    `docs/phase6-validation.md` codifies the 13-step matrix
+    (V1 extension supervisor → V13 eyeexam JSON API contract) with
+    per-step commands + green criteria. `scripts/phase6-validate.sh`
+    automates the parts that don't need a human (matrix dry-runs,
+    pg/CH probe queries, /healthz + /events/search + /rules curls,
+    delegation to `deploy/k8s/smoke.sh` for V11). Steps that need
+    eyeballs (V5 IdP loop, V6 right-click menu, V10 TPM kernel
+    bump) print instructions + pause for confirmation. Fleet:
+    Phase 5 #103's 4 stopped EC2s (start-instances brings them
+    back) + one new Graviton instance for arm64 coverage from #119.
+    All 18 Phase 6 tasks worth of code is on main; the validation
+    sweep is the operator's gate to close Phase 6.)*
 
 ### 8.2 Cross-cutting notes
 
