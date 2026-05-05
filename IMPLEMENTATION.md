@@ -1751,7 +1751,7 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     parser unit tests + updated existing IsValidAlertTransition +
     allowedNextStatuses tests for the new transition.)*
 
-14. **#117 — Keystore Gap A resolution + ADR-0038.** Decide between
+14. ✅ **#117 — Keystore Gap A resolution + ADR-0038.** Decide between
     options (a) drop kernel-keyring entirely, (b) `KEY_SPEC_USER_KEYRING`
     (`@u`) per-uid persistent, (c) systemd helper unit pre-populating
     via `KeyringMode=shared`. ADR-0037 narrowed the trade table; this
@@ -1769,6 +1769,26 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     **Exit:** integration test on all four host shapes — keyring
     survives enroll → restart → second-boot lookup; unattended-host
     use cases (no PAM session) still resolve cleanly.
+    *(Shipped 2026-05-05. Picked **option (b)** per the working
+    hypothesis: `keyringID()` now prefers `KEY_SPEC_USER_KEYRING`
+    (`@u`) and falls back to `@s` only as a defensive degradation
+    for the rare kernel that lacks per-uid keyrings (≥ 3.5 always
+    has them). `Keyring`'s package + struct comments rewritten to
+    cite ADR-0038 + describe the cross-tenant caveat. ADR-0038
+    `docs/adr/0038-keystore-strategy.md` records the decision +
+    why-not (a)/(c) + cross-tenant trade-off + migration path
+    ("functionally a no-op upgrade" — first Save lands in `@u`,
+    stale `@s` keys go inert because the load path no longer
+    consults them). `docs/threat-model.md` Surface 4 row +
+    "what we defend against" bullet rewritten to reflect the
+    chosen primary store. File store stays the durable
+    belt-and-braces. Keyring-vs-file logging via the existing
+    `keystore: <name>` slog line. Multi-host validation deferred
+    to #121 cloud-VM exit (per the spec's "validate against
+    Debian 13 + RHEL 10 + Ubuntu 24.04 + the OCI image during
+    the task's integration tests, not during #120" — read as #121
+    given #120 is the JSON API; the integration sweep travels with
+    the broader Phase 6 cloud-VM run).)*
 
 15. **#118 — TPM-sealed cert variant.** New `agent/internal/keystore/tpm_linux.go`
     using `github.com/google/go-tpm` (or equivalent). PCR 7 (Secure

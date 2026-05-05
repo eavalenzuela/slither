@@ -1,18 +1,23 @@
 // Package keystore is the agent-side persistence surface for the
-// client cert + key + CA cert. Phase 5 #98 closes IMPLEMENTATION.md
-// §10.2 — kernel keyring storage with file fallback.
+// client cert + key + CA cert. Phase 5 #98 shipped the original
+// keyring + file split closing IMPLEMENTATION.md §10.2; Phase 6 #117
+// resolved Gap A (ADR-0038) by moving the keyring target from `@s`
+// (per-PAM-session — reaped at the enroll subprocess boundary) to
+// `@u` (per-uid persistent — survives into the long-lived agent
+// unit's lifetime).
 //
 // Two implementations live behind the Store interface:
 //
-//   - Keyring (linux, user-keyring): client.key + client.cert +
-//     ca.cert live as "user"-type keys under @u. Survive reboot
-//     only if the operator's session keyring persists; for the
-//     systemd-managed agent unit this is process-lifetime, so the
-//     usual flow is `slither-agent enroll` → keys land in keyring
-//     for the rest of the boot, then a fresh enroll on next boot.
-//     For systems where that's painful (long-uptime fleets), the
-//     File implementation is the right answer — the operator's
-//     install policy picks one.
+//   - Keyring (linux, user-keyring `@u`): client.key + client.cert +
+//     ca.cert live as "user"-type keys under the per-uid keyring.
+//     Phase 6 #117 / ADR-0038. Loses the keys at reboot — that's
+//     deliberate; the file store under /etc/slither/ stays
+//     populated as the durable belt-and-braces so a fresh boot
+//     reads from disk and the keyring rebuilds on the first
+//     successful Save. The keyring's value is in-RAM-only secrecy
+//     for hosts that explicitly cleared the file store; operators
+//     wanting tighter scoping use the TPM-sealed variant
+//     (Phase 6 #118).
 //
 //   - File: writes PEM blobs to /etc/slither/{client.key,client.cert,
 //     ca.cert} with mode 0600 / 0644. Same shape Phase 2 #36 shipped;
@@ -22,11 +27,11 @@
 // $StateDir/host_id) under both stores — it's a stable identifier,
 // not a secret.
 //
-// AutoSelect picks Keyring when add_key(2) succeeds, File otherwise.
-// Operators who want determinism set the choice explicitly via the
-// agent.output.grpc.keystore config key (Phase 5+ knob; not committed
-// in this changeset to avoid scope creep — AutoSelect is the v1
-// answer).
+// AutoSelect picks Keyring when add_key(2) succeeds against `@u`,
+// File otherwise. Operators who want determinism set the choice
+// explicitly via the agent.output.grpc.keystore config key (Phase
+// 5+ knob; not committed in this changeset to avoid scope creep —
+// AutoSelect is the v1 answer).
 
 package keystore
 
