@@ -3,12 +3,14 @@ package console
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/t3rmit3/slither/server/internal/console/views"
 	"github.com/t3rmit3/slither/server/internal/store/ch"
+	"github.com/t3rmit3/slither/server/internal/store/pg"
 )
 
 // eventsPageSize bounds how many rows the list view fetches per page.
@@ -19,6 +21,13 @@ const eventsPageSize = 50
 // eventsList renders /events. Filters come from query params; the
 // cursor is opaque (handled inside ch.SearchEvents) and round-trips
 // via the "cursor" param on the next-page link.
+//
+// Phase 6 #116(a): a `q=` param carrying free-form text takes
+// precedence over the structured form fields. ParseEventsQuery turns
+// `host:foo class:1007 since:24h` into the same EventFilter shape and
+// records a query_history row so the operator can re-run it from
+// /events/history. Parse errors surface as a flash + the operator's
+// original query stays in the search box.
 func (s *Server) eventsList(w http.ResponseWriter, r *http.Request) {
 	if s.chStore == nil {
 		http.Error(w, "events store unavailable", http.StatusServiceUnavailable)
@@ -26,7 +35,42 @@ func (s *Server) eventsList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := r.URL.Query()
-	filter, viewFilter := parseEventsFilter(q)
+	rawQ := strings.TrimSpace(q.Get("q"))
+	var (
+		filter     ch.EventFilter
+		viewFilter views.EventsFilter
+		parseError string
+		unknowns   []string
+	)
+	if rawQ != "" {
+		parsed, perr := ParseEventsQuery(rawQ)
+		if perr != nil {
+			parseError = perr.Error()
+			// Render the page with no filter so the operator sees the
+			// parse error + can fix the input.
+		} else {
+			unknowns = parsed.Unknown
+			// Convert ParsedQuery into both shapes the page consumes.
+			pv := parsed.ToURLValues()
+			merged := q
+			for k, vs := range pv {
+				if len(vs) > 0 {
+					merged[k] = vs
+				}
+			}
+			filter, viewFilter = parseEventsFilter(merged)
+			if uid := s.userID(r); uid != "" {
+				if err := s.store.RecordQuery(r.Context(), uid,
+					pg.SavedQuerySurfaceEvents, "q="+rawQ); err != nil {
+					// Best-effort — a history-write blip can't fail
+					// the page render.
+					_ = err
+				}
+			}
+		}
+	} else {
+		filter, viewFilter = parseEventsFilter(q)
+	}
 
 	cursor, err := ch.ParseCursor(q.Get("cursor"))
 	if err != nil {
@@ -41,11 +85,31 @@ func (s *Server) eventsList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	render(w, r, views.Events(views.EventsPageData{
-		Rows:       rows,
-		Filter:     viewFilter,
-		NextCursor: next.String(),
-		RawQuery:   r.URL.RawQuery,
+		Rows:          rows,
+		Filter:        viewFilter,
+		NextCursor:    next.String(),
+		RawQuery:      r.URL.RawQuery,
+		QueryText:     rawQ,
+		ParseError:    parseError,
+		UnknownTokens: unknowns,
 	}))
+}
+
+// eventsHistory renders /events/history — the user's last-50 query
+// strings (most recent first). Click-to-rerun links straight back to
+// /events?q=<...>.
+func (s *Server) eventsHistory(w http.ResponseWriter, r *http.Request) {
+	uid := s.userID(r)
+	if uid == "" {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	rows, err := s.store.ListQueryHistory(r.Context(), uid, pg.SavedQuerySurfaceEvents, 50)
+	if err != nil {
+		http.Error(w, "list history failed", http.StatusInternalServerError)
+		return
+	}
+	render(w, r, views.EventsHistory(views.EventsHistoryData{Rows: rows}))
 }
 
 // eventDetail renders /events/{class_uid}/{event_id}.

@@ -20,14 +20,15 @@ func TestIsValidAlertTransition(t *testing.T) {
 		{AlertAcknowledged, AlertAcknowledged, false},
 		{AlertClosed, AlertClosed, false},
 
-		// Backward / sideways moves are rejected — closed is terminal
-		// in v1; reopen waits for Phase 5.
+		// Backward / sideways moves are rejected. Phase 6 #116 lit up
+		// the closed → in_progress reopen path; everything else stays
+		// rejected.
 		{AlertAcknowledged, AlertNew, false},
 		{AlertInProgress, AlertAcknowledged, false},
 		{AlertInProgress, AlertNew, false},
 		{AlertClosed, AlertNew, false},
 		{AlertClosed, AlertAcknowledged, false},
-		{AlertClosed, AlertInProgress, false},
+		{AlertClosed, AlertInProgress, true}, // Phase 6 #116 reopen-alert
 
 		// Garbage statuses fail closed.
 		{AlertStatus("nonsense"), AlertClosed, false},

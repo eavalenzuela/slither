@@ -380,7 +380,11 @@ var ErrAlertNotFound = errors.New("pg: alert not found")
 var ErrInvalidTransition = errors.New("pg: invalid alert transition")
 
 // validTransitions table — keep aligned with PROJECT.md §5 lifecycle.
-// Closed alerts are terminal in v1; reopening waits for Phase 5.
+// Phase 6 #116 added closed → in_progress (the reopen-alert path),
+// originally deferred from Phase 3 #61 ("closed is terminal in v1,
+// reopen Phase 5"). The console audits the transition with
+// reason_code "alert.reopened" via the standard /alerts/{id}/transition
+// endpoint.
 var validAlertTransitions = map[AlertStatus]map[AlertStatus]bool{
 	AlertNew: {
 		AlertAcknowledged: true,
@@ -393,6 +397,9 @@ var validAlertTransitions = map[AlertStatus]map[AlertStatus]bool{
 	},
 	AlertInProgress: {
 		AlertClosed: true,
+	},
+	AlertClosed: {
+		AlertInProgress: true, // Phase 6 #116 reopen-alert
 	},
 }
 
@@ -500,12 +507,19 @@ func (s *Store) TransitionAlert(ctx context.Context, t AlertTransition) (AlertRo
 		"to":     string(t.To),
 		"reason": t.Reason,
 	})
+	auditAction := fmt.Sprintf("alert.transition.%s_%s", from, t.To)
+	if from == AlertClosed && t.To == AlertInProgress {
+		// Phase 6 #116 — distinct audit action for the reopen path so
+		// operators can filter audit history by `alert.reopened`
+		// without parsing the generic transition action's substring.
+		auditAction = "alert.reopened"
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO audit_log (actor_type, actor_id, action, target_kind, target_id, detail)
 		VALUES ('user', $1, $2, 'alert', $3, $4)
 	`,
 		actorUUID,
-		fmt.Sprintf("alert.transition.%s_%s", from, t.To),
+		auditAction,
 		alertUUID.String(),
 		detail,
 	); err != nil {

@@ -324,3 +324,15 @@ button.danger:hover { background: #ff9c9c; }
 }
 .dashboard-card h4 { margin: 0 0 0.5rem 0; font-size: 0.95rem; }
 .dashboard-card p { margin: 0.2rem 0; font-size: 0.8rem; }
+
+/* Phase 6 #116(a) — events query input bar. */
+.query-form {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+.query-form input[type="text"] {
+    width: min(60ch, 100%);
+    font-family: monospace;
+}

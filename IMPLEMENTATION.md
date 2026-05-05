@@ -1708,7 +1708,7 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     dashboard layout round-trip + dangling-card semantics on
     saved-query delete.)*
 
-13. **#116 — Search refinements + reopen-alert.** Two sub-deliverables
+13. ✅ **#116 — Search refinements + reopen-alert.** Two sub-deliverables
     bundled because both are small UX wins on existing pages:
     (a) `/events` query language — promote from filter form to a
         single text-input parser supporting `host:foo class:1007 since:24h`-shape
@@ -1729,6 +1729,27 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     unit tests for query-parser tokeniser (host:/class:/since: forms,
     quoted strings, unknown tokens fall through to raw-bytes contains);
     reopen-alert path 200s and writes audit row.
+    *(Shipped 2026-05-05. (a) `ParseEventsQuery` in
+    `server/internal/console/query_parser.go` tokenises a single
+    text-input search into the same EventFilter shape the form
+    builds; supports `host:` / `class:` / `severity:` / `since:` /
+    `until:` / `raw:` axes; quoted strings preserve embedded spaces;
+    duration shorthand `24h` / `30m` / `7d`; bareword tokens fall
+    through to RawContains; unknown `key:value` axes surface in a
+    page hint rather than silently dropping. /events grew a `q=`
+    text input above the existing filter form (filter form stays
+    as fallback). /events/history page lists the user's last-50
+    query strings with click-to-rerun. Migration
+    `00022_query_history.sql` + pg helpers `RecordQuery` /
+    `ListQueryHistory`; in-tx prune to keep ≤50 rows per user. (b)
+    `validAlertTransitions` gained `closed → in_progress`;
+    `TransitionAlert` writes `alert.reopened` instead of the
+    generic `alert.transition.closed_in_progress` action so audit
+    filters surface reopens cleanly. Button label renders "Reopen"
+    on closed→in_progress. closed_at is cleared on reopen by the
+    existing closedSet branch (NULL when target != closed). 11
+    parser unit tests + updated existing IsValidAlertTransition +
+    allowedNextStatuses tests for the new transition.)*
 
 14. **#117 — Keystore Gap A resolution + ADR-0038.** Decide between
     options (a) drop kernel-keyring entirely, (b) `KEY_SPEC_USER_KEYRING`

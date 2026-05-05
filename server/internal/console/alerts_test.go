@@ -107,7 +107,8 @@ func TestAllowedNextStatuses(t *testing.T) {
 		{pg.AlertNew, []pg.AlertStatus{pg.AlertAcknowledged, pg.AlertInProgress, pg.AlertClosed}},
 		{pg.AlertAcknowledged, []pg.AlertStatus{pg.AlertInProgress, pg.AlertClosed}},
 		{pg.AlertInProgress, []pg.AlertStatus{pg.AlertClosed}},
-		{pg.AlertClosed, []pg.AlertStatus{}},
+		// Phase 6 #116 lit up the reopen path.
+		{pg.AlertClosed, []pg.AlertStatus{pg.AlertInProgress}},
 		{pg.AlertStatus(""), []pg.AlertStatus{}},
 	}
 	for _, c := range cases {

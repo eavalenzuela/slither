@@ -1513,6 +1513,9 @@ func alertTransitionLabel(from, to pg.AlertStatus) string {
 		if from == pg.AlertNew {
 			return "Start work (skip ack)"
 		}
+		if from == pg.AlertClosed {
+			return "Reopen"
+		}
 		return "Start work"
 	case pg.AlertClosed:
 		if from == pg.AlertNew {

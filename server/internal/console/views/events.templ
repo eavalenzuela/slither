@@ -7,6 +7,22 @@ templ Events(d EventsPageData) {
 	@Layout("Events") {
 		<div class="card">
 			<h2>Events</h2>
+
+			<form method="get" action="/events" class="query-form">
+				<label>
+					Search
+					<input type="text" name="q" value={ d.QueryText } placeholder="host:foo class:1007 since:24h" autocomplete="off"/>
+				</label>
+				<button type="submit">Search</button>
+				<a href="/events/history" class="muted">history</a>
+			</form>
+			if d.ParseError != "" {
+				<p class="flash">{ d.ParseError }</p>
+			}
+			if len(d.UnknownTokens) > 0 {
+				<p class="muted">Unknown tokens (treated as raw substring): { joinTokens(d.UnknownTokens) }</p>
+			}
+
 			<form method="get" action="/events" class="live-filters">
 				<label>
 					host_id
@@ -110,4 +126,48 @@ templ EventDetail(d EventDetailData) {
 			<pre class="event-raw">{ d.Event.RawPretty }</pre>
 		</div>
 	}
+}
+
+// EventsHistory renders /events/history. Phase 6 #116(a).
+templ EventsHistory(d EventsHistoryData) {
+	@Layout("Events query history") {
+		<div class="card">
+			<h2>Recent searches</h2>
+			<p class="muted">Last 50 query strings, newest first. Click to re-run on /events.</p>
+			if len(d.Rows) == 0 {
+				<p class="muted">No history yet.</p>
+			} else {
+				<table class="events-table">
+					<thead>
+						<tr>
+							<th>when</th>
+							<th>query</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, r := range d.Rows {
+							<tr>
+								<td class="muted">{ r.CreatedAt.UTC().Format("2006-01-02 15:04:05 MST") }</td>
+								<td><a href={ templ.URL("/events?" + r.Raw) }><code>{ r.Raw }</code></a></td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	}
+}
+
+// joinTokens concatenates a slice for display in the unknown-token
+// hint above the events list. Inlined so the templ doesn't pull
+// strings.Join.
+func joinTokens(toks []string) string {
+	out := ""
+	for i, t := range toks {
+		if i > 0 {
+			out += " "
+		}
+		out += t
+	}
+	return out
 }

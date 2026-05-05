@@ -240,6 +240,11 @@ func (s *Server) routes() {
 		}
 		if s.chStore != nil {
 			r.Get("/events", s.eventsList)
+			// Phase 6 #116(a) — the operator's last-50 query strings.
+			// Registered before the {class_uid}/{event_id} route so
+			// "history" doesn't get matched as a class_uid path
+			// segment.
+			r.Get("/events/history", s.eventsHistory)
 			r.Get("/events/{class_uid}/{event_id}", s.eventDetail)
 		}
 		r.Get("/hosts", s.hostsList)

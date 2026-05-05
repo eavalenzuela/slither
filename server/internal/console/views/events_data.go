@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/t3rmit3/slither/server/internal/store/ch"
+	"github.com/t3rmit3/slither/server/internal/store/pg"
 )
 
 // EventsPageData drives the events list page. NextCursor is the
@@ -18,6 +19,22 @@ type EventsPageData struct {
 	// "Save filter" partial can capture exactly what the operator
 	// has applied. Empty string is fine — saves a no-filter view.
 	RawQuery string
+
+	// Phase 6 #116(a) — text query language. QueryText is the raw
+	// `q=` value the operator submitted; ParseError is non-empty
+	// when the parser rejected it (handler clears Filter so the
+	// page renders empty results). UnknownTokens names axes the
+	// parser couldn't classify so the page surfaces them as a hint
+	// rather than silently dropping.
+	QueryText     string
+	ParseError    string
+	UnknownTokens []string
+}
+
+// EventsHistoryData drives /events/history — the user's last-50
+// query strings on the events surface, newest-first.
+type EventsHistoryData struct {
+	Rows []pg.QueryHistoryRow
 }
 
 // EventsFilter mirrors the query params accepted by the page so the
