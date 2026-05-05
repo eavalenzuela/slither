@@ -116,3 +116,78 @@ func TestEnvOverride(t *testing.T) {
 		t.Errorf("pg dsn = %q", cfg.Storage.Postgres.DSN)
 	}
 }
+
+func TestValidateOIDC_PartialBlockRejected(t *testing.T) {
+	yaml := "server:\n  log_level: info\nconsole:\n  oidc:\n    issuer_url: https://idp.example.com\n"
+	_, err := Load(writeTmp(t, yaml))
+	if err == nil || !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("want ErrInvalidConfig on partial OIDC block, got %v", err)
+	}
+}
+
+func TestValidateOIDC_RoleMappingsRequired(t *testing.T) {
+	yaml := `server:
+  log_level: info
+console:
+  oidc:
+    issuer_url: https://idp.example.com
+    client_id: slither
+    client_secret: shh
+    redirect_url: https://slither.example.com/oidc/callback
+`
+	_, err := Load(writeTmp(t, yaml))
+	if err == nil || !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("want ErrInvalidConfig on missing role_mappings, got %v", err)
+	}
+}
+
+func TestValidateOIDC_BadRole(t *testing.T) {
+	yaml := `server:
+  log_level: info
+console:
+  oidc:
+    issuer_url: https://idp.example.com
+    client_id: slither
+    client_secret: shh
+    redirect_url: https://slither.example.com/oidc/callback
+    role_mappings:
+      slither-everyone: superuser
+`
+	_, err := Load(writeTmp(t, yaml))
+	if err == nil || !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("want ErrInvalidConfig on invalid role, got %v", err)
+	}
+}
+
+func TestValidateOIDC_AcceptsFullBlock(t *testing.T) {
+	yaml := `server:
+  log_level: info
+console:
+  oidc:
+    issuer_url: https://idp.example.com
+    client_id: slither
+    client_secret: shh
+    redirect_url: https://slither.example.com/oidc/callback
+    role_mappings:
+      slither-admin:   admin
+      slither-analyst: analyst
+      slither-viewer:  viewer
+`
+	cfg, err := Load(writeTmp(t, yaml))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Console.OIDC.Enabled() {
+		t.Error("OIDC.Enabled() false on a fully-populated block")
+	}
+}
+
+func TestValidateOIDC_EmptyBlockOK(t *testing.T) {
+	cfg, err := Load(writeTmp(t, "server:\n  log_level: info\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Console.OIDC.Enabled() {
+		t.Error("OIDC.Enabled() true on empty block")
+	}
+}

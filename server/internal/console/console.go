@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -71,6 +72,33 @@ type Options struct {
 	// <ArtefactDir>/<alert_id>/*.tgz. Empty disables the listing
 	// (alerts still render; the snapshot block is hidden).
 	ArtefactDir string
+
+	// OIDC, when populated and successfully discovered, enables
+	// Phase 6 #113 SSO. New routes /oidc/login + /oidc/callback are
+	// registered; the /login page renders an extra "Sign in with
+	// SSO" button. Empty leaves SSO off; partial config fails
+	// console.Validate at boot.
+	OIDC ConsoleOIDC
+}
+
+// ConsoleOIDC mirrors config.ConsoleOIDC at the package boundary so
+// the console package doesn't import the config package directly. The
+// app wires the conversion in server/internal/app/app.go.
+type ConsoleOIDC struct {
+	IssuerURL     string
+	ClientID      string
+	ClientSecret  string
+	RedirectURL   string
+	Scopes        []string
+	RoleClaim     string
+	RoleMappings  map[string]string
+	UsernameClaim string
+}
+
+// Enabled reports whether enough fields are populated to wire SSO
+// routes. Mirrors config.ConsoleOIDC.Enabled.
+func (c ConsoleOIDC) Enabled() bool {
+	return c.IssuerURL != "" && c.ClientID != "" && c.ClientSecret != "" && c.RedirectURL != ""
 }
 
 // Server is the chi.Router built around Options. New returns a stdlib
@@ -89,6 +117,7 @@ type Server struct {
 	responseHub         *respond.Hub
 	huntHub             *hunt.Hub
 	artefactDir         string
+	oidc                *oidcAuth
 }
 
 // New constructs the console router. Panics on misconfiguration — a
@@ -129,6 +158,28 @@ func New(opts Options) *Server {
 		huntHub:             opts.HuntHub,
 		artefactDir:         opts.ArtefactDir,
 	}
+	if opts.OIDC.Enabled() {
+		auth, err := initOIDC(context.Background(), oidcConfig{
+			IssuerURL:     opts.OIDC.IssuerURL,
+			ClientID:      opts.OIDC.ClientID,
+			ClientSecret:  opts.OIDC.ClientSecret,
+			RedirectURL:   opts.OIDC.RedirectURL,
+			Scopes:        opts.OIDC.Scopes,
+			RoleClaim:     opts.OIDC.RoleClaim,
+			RoleMappings:  opts.OIDC.RoleMappings,
+			UsernameClaim: opts.OIDC.UsernameClaim,
+		})
+		if err != nil {
+			// Discovery failure logs + leaves SSO off; the operator
+			// fixes the IdP and restarts. Refusing boot would lock
+			// every operator out of the console for a transient IdP
+			// blip.
+			slog.Warn("console: OIDC discovery failed; SSO disabled",
+				"issuer", opts.OIDC.IssuerURL, "err", err)
+		} else {
+			s.oidc = auth
+		}
+	}
 	if opts.GraphCache != nil && opts.ChStore != nil {
 		s.graphBuilder = &detect.FlowGraphBuilder{Lookup: opts.ChStore}
 		s.processTreeBuilder = &detect.ProcessTreeBuilder{Lookup: opts.ChStore}
@@ -161,6 +212,13 @@ func (s *Server) routes() {
 	s.mux.Get("/login", s.loginPage)
 	s.mux.Post("/login", s.loginSubmit)
 	s.mux.Post("/logout", s.logout)
+	// Phase 6 #113 SSO routes — registered only when OIDC is wired
+	// (discovery succeeded at boot). Both routes 404 cleanly when
+	// SSO is off; the /login page hides the SSO button to match.
+	if s.oidc != nil {
+		s.mux.Get("/oidc/login", s.oidcLogin)
+		s.mux.Get("/oidc/callback", s.oidcCallback)
+	}
 
 	// Authenticated routes — viewer is the lowest bar; per-page roles
 	// are enforced inside the handlers when a stricter role is needed
@@ -285,7 +343,7 @@ func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	flash, _ := s.sm.Pop(r.Context(), "flash").(string)
-	render(w, r, views.Login(views.LoginData{Flash: flash}))
+	render(w, r, views.Login(views.LoginData{Flash: flash, SSOEnabled: s.oidc != nil}))
 }
 
 func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {

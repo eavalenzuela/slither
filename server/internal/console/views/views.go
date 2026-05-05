@@ -10,6 +10,11 @@ import "github.com/t3rmit3/slither/server/internal/store/pg"
 // LoginData drives the login form template.
 type LoginData struct {
 	Flash string // optional one-shot error message popped from the session
+	// SSOEnabled, when true, renders the Phase 6 #113 "Sign in with
+	// SSO" button alongside the local username/password form. False
+	// hides the button entirely so a misconfigured deployment never
+	// shows a non-functional control.
+	SSOEnabled bool
 }
 
 // DashboardData is the post-login landing page payload. Future page

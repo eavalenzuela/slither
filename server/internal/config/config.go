@@ -82,6 +82,71 @@ type Console struct {
 	// /var/lib/slither/artefacts — same StateDirectory pattern as
 	// GraphsDir. Bundles land as <action_id>.tgz.
 	ArtefactsDir string `yaml:"artefacts_dir"`
+	// OIDC, when populated, enables Phase 6 #113 SSO. The /login
+	// page renders a "Sign in with SSO" button alongside the local
+	// username/password form; users provisioned via SSO carry
+	// users.oidc_subject and have NULL password_hash. Local-user
+	// login keeps working alongside SSO so the bootstrap admin can
+	// still log in if the IdP is down.
+	OIDC ConsoleOIDC `yaml:"oidc"`
+}
+
+// ConsoleOIDC is the SSO config block. Empty/zero means SSO is off
+// — the /login page hides the SSO button and the OIDC routes return
+// 404. Validation runs in Validate() and refuses partially-filled
+// configs (an operator who set issuer but not client_id sees a clear
+// error rather than a 5xx at first sign-in).
+type ConsoleOIDC struct {
+	// IssuerURL is the IdP's OIDC discovery base. The handler
+	// appends /.well-known/openid-configuration via the go-oidc
+	// provider constructor, which expects the bare issuer URL.
+	// Empty disables SSO.
+	IssuerURL string `yaml:"issuer_url"`
+
+	// ClientID + ClientSecret are the operator's IdP-registered
+	// confidential-client credentials. Auth-code flow with PKCE
+	// still benefits from a confidential client for the token
+	// endpoint exchange.
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+
+	// RedirectURL is the public URL the IdP redirects back to after
+	// auth. Must end in /oidc/callback (the route the handler
+	// registers); operators set this to e.g. https://slither.acme.io/oidc/callback.
+	RedirectURL string `yaml:"redirect_url"`
+
+	// Scopes additive to the OIDC defaults. The handler always
+	// requests "openid". Operators add "email" / "profile" / IdP-
+	// specific group scopes here. Empty defaults to ["openid",
+	// "email", "profile"].
+	Scopes []string `yaml:"scopes"`
+
+	// RoleClaim names the ID-token claim carrying the operator's
+	// IdP role. Default "groups" matches Dex / Okta / Azure AD's
+	// group-membership claim shape.
+	RoleClaim string `yaml:"role_claim"`
+
+	// RoleMappings translates a claim value to a Slither role. The
+	// handler walks the claim's array values in order; the first
+	// mapping that hits sets the user's role. No match → reject the
+	// login with auth.oidc.failure reason="no_role_mapping".
+	// Operators express this as e.g.:
+	//   role_mappings:
+	//     slither-admin:   admin
+	//     slither-analyst: analyst
+	//     slither-viewer:  viewer
+	RoleMappings map[string]string `yaml:"role_mappings"`
+
+	// UsernameClaim picks the claim used to populate users.username
+	// on first SSO login. Default "email".
+	UsernameClaim string `yaml:"username_claim"`
+}
+
+// Enabled reports whether the OIDC block is populated enough to wire
+// the SSO routes. Returns true only when every load-bearing field is
+// set; partial configs fail Validate() upfront.
+func (c ConsoleOIDC) Enabled() bool {
+	return c.IssuerURL != "" && c.ClientID != "" && c.ClientSecret != "" && c.RedirectURL != ""
 }
 
 // ErrInvalidConfig wraps every user-visible config error. Callers use
@@ -154,6 +219,53 @@ func (c *Config) Validate() error {
 	if !known(validLogLevels, c.Server.LogLevel) {
 		return fmt.Errorf("%w: server.log_level %q (valid: %s)",
 			ErrInvalidConfig, c.Server.LogLevel, strings.Join(validLogLevels, ", "))
+	}
+	if err := c.Console.OIDC.validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validate enforces the all-or-nothing shape on the OIDC block. A
+// partially-filled block (e.g. issuer set but client_id blank) is a
+// likely operator typo; failing Validate at boot beats discovering it
+// at first sign-in.
+func (o *ConsoleOIDC) validate() error {
+	if o == nil {
+		return nil
+	}
+	anyField := o.IssuerURL != "" || o.ClientID != "" || o.ClientSecret != "" || o.RedirectURL != ""
+	if !anyField {
+		return nil
+	}
+	missing := []string{}
+	if o.IssuerURL == "" {
+		missing = append(missing, "issuer_url")
+	}
+	if o.ClientID == "" {
+		missing = append(missing, "client_id")
+	}
+	if o.ClientSecret == "" {
+		missing = append(missing, "client_secret")
+	}
+	if o.RedirectURL == "" {
+		missing = append(missing, "redirect_url")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("%w: console.oidc partially set; missing: %s",
+			ErrInvalidConfig, strings.Join(missing, ", "))
+	}
+	if len(o.RoleMappings) == 0 {
+		return fmt.Errorf("%w: console.oidc.role_mappings required when SSO enabled (no IdP claim → no role grant)",
+			ErrInvalidConfig)
+	}
+	for claim, role := range o.RoleMappings {
+		switch role {
+		case "viewer", "analyst", "admin":
+		default:
+			return fmt.Errorf("%w: console.oidc.role_mappings[%q]=%q invalid (valid: viewer, analyst, admin)",
+				ErrInvalidConfig, claim, role)
+		}
 	}
 	return nil
 }

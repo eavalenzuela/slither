@@ -1558,7 +1558,7 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
    CHErrorDegrades,InvertedWindowSkipsCount,PGErrorSurfaces}` cover
    the audit-firing + degradation paths.)*
 
-10. **#113 — Console SSO (OIDC) backend (closes §10.7).** New
+10. ✅ **#113 — Console SSO (OIDC) backend (closes §10.7).** New
     `server/internal/console/oidc.go` with the standard
     `golang.org/x/oauth2` + `github.com/coreos/go-oidc/v3` pair.
     Auth-code flow with PKCE; discover via `well_known_url` config.
@@ -1580,6 +1580,35 @@ multi-arch buildx + live k8s validation closing #93's deferred piece.
     created on first login with role from claim, role mapping
     persists across logins, IdP-down fallback to local-user login
     still works.
+    *(Shipped 2026-05-05. New `server/internal/console/oidc.go`
+    implements auth-code flow with PKCE (RFC 7636 §4.2 S256 challenge),
+    state + nonce binding, and rotated session tokens after
+    successful auth. Provider discovery via go-oidc has a 10s timeout
+    and degrades gracefully — discovery failure logs + leaves SSO off
+    rather than blocking server boot, since refusing boot would lock
+    every operator out for a transient IdP blip. Migration
+    `00019_users_oidc.sql` adds `users.oidc_subject text UNIQUE` and
+    relaxes `password_hash` to nullable, gated by a CHECK constraint
+    requiring at least one of (password_hash, oidc_subject). pg
+    helpers: `GetUserByOIDCSubject`, `InsertOIDCUser` (returns
+    `ErrUserExists` on collision), `UpdateUserRole` (refreshes role
+    on subsequent SSO logins when the IdP claim mapping changes).
+    Config: `console.oidc` block with `issuer_url`, `client_id`,
+    `client_secret`, `redirect_url`, `scopes` (default openid + email
+    + profile), `role_claim` (default "groups"), `role_mappings`
+    (claim-value → role), `username_claim` (default "email").
+    Validation refuses partial blocks at boot (issuer set but
+    client_id blank → clean error). Audit:
+    `auth.oidc.success`/`auth.oidc.failure` with reason codes
+    (state_mismatch, state_expired, nonce_mismatch, exchange_failed,
+    id_token_invalid, no_role_mapping, username_collision,
+    insert_failed, lookup_failed). Login page renders "Sign in with
+    SSO" button only when `s.oidc != nil`. 11 unit tests cover role
+    mapping (string/array/[]any/[]string variants, first-match
+    wins, no-match, missing claim), PKCE S256 against the RFC 7636
+    sample, randomness uniqueness, claim helpers, and 5 config
+    validation paths (partial block, missing role_mappings, bad role,
+    full block accepted, empty block accepted).)*
 
 11. **#114 — Live process-tree explorer (closes ADR-0024 deferral).**
     Replaces the SSR mini-graph (#65) on the alert-detail page with

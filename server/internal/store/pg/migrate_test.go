@@ -33,6 +33,7 @@ func TestEmbeddedMigrationsPresent(t *testing.T) {
 		"00016_hosts_mgmt_subnet.sql",
 		"00017_hunts.sql",
 		"00018_chain_summaries.sql",
+		"00019_users_oidc.sql",
 	}
 	got, err := fs.Glob(migrations.FS, "*.sql")
 	if err != nil {

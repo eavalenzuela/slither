@@ -262,3 +262,27 @@ button.danger:hover { background: #ff9c9c; }
 .alert-status-failed           { background: #4a2c2c; color: #f08080; }
 .alert-status-denied_by_policy { background: #4a3f1f; color: #f0c674; }
 .alert-status-reverted         { background: #3a3a4a; color: #aaa9d9; }
+
+/* Phase 6 #113 — SSO button on the login page. Sits below the
+   primary username/password form, separated by a thin divider. */
+.login-sso {
+    margin-top: 1.25rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid #3a4a5e;
+    text-align: center;
+}
+.login-sso p.muted { margin: 0 0 0.5rem 0; }
+.btn-sso {
+    display: inline-block;
+    padding: 0.5rem 1rem;
+    background: #1f3a5e;
+    color: #d3d8e0;
+    border: 1px solid #3a4a5e;
+    border-radius: 4px;
+    text-decoration: none;
+}
+.btn-sso:hover { background: #2c4a6e; }
+
+/* Phase 6 #112 — chain-summary row highlighting on /hosts/{id}/chain-status. */
+.row-mismatch { background: #4a2c2c; }
+.alert-status-ok { background: #1f4738; color: #6dd9a3; }

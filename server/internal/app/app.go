@@ -196,6 +196,19 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		// snapshot blobs under <ArtefactDir>/<alert_id>/*.tgz. Same
 		// dir the dispatcher writes to.
 		ArtefactDir: artefactsDir(cfg.Console.ArtefactsDir),
+		// Phase 6 #113 — Console SSO. Empty config → SSO off; the
+		// /login page renders without the SSO button and the OIDC
+		// routes 404. Validate() at boot rejects partial blocks.
+		OIDC: console.ConsoleOIDC{
+			IssuerURL:     cfg.Console.OIDC.IssuerURL,
+			ClientID:      cfg.Console.OIDC.ClientID,
+			ClientSecret:  cfg.Console.OIDC.ClientSecret,
+			RedirectURL:   cfg.Console.OIDC.RedirectURL,
+			Scopes:        cfg.Console.OIDC.Scopes,
+			RoleClaim:     cfg.Console.OIDC.RoleClaim,
+			RoleMappings:  cfg.Console.OIDC.RoleMappings,
+			UsernameClaim: cfg.Console.OIDC.UsernameClaim,
+		},
 	})
 	consoleSrv := &http.Server{
 		Addr:              cfg.Listeners.Console,

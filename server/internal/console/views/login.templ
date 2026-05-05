@@ -24,6 +24,12 @@ templ Login(d LoginData) {
 					<input id="password" name="password" type="password" autocomplete="current-password"/>
 					<button type="submit">Sign in</button>
 				</form>
+				if d.SSOEnabled {
+					<div class="login-sso">
+						<p class="muted">or</p>
+						<a class="btn btn-sso" href="/oidc/login">Sign in with SSO</a>
+					</div>
+				}
 			</div>
 		</body>
 	</html>
