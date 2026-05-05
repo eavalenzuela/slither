@@ -1,0 +1,7 @@
+{
+  "name": "nf_conntrack",
+  "size": "163840",
+  "used_by": "nf_nat,nf_conntrack_netlink",
+  "status": "Live",
+  "address": "0xffffffffc0500000"
+}

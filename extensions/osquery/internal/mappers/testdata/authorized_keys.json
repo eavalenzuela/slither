@@ -1,0 +1,7 @@
+{
+  "uid": "0",
+  "algorithm": "ssh-ed25519",
+  "key": "AAAAC3NzaC1lZDI1NTE5AAAAI...",
+  "key_file": "/root/.ssh/authorized_keys",
+  "comment": "ops@deploy"
+}

@@ -1,0 +1,18 @@
+{
+  "pid": "12345",
+  "path": "/usr/bin/sshd",
+  "cmdline": "sshd -D",
+  "ctime": "1714502400",
+  "atime": "1714502400",
+  "mtime": "1714502400",
+  "uid": "0",
+  "gid": "0",
+  "euid": "0",
+  "egid": "0",
+  "owner_uid": "0",
+  "parent": "1",
+  "syscall": "execve",
+  "cwd": "/",
+  "time": "1714502400",
+  "eid": "1"
+}

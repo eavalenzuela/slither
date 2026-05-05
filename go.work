@@ -9,6 +9,7 @@ toolchain go1.25.0
 
 use (
 	./agent
+	./extensions/osquery
 	./pkg
 	./proto
 	./server

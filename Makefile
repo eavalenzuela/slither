@@ -37,7 +37,7 @@ LDFLAGS := -s -w -X github.com/t3rmit3/slither/pkg/version.Version=$(VERSION)
 # the byte-for-byte invariant by building twice and diffing.
 GO_BUILD_FLAGS := -trimpath -buildvcs=true -mod=readonly -ldflags='$(LDFLAGS)'
 
-GO_MODULES := pkg agent server
+GO_MODULES := pkg agent server extensions/osquery
 
 # ----------------------------------------------------------------------------
 # Help
@@ -110,7 +110,12 @@ verify-gen: ## Fail if `make gen` would produce a diff (CI guard)
 # ----------------------------------------------------------------------------
 
 .PHONY: build
-build: build-agent build-server build-db build-ch ## Build all binaries
+build: build-agent build-server build-db build-ch build-ext-osquery ## Build all binaries
+
+.PHONY: build-ext-osquery
+build-ext-osquery: ## Build slither-ext-osquery (Phase 6 #109) → bin/
+	@mkdir -p $(BIN)
+	@cd extensions/osquery && CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(BIN)/slither-ext-osquery ./cmd/slither-ext-osquery
 
 .PHONY: build-agent
 build-agent: ## Build slither-agent → bin/
@@ -138,14 +143,14 @@ verify-reproducible: ## Phase 5 #89 — build twice, assert bin/* are byte-ident
 	tmp=$$(mktemp -d); \
 	echo "▶ first build"; \
 	$(MAKE) --no-print-directory build >/dev/null; \
-	for f in $(BIN)/slither-agent $(BIN)/slither-server $(BIN)/slither-db $(BIN)/slither-ch; do \
+	for f in $(BIN)/slither-agent $(BIN)/slither-server $(BIN)/slither-db $(BIN)/slither-ch $(BIN)/slither-ext-osquery; do \
 		cp "$$f" "$$tmp/$$(basename $$f).1"; \
 	done; \
 	echo "▶ second build"; \
-	rm -f $(BIN)/slither-agent $(BIN)/slither-server $(BIN)/slither-db $(BIN)/slither-ch; \
+	rm -f $(BIN)/slither-agent $(BIN)/slither-server $(BIN)/slither-db $(BIN)/slither-ch $(BIN)/slither-ext-osquery; \
 	$(MAKE) --no-print-directory build >/dev/null; \
 	fail=0; \
-	for f in $(BIN)/slither-agent $(BIN)/slither-server $(BIN)/slither-db $(BIN)/slither-ch; do \
+	for f in $(BIN)/slither-agent $(BIN)/slither-server $(BIN)/slither-db $(BIN)/slither-ch $(BIN)/slither-ext-osquery; do \
 		base=$$(basename $$f); \
 		s1=$$(sha256sum "$$tmp/$$base.1" | cut -d' ' -f1); \
 		s2=$$(sha256sum "$$f" | cut -d' ' -f1); \

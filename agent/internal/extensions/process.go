@@ -313,6 +313,22 @@ func (p *Process) stampAndDecode(emitted *pb.OCSFEvent) ocsf.Event {
 		}
 		ev.Metadata.Product.Name = p.cfg.Name + " (extension)"
 		return &ev
+	case pb.OcsfClassId_OCSF_CLASS_ID_KERNEL_ACTIVITY:
+		// Phase 6 #109 — added when the osquery bridge began emitting
+		// kernel_modules events. Pre-#109 extensions never emitted this
+		// class; no compat concern.
+		var ev ocsf.KernelActivity
+		if err := json.Unmarshal(emitted.Payload, &ev); err != nil {
+			slog.Warn("ext: ocsf decode failed", "ext", p.cfg.Name, "class", "kernel_activity", "err", err)
+			return nil
+		}
+		ev.Device = p.device
+		ev.Time = ocsf.TimeOCSF(now.UnixMilli())
+		if ev.ClassUID == 0 {
+			ev.ClassUID = ocsf.ClassKernelActivity
+		}
+		ev.Metadata.Product.Name = p.cfg.Name + " (extension)"
+		return &ev
 	}
 	slog.Warn("ext: dropping ocsf event with unsupported class",
 		"ext", p.cfg.Name,

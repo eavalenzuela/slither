@@ -460,7 +460,74 @@ in place will produce a steady drip of restart attempts that operators
 should remediate (replace the binary or the sidecars with a freshly
 signed copy).
 
-### 6.4 Operators with downstream forks
+### 6.4 Reference extension: `slither-ext-osquery` (Phase 6 #109)
+
+The osquery bridge polls a running osqueryd daemon for a curated set of
+tables and forwards each row as an OCSF event over the supervised wire.
+Bundled with the agent release; not bundled with osqueryd itself
+(ADR-0028 — the operator picks osquery's release channel).
+
+**Prerequisites.** Install osqueryd separately via your distro
+package (`apt install osquery` / `dnf install osquery`) or via
+osquery's own deb/rpm. Confirm the daemon is up:
+
+```bash
+sudo systemctl status osqueryd
+ls -la /var/osquery/osquery.em       # the extension socket the bridge talks to
+```
+
+Inventory tables (`listening_ports`, `kernel_modules`, `ssh_keys`,
+`authorized_keys`) work out of the box. Event tables (`process_events`,
+`socket_events`, `file_events`) require osqueryd's audit subscribers
+enabled — confirm in `/etc/osquery/osquery.conf`:
+
+```jsonc
+{
+  "options": {
+    "disable_audit":            "false",
+    "audit_allow_config":       "true",
+    "audit_allow_process_events": "true",
+    "audit_allow_sockets":      "true"
+  },
+  "schedule": { /* leave empty — the bridge drives polls itself */ }
+}
+```
+
+**Install the bridge binary** following §6.1, then declare it as an
+extension:
+
+```yaml
+extensions:
+  - name: osquery
+    binary_path: /usr/lib/slither/extensions/slither-ext-osquery
+    capabilities:
+      - ocsf_emit
+      - live_query_respond
+```
+
+The bridge picks `/var/osquery/osquery.em` by default. Override via the
+binary's `--socket` flag if osqueryd is configured differently — the
+agent supervisor today does not pass extra args; for a non-default
+socket, ship a wrapper script as `binary_path` that exec's the bridge
+with the right flag, or wait for #110 (live-query) which adds an
+`args:` field to the extension config schema.
+
+**Verify.** After restart, look for OCSF events under
+`metadata.product.name = "osquery (extension)"`:
+
+```sql
+-- ClickHouse
+SELECT class_uid, JSONExtractString(payload, 'metadata', 'product', 'name') AS source
+FROM ocsf_events_raw
+WHERE source LIKE 'osquery%'
+ORDER BY observed_at DESC
+LIMIT 10;
+```
+
+A `process_events` row from osqueryd lands as
+`class_uid=1007` with `metadata.product.name="osquery (extension)"`.
+
+### 6.5 Operators with downstream forks
 
 If your release pipeline signs against a different identity, override
 the trust root per-extension:

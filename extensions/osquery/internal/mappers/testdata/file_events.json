@@ -1,0 +1,20 @@
+{
+  "target_path": "/etc/passwd",
+  "category": "homes",
+  "action": "UPDATED",
+  "transaction_id": "12",
+  "inode": "65",
+  "uid": "0",
+  "gid": "0",
+  "mode": "0644",
+  "size": "1234",
+  "atime": "1714502400",
+  "mtime": "1714502400",
+  "ctime": "1714502400",
+  "md5": "",
+  "sha1": "",
+  "sha256": "abc123",
+  "hashed": "1",
+  "time": "1714502400",
+  "eid": "5"
+}

@@ -82,6 +82,12 @@ jobs:
         # the rest (-trimpath -buildvcs=true -mod=readonly + -ldflags)
         # mirrors GO_BUILD_FLAGS so release artefacts inherit the same
         # reproducibility properties verify-reproducible asserts.
+        #
+        # Phase 6 #109 — slither-ext-osquery joins the cross-compile
+        # loop. Different module path (extensions/osquery/cmd/...) so
+        # we treat it as a third top-level binary alongside agent +
+        # server. Bundled into its own tarball so operators can drop
+        # the bridge onto a host that runs an older agent.
         run: |
           mkdir -p dist
           for arch in amd64 arm64; do
@@ -95,6 +101,15 @@ jobs:
               cp LICENSE README.md "$dir/"
               tar -C dist -czf "$dir.tar.gz" "$(basename $dir)"
             done
+            # Extension: slither-ext-osquery (Phase 6 #109).
+            ext_dir="dist/slither-ext-osquery-linux-$arch"
+            mkdir -p "$ext_dir"
+            (cd extensions/osquery && GOOS=linux GOARCH=$arch CGO_ENABLED=0 \
+              go build -trimpath -buildvcs=true -mod=readonly \
+                -ldflags="-s -w -X main.version=$VERSION" \
+                -o "../../$ext_dir/slither-ext-osquery" ./cmd/slither-ext-osquery)
+            cp LICENSE "$ext_dir/"
+            tar -C dist -czf "$ext_dir.tar.gz" "$(basename $ext_dir)"
           done
 
       - name: Build deb + rpm packages (Phase 5 #92)

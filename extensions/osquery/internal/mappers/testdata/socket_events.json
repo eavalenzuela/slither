@@ -1,0 +1,17 @@
+{
+  "action": "connect",
+  "pid": "999",
+  "path": "/usr/bin/curl",
+  "fd": "3",
+  "auid": "1000",
+  "uid": "1000",
+  "family": "2",
+  "protocol": "6",
+  "local_address": "10.0.0.5",
+  "remote_address": "1.2.3.4",
+  "local_port": "55432",
+  "remote_port": "443",
+  "socket": "1",
+  "time": "1714502400",
+  "status": "succeeded"
+}
