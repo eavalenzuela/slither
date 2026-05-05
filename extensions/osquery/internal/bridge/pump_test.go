@@ -159,30 +159,109 @@ func TestPump_ClientUnavailableLogsAndContinues(t *testing.T) {
 	}
 }
 
-func TestPump_HandleAgentMessage_LiveQueryAcksWithNotImplemented(t *testing.T) {
+func TestPump_HandleAgentMessage_LiveQueryStreamsRowsAndComplete(t *testing.T) {
+	fake := &fakeClient{
+		rowsByTbl: map[string][]Row{
+			"listening_ports": {
+				{"port": "22", "address": "0.0.0.0"},
+				{"port": "443", "address": "0.0.0.0"},
+			},
+		},
+	}
 	send, got := recordingSender()
-	pump := NewPump(&fakeClient{}, nil, time.Hour, send)
+	pump := NewPump(fake, nil, time.Hour, send)
 	msg := &pb.AgentToExtension{
 		Payload: &pb.AgentToExtension_LiveQueryRequest{
-			LiveQueryRequest: &pb.LiveQueryRequest{QueryId: "q1", Sql: "SELECT 1"},
+			LiveQueryRequest: &pb.LiveQueryRequest{
+				QueryId:     "q1",
+				Sql:         "SELECT * FROM listening_ports",
+				MaxRows:     10,
+				TimeoutSecs: 5,
+			},
 		},
 	}
 	if err := pump.HandleAgentMessage(context.Background(), msg); err != nil {
 		t.Fatalf("HandleAgentMessage: %v", err)
 	}
+	// 2 rows + 1 complete = 3 envelopes
+	if len(*got) != 3 {
+		t.Fatalf("expected 3 envelopes (2 rows + 1 complete), got %d", len(*got))
+	}
+	complete := (*got)[2].GetLiveQueryComplete()
+	if complete == nil {
+		t.Fatal("expected last envelope to be LiveQueryComplete")
+		return
+	}
+	if complete.RowCount != 2 {
+		t.Errorf("complete.row_count=%d, want 2", complete.RowCount)
+	}
+	if complete.Error != "" {
+		t.Errorf("complete.error=%q, want empty", complete.Error)
+	}
+	row0 := (*got)[0].GetLiveQueryRow()
+	if row0 == nil || row0.QueryId != "q1" {
+		t.Errorf("row 0 wrong: %+v", row0)
+	}
+}
+
+func TestPump_HandleAgentMessage_LiveQueryRowCapTruncates(t *testing.T) {
+	fake := &fakeClient{
+		rowsByTbl: map[string][]Row{
+			"listening_ports": {
+				{"port": "1"},
+				{"port": "2"},
+				{"port": "3"},
+			},
+		},
+	}
+	send, got := recordingSender()
+	pump := NewPump(fake, nil, time.Hour, send)
+	msg := &pb.AgentToExtension{
+		Payload: &pb.AgentToExtension_LiveQueryRequest{
+			LiveQueryRequest: &pb.LiveQueryRequest{
+				QueryId: "q1",
+				Sql:     "SELECT * FROM listening_ports",
+				MaxRows: 2,
+			},
+		},
+	}
+	if err := pump.HandleAgentMessage(context.Background(), msg); err != nil {
+		t.Fatalf("HandleAgentMessage: %v", err)
+	}
+	// 2 rows (capped) + 1 complete = 3 envelopes
+	if len(*got) != 3 {
+		t.Fatalf("expected 3 envelopes (2 rows + complete), got %d", len(*got))
+	}
+	complete := (*got)[2].GetLiveQueryComplete()
+	if complete == nil {
+		t.Fatal("expected LiveQueryComplete")
+		return
+	}
+	if complete.RowCount != 2 {
+		t.Errorf("row_count=%d, want 2 (cap)", complete.RowCount)
+	}
+}
+
+func TestPump_HandleAgentMessage_LiveQueryClientError(t *testing.T) {
+	fake := &fakeClient{err: errors.New("osqueryi died")}
+	send, got := recordingSender()
+	pump := NewPump(fake, nil, time.Hour, send)
+	msg := &pb.AgentToExtension{
+		Payload: &pb.AgentToExtension_LiveQueryRequest{
+			LiveQueryRequest: &pb.LiveQueryRequest{QueryId: "q1", Sql: "SELECT 1"},
+		},
+	}
+	_ = pump.HandleAgentMessage(context.Background(), msg)
 	if len(*got) != 1 {
-		t.Fatalf("expected 1 ack, got %d", len(*got))
+		t.Fatalf("expected 1 envelope (terminal complete), got %d", len(*got))
 	}
 	complete := (*got)[0].GetLiveQueryComplete()
 	if complete == nil {
 		t.Fatal("expected LiveQueryComplete")
 		return
 	}
-	if complete.QueryId != "q1" {
-		t.Errorf("query_id=%q", complete.QueryId)
-	}
-	if !strings.Contains(complete.Error, "#110") {
-		t.Errorf("expected #110 reference in error, got %q", complete.Error)
+	if !strings.Contains(complete.Error, "osqueryi died") {
+		t.Errorf("expected client error in Error, got %q", complete.Error)
 	}
 }
 

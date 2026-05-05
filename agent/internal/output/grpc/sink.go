@@ -79,6 +79,13 @@ type Options struct {
 	// agent's backpressure.Cache. Must be non-blocking.
 	OnBackpressure func(*pb.BackpressureSignal)
 
+	// OnHuntQuery, when non-nil, is called for every server-pushed
+	// HuntQuery (Phase 6 #110). Production wires this to a hunt
+	// dispatcher that forwards to the extension supervisor's
+	// LIVE_QUERY_RESPOND-capable extension and writes back to the
+	// sink's HuntResults channel. Must be non-blocking.
+	OnHuntQuery func(*pb.HuntQuery)
+
 	// Backpressure, when non-nil, is consulted on every event in
 	// ingest() to decide whether to keep or sample-drop it. Phase
 	// 5 #97. Same Cache the OnBackpressure callback writes to (the
@@ -122,6 +129,14 @@ type Sink struct {
 	// blocking; if the channel saturates the executor counts a
 	// response_exec_result_dropped via telemetry.
 	results chan *pb.ResponseResult
+
+	// huntResults carries HuntResult chunks emitted by the agent's
+	// hunt dispatcher (Phase 6 #110). Capacity sized to absorb a
+	// single hunt's row stream — at the default per-host max (10k
+	// rows / chunk size 256) the dispatcher emits ~40 chunks; a
+	// queue of 64 absorbs that without blocking the dispatcher's
+	// inner loop on a slow stream.Send.
+	huntResults chan *pb.HuntResult
 }
 
 // New constructs a Sink. Reads host_id from disk up-front — a sink
@@ -145,14 +160,21 @@ func New(opts Options, telem *telemetry.Counters) (*Sink, error) {
 	}
 
 	return &Sink{
-		opts:    opts,
-		telem:   telem,
-		hostID:  hostID,
-		buf:     make(chan *pb.Envelope, opts.BufferSize),
-		diags:   make(chan *pb.DiagReport, 8),
-		results: make(chan *pb.ResponseResult, 16),
+		opts:        opts,
+		telem:       telem,
+		hostID:      hostID,
+		buf:         make(chan *pb.Envelope, opts.BufferSize),
+		diags:       make(chan *pb.DiagReport, 8),
+		results:     make(chan *pb.ResponseResult, 16),
+		huntResults: make(chan *pb.HuntResult, 64),
 	}, nil
 }
+
+// HuntResults returns the dispatcher → sink pipe. Phase 6 #110 wires
+// this so the hunt dispatcher pushes HuntResult chunks here; the
+// session goroutine fans onto stream.Send under the same gRPC
+// non-concurrent-send contract that #75 codified.
+func (s *Sink) HuntResults() chan<- *pb.HuntResult { return s.huntResults }
 
 // Results returns the executor → sink pipe. Phase 4 #77 wires this
 // into respond.New so handlers push their ResponseResult here; the
@@ -380,6 +402,12 @@ func (s *Sink) runSession(ctx context.Context, client pb.AgentServiceClient) err
 			}); err != nil {
 				return err
 			}
+		case hr := <-s.huntResults:
+			if err := stream.Send(&pb.ClientMessage{
+				Kind: &pb.ClientMessage_HuntResult{HuntResult: hr},
+			}); err != nil {
+				return err
+			}
 		case <-hb.C:
 			if err := stream.Send(&pb.ClientMessage{
 				Kind: &pb.ClientMessage_Heartbeat{
@@ -430,6 +458,14 @@ func (s *Sink) handleServerMessage(msg *pb.ServerMessage) {
 		// the agent's cache; collectors consult it on the hot path.
 		if s.opts.OnBackpressure != nil && k.Backpressure != nil {
 			s.opts.OnBackpressure(k.Backpressure)
+		}
+	case *pb.ServerMessage_HuntQuery:
+		// Phase 6 #110 — server-pushed live-query hunt. Forward to the
+		// hunt dispatcher (production wires huntdispatch.New); the
+		// dispatcher writes back to s.huntResults asynchronously so
+		// this Recv goroutine isn't stalled on extension I/O.
+		if s.opts.OnHuntQuery != nil && k.HuntQuery != nil {
+			s.opts.OnHuntQuery(k.HuntQuery)
 		}
 	}
 }

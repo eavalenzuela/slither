@@ -62,6 +62,16 @@ type BackpressureHub interface {
 	Subscribe(name string) (<-chan *pb.BackpressureSignal, func())
 }
 
+// HuntHub is the live-query hunt fan-out (Phase 6 #110). Subscribe
+// returns the per-host pending HuntQuery channel (filled by Dispatch
+// when host_filter matches); OnResult ingests one HuntResult chunk
+// from the agent — buffers rows into ClickHouse and bumps
+// completed_host_count when the chunk's complete is set.
+type HuntHub interface {
+	Subscribe(hostID string) (<-chan *pb.HuntQuery, func())
+	OnResult(ctx context.Context, hostID string, result *pb.HuntResult) error
+}
+
 // SessionService implements AgentService.Session. It embeds
 // UnimplementedAgentServiceServer so it satisfies AgentServiceServer
 // with Enroll left unimplemented — the two halves of AgentService run
@@ -78,6 +88,7 @@ type SessionService struct {
 	ResponseHub     ResponseHub     // optional; nil disables response dispatch
 	PolicyHub       PolicyHub       // optional; nil disables host-policy push
 	BackpressureHub BackpressureHub // optional; nil disables backpressure push
+	HuntHub         HuntHub         // optional; nil disables live-query hunt dispatch
 
 	// PeerHostIDExtractor is overridable for tests that route through
 	// bufconn without real client certs. Production leaves it nil and
@@ -133,7 +144,7 @@ func (s *SessionService) Session(stream pb.AgentService_SessionServer) error {
 	// by cancelling sendCtx on its own return.
 	sendCtx, cancelSend := context.WithCancel(ctx)
 	var sendWG sync.WaitGroup
-	if s.RuleHub != nil || s.ResponseHub != nil || s.PolicyHub != nil || s.BackpressureHub != nil {
+	if s.RuleHub != nil || s.ResponseHub != nil || s.PolicyHub != nil || s.BackpressureHub != nil || s.HuntHub != nil {
 		sendWG.Add(1)
 		go func() {
 			defer sendWG.Done()
@@ -192,6 +203,13 @@ func (s *SessionService) runSendLoop(sendCtx context.Context, hostID string, str
 	if s.BackpressureHub != nil {
 		bpUpdates, bpUnsubscribe = s.BackpressureHub.Subscribe(subName)
 		defer bpUnsubscribe()
+	}
+
+	var huntUpdates <-chan *pb.HuntQuery
+	var huntUnsubscribe func()
+	if s.HuntHub != nil {
+		huntUpdates, huntUnsubscribe = s.HuntHub.Subscribe(hostID)
+		defer huntUnsubscribe()
 	}
 
 	for {
@@ -266,6 +284,23 @@ func (s *SessionService) runSendLoop(sendCtx context.Context, hostID string, str
 				"host_id", hostID,
 				"level", sig.GetLevel().String(),
 				"observed_drop_rate", sig.GetObservedDropRate())
+		case q, ok := <-huntUpdates:
+			if !ok {
+				huntUpdates = nil
+				continue
+			}
+			if q == nil {
+				continue
+			}
+			if err := stream.Send(&pb.ServerMessage{
+				Kind: &pb.ServerMessage_HuntQuery{HuntQuery: q},
+			}); err != nil {
+				return
+			}
+			slog.Info("hunt: sent",
+				"host_id", hostID,
+				"hunt_id", q.GetControlId(),
+				"backend", q.GetBackend().String())
 		}
 	}
 }
@@ -300,6 +335,18 @@ func (s *SessionService) handle(ctx context.Context, hostID string, msg *pb.Clie
 				slog.Warn("respond: result handling failed",
 					"host_id", hostID,
 					"action_id", k.ResponseResult.GetControlId(),
+					"err", err)
+			}
+		}
+	case *pb.ClientMessage_HuntResult:
+		// Phase 6 #110: one chunk of a live-query hunt response.
+		// HuntHub.OnResult buffers rows into ClickHouse and bumps
+		// completed_host_count when complete arrives.
+		if s.HuntHub != nil && k.HuntResult != nil {
+			if err := s.HuntHub.OnResult(ctx, hostID, k.HuntResult); err != nil {
+				slog.Warn("hunt: result handling failed",
+					"host_id", hostID,
+					"hunt_id", k.HuntResult.GetControlId(),
 					"err", err)
 			}
 		}

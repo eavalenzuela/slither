@@ -26,6 +26,7 @@ import (
 	"github.com/t3rmit3/slither/server/internal/console/views"
 	"github.com/t3rmit3/slither/server/internal/detect"
 	"github.com/t3rmit3/slither/server/internal/graph"
+	"github.com/t3rmit3/slither/server/internal/hunt"
 	"github.com/t3rmit3/slither/server/internal/ingest"
 	"github.com/t3rmit3/slither/server/internal/respond"
 	"github.com/t3rmit3/slither/server/internal/store/ch"
@@ -59,6 +60,10 @@ type Options struct {
 	// alert response button POST returns 503 cleanly rather than
 	// trying to dispatch.
 	ResponseHub *respond.Hub
+	// HuntHub dispatches operator-driven live-query hunts onto
+	// per-host send queues (Phase 6 #110). Optional — when nil the
+	// /hunt POST returns 503 and the page renders read-only history.
+	HuntHub *hunt.Hub
 }
 
 // Server is the chi.Router built around Options. New returns a stdlib
@@ -75,6 +80,7 @@ type Server struct {
 	graphBuilder        *detect.FlowGraphBuilder
 	processTreeBuilder  *detect.ProcessTreeBuilder
 	responseHub         *respond.Hub
+	huntHub             *hunt.Hub
 }
 
 // New constructs the console router. Panics on misconfiguration — a
@@ -112,6 +118,7 @@ func New(opts Options) *Server {
 		defaultEnrollServer: opts.DefaultEnrollServer,
 		graphCache:          opts.GraphCache,
 		responseHub:         opts.ResponseHub,
+		huntHub:             opts.HuntHub,
 	}
 	if opts.GraphCache != nil && opts.ChStore != nil {
 		s.graphBuilder = &detect.FlowGraphBuilder{Lookup: opts.ChStore}
@@ -203,6 +210,15 @@ func (s *Server) routes() {
 		// path's role policy.
 		r.With(s.RequireRole(pg.RoleAnalyst, pg.RoleAdmin)).
 			Post("/responses/{action_id}/revert", s.responseActionRevert)
+
+		// Phase 6 #110: live-query hunts. List + detail are viewer-
+		// readable so analysts can review history; dispatch is
+		// analyst+admin gated.
+		r.Get("/hunt", s.huntList)
+		r.Get("/hunt/{id}", s.huntDetail)
+		r.Get("/hunt/{id}.csv", s.huntCSV)
+		r.With(s.RequireRole(pg.RoleAnalyst, pg.RoleAdmin)).
+			Post("/hunt", s.huntDispatch)
 
 		// Enrolment-token UX (#45) — admin-only across the board.
 		r.With(s.RequireRole(pg.RoleAdmin)).Group(func(r chi.Router) {

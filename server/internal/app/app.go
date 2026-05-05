@@ -35,6 +35,7 @@ import (
 	"github.com/t3rmit3/slither/server/internal/detect"
 	"github.com/t3rmit3/slither/server/internal/graph"
 	"github.com/t3rmit3/slither/server/internal/grpcserv"
+	"github.com/t3rmit3/slither/server/internal/hunt"
 	"github.com/t3rmit3/slither/server/internal/ingest"
 	"github.com/t3rmit3/slither/server/internal/ioc"
 	"github.com/t3rmit3/slither/server/internal/mtls"
@@ -119,6 +120,9 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	// --- Fleet-global backpressure push (Phase 5 #97) ---
 	bpHub := control.NewBackpressureHub()
 
+	// --- Live-query hunt fan-out (Phase 6 #110) ---
+	huntHub := hunt.NewHub(pgStore, chStore, pgStore)
+
 	// --- gRPC services ---
 	enrollSvc := grpcserv.NewEnrollService(pgStore, ca, telem)
 	sessionSvc := grpcserv.NewSessionService(pgStore, bus, telem)
@@ -126,6 +130,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	sessionSvc.ResponseHub = responseHub
 	sessionSvc.PolicyHub = policyHub
 	sessionSvc.BackpressureHub = bpHub
+	sessionSvc.HuntHub = huntHub
 
 	enrollSrv := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(mtls.ServerEnrollTLSConfig(serverCert))),
@@ -181,6 +186,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		DefaultEnrollServer: defaultEnrollServer(cfg.Listeners.Enroll),
 		GraphCache:          graphCache,
 		ResponseHub:         responseHub,
+		HuntHub:             huntHub,
 	})
 	consoleSrv := &http.Server{
 		Addr:              cfg.Listeners.Console,

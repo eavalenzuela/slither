@@ -202,25 +202,23 @@ func (ts TableSpec) advancesCursor() bool {
 	return strings.Contains(ts.SQL, "{since}")
 }
 
-// HandleAgentMessage processes one AgentToExtension envelope. Phase 6
-// #109 stubs both LiveQueryRequest and SnapshotRequest with a
-// terminal "not implemented" complete so the server's hunt /
-// snapshot machinery doesn't stall waiting forever. Real handling
-// lands in #110 (live-query) and a Phase 7 snapshot extension.
+// HandleAgentMessage processes one AgentToExtension envelope.
+//
+// Phase 6 #110: LiveQueryRequest runs the supplied SQL via the bridge's
+// Client (osqueryi default), streams each row as one LiveQueryRow, and
+// terminates with LiveQueryComplete. Respects max_rows (silently
+// truncates beyond cap; agent's hunt dispatcher stamps the truncation
+// error into HuntResult.complete) and timeout_secs (per-request ctx
+// timeout).
+//
+// SnapshotRequest is refused — the osquery bridge does not declare
+// CAPABILITY_SNAPSHOT_PROVIDE; the agent's supervisor shouldn't
+// forward one but a defensive ack means the (theoretical) caller
+// doesn't hang.
 func (p *Pump) HandleAgentMessage(ctx context.Context, msg *pb.AgentToExtension) error {
 	switch payload := msg.Payload.(type) {
 	case *pb.AgentToExtension_LiveQueryRequest:
-		req := payload.LiveQueryRequest
-		complete := &pb.ExtensionToAgent{
-			Payload: &pb.ExtensionToAgent_LiveQueryComplete{
-				LiveQueryComplete: &pb.LiveQueryComplete{
-					QueryId:  req.QueryId,
-					RowCount: 0,
-					Error:    "live-query handler pending (#110)",
-				},
-			},
-		}
-		return p.send(complete)
+		return p.handleLiveQuery(ctx, payload.LiveQueryRequest)
 	case *pb.AgentToExtension_SnapshotRequest:
 		req := payload.SnapshotRequest
 		complete := &pb.ExtensionToAgent{
@@ -234,6 +232,69 @@ func (p *Pump) HandleAgentMessage(ctx context.Context, msg *pb.AgentToExtension)
 		return p.send(complete)
 	}
 	return nil
+}
+
+// handleLiveQuery runs one LiveQueryRequest end-to-end. Returns nil
+// once the terminal LiveQueryComplete has been sent (or attempted).
+func (p *Pump) handleLiveQuery(ctx context.Context, req *pb.LiveQueryRequest) error {
+	queryID := req.GetQueryId()
+	timeout := time.Duration(req.GetTimeoutSecs()) * time.Second
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+	qctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	rows, err := p.client.QueryRows(qctx, req.GetSql())
+	if err != nil {
+		return p.send(&pb.ExtensionToAgent{
+			Payload: &pb.ExtensionToAgent_LiveQueryComplete{
+				LiveQueryComplete: &pb.LiveQueryComplete{
+					QueryId:  queryID,
+					RowCount: 0,
+					Error:    err.Error(),
+				},
+			},
+		})
+	}
+
+	maxRows := uint64(req.GetMaxRows())
+	if maxRows == 0 {
+		maxRows = 10000
+	}
+	emitted := uint64(0)
+	for _, row := range rows {
+		if emitted >= maxRows {
+			break
+		}
+		cols := make([]string, 0, len(row))
+		vals := make([]string, 0, len(row))
+		for k, v := range row {
+			cols = append(cols, k)
+			vals = append(vals, v)
+		}
+		if err := p.send(&pb.ExtensionToAgent{
+			Payload: &pb.ExtensionToAgent_LiveQueryRow{
+				LiveQueryRow: &pb.LiveQueryRow{
+					QueryId: queryID,
+					Columns: cols,
+					Values:  vals,
+				},
+			},
+		}); err != nil {
+			return err
+		}
+		emitted++
+	}
+
+	return p.send(&pb.ExtensionToAgent{
+		Payload: &pb.ExtensionToAgent_LiveQueryComplete{
+			LiveQueryComplete: &pb.LiveQueryComplete{
+				QueryId:  queryID,
+				RowCount: emitted,
+			},
+		},
+	})
 }
 
 // SendHello composes the osquery bridge's Hello and writes it as the

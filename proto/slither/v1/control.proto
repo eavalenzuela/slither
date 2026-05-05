@@ -150,18 +150,65 @@ message HostPolicy {
 }
 
 // HuntQuery distributes a one-shot query to matching hosts.
-// Phase 6 — skeleton message for v1 wire freeze.
+// Phase 6 #110 — fields beyond the original {control_id, operator_id,
+// backend, query, deadline} skeleton are additive within slither.v1
+// per ADR-0011's wire-freeze contract.
 message HuntQuery {
   string control_id = 1;
   string operator_id = 2;
   HuntBackend backend = 3;
   string query = 4;             // backend-specific query text
   google.protobuf.Timestamp deadline = 5;
+  // max_rows caps the per-host row count the agent forwards. The
+  // extension may emit more, but the agent's enforcement layer
+  // truncates and stamps the truncation in HuntResultComplete.error.
+  // Zero means "no cap" (operators must opt out explicitly).
+  uint32 max_rows = 6;
+  // timeout_secs is the hard deadline the agent enforces on the
+  // extension's response. After it elapses, the agent emits a
+  // HuntResultComplete carrying error="timeout" and abandons any
+  // subsequent rows from the extension. Zero defaults to 60s.
+  uint32 timeout_secs = 7;
 }
 
 enum HuntBackend {
   HUNT_BACKEND_UNSPECIFIED = 0;
   HUNT_BACKEND_OSQUERY = 1;
+}
+
+// HuntResult is one chunk of a hunt response from agent → server.
+// Phase 6 #110 (additive within slither.v1).
+//
+// Multiple HuntResult messages may arrive for one control_id: any
+// number carrying rows, then exactly one carrying complete. Empty-
+// result hunts produce a single message with rows=[] and complete set.
+message HuntResult {
+  // control_id echoes HuntQuery.control_id; the server uses it to bind
+  // results to the dispatched hunt.
+  string control_id = 1;
+  // rows are the per-row chunks. The agent batches them to amortise
+  // per-message gRPC overhead. Each row's columns + values arrays are
+  // co-indexed.
+  repeated HuntResultRow rows = 2;
+  // complete is set on the last message only. error is empty on
+  // success; carries "timeout" / "extension error: ..." / "no
+  // extension declares live_query_respond" / "row cap exceeded
+  // (truncated at N)" otherwise.
+  HuntResultComplete complete = 3;
+}
+
+message HuntResultRow {
+  repeated string columns = 1;
+  repeated string values = 2;
+}
+
+message HuntResultComplete {
+  // row_count is the total number of rows the agent forwarded for this
+  // hunt (after row-cap truncation). Useful for the console's per-host
+  // attribution row count.
+  uint64 row_count = 1;
+  // error is the terminal status. Empty string == success.
+  string error = 2;
 }
 
 // ConfigUpdate pushes agent-side config changes without requiring restart.

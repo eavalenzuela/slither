@@ -56,6 +56,21 @@ type Process struct {
 
 	mu      sync.Mutex
 	current *exec.Cmd
+	// sendCh is the per-cycle outbound queue — non-runOnce goroutines
+	// (DispatchLiveQuery from the gRPC sink) push AgentToExtension
+	// envelopes here; the runOnce goroutine's writer half reads and
+	// calls channel.Send. Nil while no extension is connected; a
+	// closed sendCh means the cycle ended and dispatchers must
+	// fast-fail.
+	sendCh chan *pb.AgentToExtension
+
+	// liveQueries tracks per-query result channels for outstanding
+	// LiveQueryRequest dispatches. The Recv loop fans LiveQueryRow +
+	// LiveQueryComplete into the channel keyed by query_id; on
+	// Complete the entry is deleted and the channel closed. Cycle
+	// teardown closes every outstanding channel.
+	liveQueriesMu sync.Mutex
+	liveQueries   map[string]chan *pb.ExtensionToAgent
 }
 
 // NewProcess assembles a supervisor instance. out receives stamped
@@ -63,12 +78,25 @@ type Process struct {
 // closes it).
 func NewProcess(cfg config.Extension, verifier SignatureVerifier, device ocsf.Device, telem *telemetry.Counters, out chan<- ocsf.Event) *Process {
 	return &Process{
-		cfg:      cfg,
-		verifier: verifier,
-		device:   device,
-		telem:    telem,
-		out:      out,
+		cfg:         cfg,
+		verifier:    verifier,
+		device:      device,
+		telem:       telem,
+		out:         out,
+		liveQueries: make(map[string]chan *pb.ExtensionToAgent),
 	}
+}
+
+// HasCapability reports whether this extension declared want on Hello
+// and the operator authorised it (i.e. it survived intersection).
+// Returns false during the pre-Hello window.
+func (p *Process) HasCapability(want pb.Capability) bool {
+	for _, c := range p.declaredCaps {
+		if c == want {
+			return true
+		}
+	}
+	return false
 }
 
 // Run blocks until ctx is cancelled, supervising the extension across
@@ -220,9 +248,53 @@ func (p *Process) runOnce(ctx context.Context) error {
 
 	channel := NewChannel(agentConn, agentConn, intersection)
 
-	// Phase 2: read events forever. Live-query + snapshot dispatch
-	// (#110/#111) wires onto the same channel via a future Send path;
-	// for #107 we only consume.
+	// Phase 6 #110: a per-cycle outbound queue lets non-runOnce
+	// goroutines push AgentToExtension envelopes (live-query dispatch
+	// from the gRPC sink). One writer goroutine owns channel.Send —
+	// matches gRPC's non-concurrent-Send pattern in #75.
+	p.mu.Lock()
+	p.sendCh = make(chan *pb.AgentToExtension, 16)
+	sendCh := p.sendCh
+	p.mu.Unlock()
+
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case env, ok := <-sendCh:
+				if !ok {
+					return
+				}
+				if err := channel.Send(env); err != nil {
+					// Send failure tears down the connection. Recv will
+					// observe the resulting EOF / error and exit too.
+					slog.Warn("ext: send failed", "ext", p.cfg.Name, "err", err)
+					return
+				}
+			}
+		}
+	}()
+
+	// On exit (any path), fail every outstanding live-query so the
+	// dispatcher's caller doesn't block forever.
+	defer func() {
+		p.mu.Lock()
+		ch := p.sendCh
+		p.sendCh = nil
+		p.mu.Unlock()
+		if ch != nil {
+			close(ch)
+		}
+		<-writerDone
+		p.failAllPendingQueries()
+	}()
+
+	// Phase 2: read events forever. Live-query replies (#110) route
+	// through liveQueries; snapshot replies (#111) drop on the floor
+	// for now.
 	for {
 		if err := ctx.Err(); err != nil {
 			killAndWait(cmd)
@@ -259,11 +331,126 @@ func (p *Process) runOnce(ctx context.Context) error {
 					p.telem.IncExtEventEmitted()
 				}
 			}
-			// Live-query / snapshot replies have no consumer in
-			// #107 — they're plumbed in #110 / #111.
+		case *pb.ExtensionToAgent_LiveQueryRow:
+			p.routeLiveQueryReply(payload.LiveQueryRow.GetQueryId(), msg, false)
+		case *pb.ExtensionToAgent_LiveQueryComplete:
+			p.routeLiveQueryReply(payload.LiveQueryComplete.GetQueryId(), msg, true)
 		}
 	}
 }
+
+// routeLiveQueryReply forwards a Row/Complete envelope to the per-query
+// result channel registered by DispatchLiveQuery. complete=true closes
+// + deletes the entry. Unknown query_ids are dropped + logged — the
+// dispatcher may have torn down (e.g. timeout) before the extension's
+// response landed.
+func (p *Process) routeLiveQueryReply(queryID string, msg *pb.ExtensionToAgent, complete bool) {
+	if queryID == "" {
+		slog.Warn("ext: live-query reply with empty query_id", "ext", p.cfg.Name)
+		return
+	}
+	p.liveQueriesMu.Lock()
+	ch, ok := p.liveQueries[queryID]
+	if complete && ok {
+		delete(p.liveQueries, queryID)
+	}
+	p.liveQueriesMu.Unlock()
+	if !ok {
+		slog.Debug("ext: live-query reply for unknown query_id",
+			"ext", p.cfg.Name, "query_id", queryID, "complete", complete)
+		return
+	}
+	// Best-effort send; drop on a wedged consumer rather than block
+	// the supervisor's Recv loop. The dispatcher's reader is sized to
+	// max_rows+1 so this only fires on slow consumers.
+	select {
+	case ch <- msg:
+	default:
+		slog.Warn("ext: live-query result channel full; dropping",
+			"ext", p.cfg.Name, "query_id", queryID)
+	}
+	if complete {
+		close(ch)
+	}
+}
+
+// failAllPendingQueries closes every outstanding live-query channel
+// without delivering a Complete — callers see a closed channel and
+// must treat it as an extension teardown.
+func (p *Process) failAllPendingQueries() {
+	p.liveQueriesMu.Lock()
+	defer p.liveQueriesMu.Unlock()
+	for id, ch := range p.liveQueries {
+		close(ch)
+		delete(p.liveQueries, id)
+	}
+}
+
+// DispatchLiveQuery sends a LiveQueryRequest to the extension and
+// returns a result channel that receives every LiveQueryRow followed
+// by exactly one LiveQueryComplete envelope, then closes. Closes
+// without a Complete iff the extension's cycle ended unexpectedly.
+//
+// Returns ErrExtensionUnavailable when no cycle is active or
+// ErrCapabilityViolation when the extension didn't declare
+// LIVE_QUERY_RESPOND.
+func (p *Process) DispatchLiveQuery(ctx context.Context, req *pb.LiveQueryRequest) (<-chan *pb.ExtensionToAgent, error) {
+	if req == nil || req.GetQueryId() == "" {
+		return nil, errors.New("ext: DispatchLiveQuery: query_id required")
+	}
+	if !p.HasCapability(pb.Capability_CAPABILITY_LIVE_QUERY_RESPOND) {
+		return nil, ErrCapabilityViolation
+	}
+	p.mu.Lock()
+	send := p.sendCh
+	p.mu.Unlock()
+	if send == nil {
+		return nil, ErrExtensionUnavailable
+	}
+	// Result chan capacity = max_rows + 1 (rows + complete) so the
+	// supervisor's routeLiveQueryReply never wedges. Capped at a sane
+	// upper bound — extensions that try to overflow are throttled by
+	// the agent's row-cap enforcement before getting here.
+	cap := int(req.GetMaxRows()) + 1
+	if cap <= 0 || cap > 65536 {
+		cap = 65536
+	}
+	resultCh := make(chan *pb.ExtensionToAgent, cap)
+	p.liveQueriesMu.Lock()
+	if _, dup := p.liveQueries[req.GetQueryId()]; dup {
+		p.liveQueriesMu.Unlock()
+		close(resultCh)
+		return nil, fmt.Errorf("ext: DispatchLiveQuery: duplicate query_id %s", req.GetQueryId())
+	}
+	p.liveQueries[req.GetQueryId()] = resultCh
+	p.liveQueriesMu.Unlock()
+
+	envelope := &pb.AgentToExtension{
+		Payload: &pb.AgentToExtension_LiveQueryRequest{LiveQueryRequest: req},
+	}
+	select {
+	case <-ctx.Done():
+		p.cancelLiveQuery(req.GetQueryId())
+		return nil, ctx.Err()
+	case send <- envelope:
+		return resultCh, nil
+	}
+}
+
+// cancelLiveQuery removes a per-query result channel. Used when
+// DispatchLiveQuery fails before the request lands on the wire.
+func (p *Process) cancelLiveQuery(queryID string) {
+	p.liveQueriesMu.Lock()
+	defer p.liveQueriesMu.Unlock()
+	if ch, ok := p.liveQueries[queryID]; ok {
+		close(ch)
+		delete(p.liveQueries, queryID)
+	}
+}
+
+// ErrExtensionUnavailable is returned by DispatchLiveQuery (and future
+// SendSnapshot in #111) when no extension cycle is currently active.
+var ErrExtensionUnavailable = errors.New("ext: extension not currently spawned")
 
 // stampAndDecode parses the extension's OCSF JSON payload, stamps the
 // agent's device identity + the current wall-clock, and returns the

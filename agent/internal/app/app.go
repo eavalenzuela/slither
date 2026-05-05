@@ -15,6 +15,7 @@ import (
 	"github.com/t3rmit3/slither/agent/internal/config"
 	"github.com/t3rmit3/slither/agent/internal/enricher"
 	"github.com/t3rmit3/slither/agent/internal/extensions"
+	"github.com/t3rmit3/slither/agent/internal/huntdispatch"
 	"github.com/t3rmit3/slither/agent/internal/ioc"
 	"github.com/t3rmit3/slither/agent/internal/output"
 	"github.com/t3rmit3/slither/agent/internal/selfprotect"
@@ -124,11 +125,6 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	}
 	eng.SetAuditChain(chain)
 
-	sink, err := newSink(ctx, cfg, telem, eng, iocStore, chain, bpCache)
-	if err != nil {
-		return fmt.Errorf("app: output sink: %w", err)
-	}
-
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -155,6 +151,13 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	// preferential select; under contention extension events queue on
 	// the manager's own buffered channel rather than the merged feed.
 	engineIn := mergeEvents(ctx, enr.Events(), extMgr.Events())
+
+	// Sink construction is deferred until after extMgr exists so the
+	// hunt dispatcher (Phase 6 #110) can wire OnHuntQuery → extMgr.
+	sink, err := newSink(ctx, cfg, telem, eng, iocStore, chain, bpCache, extMgr)
+	if err != nil {
+		return fmt.Errorf("app: output sink: %w", err)
+	}
 
 	errs := make(chan error, 5)
 	go func() { errs <- cg.Run(ctx) }()
@@ -245,7 +248,7 @@ func isCancelled(err error, ctx context.Context) bool {
 // flow in #36) — a missing or empty file is a startup error, not a
 // silent degradation. eng is wired in so the sink's ServerMessage
 // receiver can apply server-pushed RuleSets via Engine.ReplaceRules.
-func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engine, iocStore *ioc.Store, chain *selfprotect.ChainWriter, bpCache *backpressure.Cache) (output.Sink, error) {
+func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters, eng ruleengine.Engine, iocStore *ioc.Store, chain *selfprotect.ChainWriter, bpCache *backpressure.Cache, extMgr *extensions.Manager) (output.Sink, error) {
 	switch cfg.Output.Kind {
 	case "stdout", "":
 		return output.NewStdoutJSONL(os.Stdout), nil
@@ -254,6 +257,7 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 		var (
 			emit           func([]string)
 			submitResponse func(*pb.ResponseRequest)
+			submitHunt     func(*pb.HuntQuery)
 		)
 		// Phase 4 #84: agent-side policy cache. Receives the latest
 		// pb.HostPolicy from the server's session push and exposes a
@@ -326,6 +330,14 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 				bpCache.SetServer(sig.GetLevel(), sig.GetObservedDropRate(), since)
 			},
 			Backpressure: bpCache,
+			// Phase 6 #110: server-pushed HuntQuery fans into the hunt
+			// dispatcher; submitHunt is filled in below once the sink
+			// + extension manager are both available.
+			OnHuntQuery: func(q *pb.HuntQuery) {
+				if submitHunt != nil {
+					submitHunt(q)
+				}
+			},
 		}, telem)
 		if err != nil {
 			return nil, err
@@ -365,6 +377,13 @@ func newSink(ctx context.Context, cfg *config.Config, telem *telemetry.Counters,
 			// Handlers inherit the agent-process context so a Run
 			// cancellation propagates into in-flight actions.
 			_ = executor.Submit(ctx, req)
+		}
+		// Phase 6 #110: hunt dispatcher routes HuntQuery →
+		// LiveQueryRequest on the LIVE_QUERY_RESPOND-capable extension
+		// → HuntResult chunks on sink.HuntResults().
+		hunts := huntdispatch.New(extMgr, sink.HuntResults())
+		submitHunt = func(q *pb.HuntQuery) {
+			hunts.Submit(ctx, q)
 		}
 		return sink, nil
 	}

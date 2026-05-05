@@ -2,6 +2,7 @@ package extensions
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -9,6 +10,7 @@ import (
 	"github.com/t3rmit3/slither/agent/internal/config"
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
 	"github.com/t3rmit3/slither/pkg/ocsf"
+	pb "github.com/t3rmit3/slither/proto/gen/slither/v1"
 )
 
 // Manager is the per-agent supervisor of all extensions. It owns the
@@ -52,6 +54,31 @@ func NewManager(cfgs []config.Extension, verifierFor func(config.Extension) Sign
 // Events is the merged OCSF event channel — every Process writes
 // stamped events here. Closed when Run returns.
 func (m *Manager) Events() <-chan ocsf.Event { return m.events }
+
+// DispatchLiveQuery picks the first extension declaring
+// CAPABILITY_LIVE_QUERY_RESPOND and dispatches the request to it.
+// Returns ErrNoLiveQueryProvider when no extension declares the
+// capability at the time of dispatch. The caller drains the returned
+// channel; it closes when the extension emits LiveQueryComplete or
+// the cycle tears down.
+//
+// Phase 6 #110. Single-provider semantics — multiple providers is
+// a Phase 7 concern (no v1 use case).
+func (m *Manager) DispatchLiveQuery(ctx context.Context, req *pb.LiveQueryRequest) (<-chan *pb.ExtensionToAgent, error) {
+	for _, p := range m.exts {
+		if p.HasCapability(pb.Capability_CAPABILITY_LIVE_QUERY_RESPOND) {
+			return p.DispatchLiveQuery(ctx, req)
+		}
+	}
+	return nil, ErrNoLiveQueryProvider
+}
+
+// ErrNoLiveQueryProvider signals no loaded extension declares
+// CAPABILITY_LIVE_QUERY_RESPOND. The gRPC sink maps this to a
+// HuntResult complete carrying error="no extension declares
+// live_query_respond" so the operator's console surfaces a clean
+// no-op rather than a hung hunt.
+var ErrNoLiveQueryProvider = errors.New("ext: no extension declares live_query_respond")
 
 // Run starts every Process supervisor goroutine and blocks until ctx
 // is cancelled. Closes Events on return so downstream merging

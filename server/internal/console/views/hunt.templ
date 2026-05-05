@@ -1,0 +1,218 @@
+package views
+
+import (
+	"fmt"
+	"strconv"
+	"time"
+
+	"github.com/t3rmit3/slither/server/internal/store/pg"
+)
+
+// HuntList is the /hunt page — newest hunts first, with a dispatch
+// form at the top for analyst+admin operators (Phase 6 #110).
+templ HuntList(d HuntListData) {
+	@Layout("Live-query hunts") {
+		<div class="card">
+			<h2>Live-query hunts</h2>
+			if d.Flash != "" {
+				<p class="flash">{ d.Flash }</p>
+			}
+			if d.Error != "" {
+				<p class="flash flash-error">{ d.Error }</p>
+			}
+			if d.CanRun {
+				<form method="post" action="/hunt" class="filters">
+					<label>
+						Query
+						<input type="text" name="query" value={ d.Form.Query } placeholder="SELECT * FROM listening_ports" required style="min-width: 30em"/>
+					</label>
+					<label>
+						Host filter
+						<input type="text" name="host_filter" value={ d.Form.HostFilter } placeholder="(empty = every host)"/>
+					</label>
+					<label>
+						Timeout (s)
+						<input type="number" name="timeout_secs" value={ formatIntZero(d.Form.TimeoutSecs, 60) } min="1" max="3600"/>
+					</label>
+					<label>
+						Max rows / host
+						<input type="number" name="max_rows_per_host" value={ formatIntZero(d.Form.MaxRowsPerHost, 10000) } min="0"/>
+					</label>
+					<button type="submit">Dispatch</button>
+				</form>
+			} else {
+				<p>Viewer-role accounts can review hunt history but cannot dispatch new hunts.</p>
+			}
+		</div>
+		<div class="card">
+			<h3>History</h3>
+			if len(d.Hunts) == 0 {
+				<p>No hunts dispatched yet.</p>
+			} else {
+				<table>
+					<thead>
+						<tr>
+							<th>Dispatched</th>
+							<th>Status</th>
+							<th>Hosts</th>
+							<th>Query</th>
+							<th>Filter</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, h := range d.Hunts {
+							<tr>
+								<td><a href={ huntHref(h.ID) }>{ h.DispatchedAt.UTC().Format(time.RFC3339) }</a></td>
+								<td>{ string(h.Status) }</td>
+								<td>{ fmt.Sprintf("%d/%d", h.CompletedHostCount, h.TargetHostCount) }</td>
+								<td><code>{ truncateAt(h.Query, 80) }</code></td>
+								<td>{ h.HostFilter }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	}
+}
+
+// HuntDetail is the /hunt/{id} page — paginated row table grouped by
+// host, with per-host row-count summary + a CSV-export link.
+templ HuntDetail(d HuntDetailData) {
+	@Layout("Hunt " + d.Hunt.ID) {
+		<div class="card">
+			<h2>Hunt { d.Hunt.ID }</h2>
+			<dl class="kv">
+				<dt>Status</dt><dd>{ string(d.Hunt.Status) }</dd>
+				<dt>Backend</dt><dd>{ d.Hunt.Backend }</dd>
+				<dt>Query</dt><dd><code>{ d.Hunt.Query }</code></dd>
+				<dt>Host filter</dt><dd>{ d.Hunt.HostFilter }</dd>
+				<dt>Timeout</dt><dd>{ strconv.Itoa(d.Hunt.TimeoutSecs) } s</dd>
+				<dt>Max rows / host</dt><dd>{ strconv.Itoa(d.Hunt.MaxRowsPerHost) }</dd>
+				<dt>Completed</dt><dd>{ fmt.Sprintf("%d / %d", d.Hunt.CompletedHostCount, d.Hunt.TargetHostCount) }</dd>
+				<dt>Dispatched at</dt><dd>{ d.Hunt.DispatchedAt.UTC().Format(time.RFC3339) }</dd>
+				if d.Hunt.CompletedAt != nil {
+					<dt>Completed at</dt><dd>{ d.Hunt.CompletedAt.UTC().Format(time.RFC3339) }</dd>
+				}
+				if d.Hunt.Error != "" {
+					<dt>Error</dt><dd>{ d.Hunt.Error }</dd>
+				}
+			</dl>
+			<p><a href={ huntCSVHref(d.Hunt.ID) }>Export CSV</a></p>
+		</div>
+		<div class="card">
+			<h3>Per-host row counts</h3>
+			if len(d.PerHostCount) == 0 {
+				<p>No rows yet.</p>
+			} else {
+				<table>
+					<thead><tr><th>Host</th><th>Rows</th></tr></thead>
+					<tbody>
+						for hostID, count := range d.PerHostCount {
+							<tr>
+								<td>
+									if name := d.HostnamesByID[hostID]; name != "" {
+										{ name } <span class="muted">{ "(" + hostID[:8] + ")" }</span>
+									} else {
+										<code>{ hostID }</code>
+									}
+								</td>
+								<td>{ strconv.FormatUint(count, 10) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+		<div class="card">
+			<h3>Rows</h3>
+			if len(d.Rows) == 0 {
+				<p>No rows match this page.</p>
+			} else {
+				<table>
+					<thead>
+						<tr>
+							<th>Host</th>
+							<th>Observed</th>
+							<th>Row</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, row := range d.Rows {
+							<tr>
+								<td>
+									if name := d.HostnamesByID[row.HostID]; name != "" {
+										{ name }
+									} else {
+										<code>{ row.HostID }</code>
+									}
+								</td>
+								<td>{ row.ObservedAt.UTC().Format(time.RFC3339) }</td>
+								<td><code>{ formatRow(row.Columns, row.Values) }</code></td>
+							</tr>
+						}
+					</tbody>
+				</table>
+				<div class="pagination">
+					if d.Offset > 0 {
+						<a href={ huntDetailPageHref(d.Hunt.ID, d.Limit, d.Offset-d.Limit) }>« Prev</a>
+					}
+					if d.HasNextPage {
+						<a href={ huntDetailPageHref(d.Hunt.ID, d.Limit, d.Offset+d.Limit) }>Next »</a>
+					}
+				</div>
+			}
+		</div>
+	}
+}
+
+// formatIntZero shows the user-supplied value when non-zero, falling
+// back to fallback (kept as the placeholder default for new
+// dispatches).
+func formatIntZero(v, fallback int) string {
+	if v == 0 {
+		return strconv.Itoa(fallback)
+	}
+	return strconv.Itoa(v)
+}
+
+// formatRow renders one osquery row as `key=val key2=val2` for the
+// detail table. Operators reach for CSV export when they want
+// machine-readable output.
+func formatRow(cols, vals []string) string {
+	var b []byte
+	for i := range cols {
+		if i > 0 {
+			b = append(b, ' ')
+		}
+		b = append(b, cols[i]...)
+		b = append(b, '=')
+		if i < len(vals) {
+			b = append(b, vals[i]...)
+		}
+	}
+	return string(b)
+}
+
+func truncateAt(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
+// huntHref / huntCSVHref / huntDetailPageHref are templ-friendly
+// templ.SafeURL builders. Centralised so tests can string-match cleanly.
+func huntHref(id string) templ.SafeURL { return templ.SafeURL("/hunt/" + id) }
+
+func huntCSVHref(id string) templ.SafeURL { return templ.SafeURL("/hunt/" + id + ".csv") }
+
+func huntDetailPageHref(id string, limit, offset int) templ.SafeURL {
+	if offset < 0 {
+		offset = 0
+	}
+	return templ.SafeURL(fmt.Sprintf("/hunt/%s?limit=%d&offset=%d", id, limit, offset))
+}
+
+// pg used implicitly by data types referenced above.
+var _ pg.HuntRow

@@ -60,6 +60,11 @@ message ClientMessage {
     // ResponseRequest. Additive within slither.v1; v0 agents that
     // don't know the field never emit it.
     ResponseResult response_result = 5;
+    // Phase 6 #110: one chunk of a live-query hunt response. Additive
+    // within slither.v1; v0 agents never emit. Multiple hunt_result
+    // messages flow per HuntQuery — any number carrying rows then
+    // exactly one carrying complete.
+    HuntResult hunt_result = 6;
   }
 }
 
