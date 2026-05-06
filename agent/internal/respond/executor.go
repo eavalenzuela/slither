@@ -192,6 +192,34 @@ func (e *Executor) handle(ctx context.Context, req *pb.ResponseRequest) {
 	}
 
 	status, detail, blob := h(ctx, req)
+	switch status {
+	case pb.ResponseStatus_RESPONSE_STATUS_DONE:
+		e.telem.IncResponseExecDone()
+	case pb.ResponseStatus_RESPONSE_STATUS_FAILED:
+		e.telem.IncResponseExecFailed()
+	}
+	// Phase 5 #95 — append a tamper-evident audit row for this
+	// terminal transition. Best-effort: chain append errors don't
+	// surface to the caller. result_blob is excluded from the chain
+	// summary to keep the chain file size bounded — operators have
+	// the full blob in the server's response_actions.result_blob
+	// column.
+	//
+	// Order matters: chain.Append runs before emit so a consumer that
+	// has received the result on `e.results` is guaranteed the audit
+	// row is already written. The previous order let a fast consumer
+	// observe the result and inspect the chain before this goroutine
+	// got to Append, producing flaky tests / ordering surprises.
+	if e.chain != nil {
+		_ = e.chain.Append("response_action", map[string]any{
+			"control_id": req.GetControlId(),
+			"rule_uid":   req.GetRuleUid(),
+			"action":     req.GetAction().String(),
+			"target":     req.GetTarget(),
+			"status":     status.String(),
+			"detail":     truncateChainDetail(detail),
+		})
+	}
 	// Phase 4 #83/#86: rule_uid + action + target stamps on the result
 	// let the server's OnResult insert a response_actions row for
 	// agent-initiated actions whose control_id it has never seen.
@@ -206,28 +234,6 @@ func (e *Executor) handle(ctx context.Context, req *pb.ResponseRequest) {
 		Action:     req.GetAction(),
 		Target:     req.GetTarget(),
 	})
-	switch status {
-	case pb.ResponseStatus_RESPONSE_STATUS_DONE:
-		e.telem.IncResponseExecDone()
-	case pb.ResponseStatus_RESPONSE_STATUS_FAILED:
-		e.telem.IncResponseExecFailed()
-	}
-	// Phase 5 #95 — append a tamper-evident audit row for this
-	// terminal transition. Best-effort: chain append errors don't
-	// surface to the caller (the response itself already shipped).
-	// result_blob is excluded from the chain summary to keep the
-	// chain file size bounded — operators have the full blob in
-	// the server's response_actions.result_blob column.
-	if e.chain != nil {
-		_ = e.chain.Append("response_action", map[string]any{
-			"control_id": req.GetControlId(),
-			"rule_uid":   req.GetRuleUid(),
-			"action":     req.GetAction().String(),
-			"target":     req.GetTarget(),
-			"status":     status.String(),
-			"detail":     truncateChainDetail(detail),
-		})
-	}
 }
 
 // truncateChainDetail caps a detail string at 256 bytes so a
@@ -274,18 +280,10 @@ func (e *Executor) EmitSnapshotResult(req *pb.ResponseRequest, blob []byte) {
 	status := pb.ResponseStatus_RESPONSE_STATUS_DONE
 	detail := fmt.Sprintf("snapshot from extension %q (%d bytes)",
 		req.GetSnapshotExtensionName(), len(blob))
-	e.emit(&pb.ResponseResult{
-		ControlId:             req.GetControlId(),
-		Status:                status,
-		Detail:                detail,
-		ResultBlob:            blob,
-		RuleUid:               req.GetRuleUid(),
-		Action:                req.GetAction(),
-		Target:                req.GetTarget(),
-		SnapshotAlertId:       req.GetSnapshotAlertId(),
-		SnapshotExtensionName: req.GetSnapshotExtensionName(),
-	})
 	e.telem.IncResponseExecDone()
+	// Same ordering invariant as runHandler: chain.Append before emit so
+	// a consumer that has received the result is guaranteed the audit
+	// row is already written.
 	if e.chain != nil {
 		_ = e.chain.Append("response_action", map[string]any{
 			"control_id":     req.GetControlId(),
@@ -298,6 +296,17 @@ func (e *Executor) EmitSnapshotResult(req *pb.ResponseRequest, blob []byte) {
 			"snapshot_ext":   req.GetSnapshotExtensionName(),
 		})
 	}
+	e.emit(&pb.ResponseResult{
+		ControlId:             req.GetControlId(),
+		Status:                status,
+		Detail:                detail,
+		ResultBlob:            blob,
+		RuleUid:               req.GetRuleUid(),
+		Action:                req.GetAction(),
+		Target:                req.GetTarget(),
+		SnapshotAlertId:       req.GetSnapshotAlertId(),
+		SnapshotExtensionName: req.GetSnapshotExtensionName(),
+	})
 }
 
 // notImplementedHandler returns a handler that fails cleanly with a
