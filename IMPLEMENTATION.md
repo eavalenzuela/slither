@@ -2190,14 +2190,17 @@ Secure Boot implementations).
      threat-model's `@u` claim (Surface 4) was already
      forward-leaning from #105 and is now operative without
      further edits.
-  5. **NitroTPM AMI provisioning gap.** AWS NitroTPM 2.0 needs an
-     AMI with `TpmSupport=v2.0` baked in; Canonical's stock
-     Ubuntu 24.04 amd64 AMI ships with `TpmSupport=None`, so a
-     stock `m7a.large` exposes no `/dev/tpm*`. Phase 6 #121 V10
-     only validated the no-TPM fallback. Full hardware
-     seal/unseal + PCR-bump validation needs either a custom
-     `register-image` recipe in the docs or a Packer template
-     under `deploy/cloud/aws/`.
+  5. ✅ **NitroTPM AMI provisioning gap** (resolved 2026-05-06).
+     New `deploy/cloud/aws/register-tpm-ami.sh` re-registers a
+     stock Canonical Ubuntu 24.04 AMI's root snapshot with
+     `TpmSupport=v2.0 + boot_mode=uefi`. No EBS copy — same
+     blocks, new metadata, single `register-image` call.
+     `deploy/cloud/aws/README.md` covers source-AMI lookup,
+     when-to-use/skip, and the Packer-pipeline lift path.
+     `docs/install.md` §2.2.1 cross-references it. Full hardware
+     seal/unseal + PCR-bump validation rides this on the next
+     Phase 6 #121 fleet bring-up; captures land under
+     `phase6_validation/V10/` alongside the existing no-TPM run.
   6. ✅ **Events query parser host: axis hostname/UUID gap**
      (resolved 2026-05-06). Picked the "hostname-resolve via
      `pg.GetHostByName`" path so operators can keep typing

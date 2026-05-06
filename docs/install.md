@@ -274,6 +274,20 @@ When to skip TPM:
 - Anything where the keyring + file stores already meet the
   threat model.
 
+#### 2.2.1 AWS NitroTPM 2.0
+
+Stock AWS Ubuntu 24.04 AMIs ship with `TpmSupport=None`, so a stock
+`m7a.large` boots without `/dev/tpm*` and the keystore silently
+falls through to keyring → file. Re-register the AMI with
+`TpmSupport=v2.0` to expose the device:
+
+```bash
+deploy/cloud/aws/register-tpm-ami.sh --source-ami ami-XXXXXXXX
+```
+
+See `deploy/cloud/aws/README.md` for the full recipe (resolving the
+latest Canonical AMI, regional caveats, when to skip).
+
 ## 3. Write the config
 
 ```bash
