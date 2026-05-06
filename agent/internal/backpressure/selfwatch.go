@@ -78,7 +78,7 @@ func RunSelfWatch(ctx context.Context, cache *Cache, telem *telemetry.Counters, 
 // agent has no pressure regardless of any prior drops. Zero-valued
 // thresholds in opts get the same defaults RunSelfWatch applies, so
 // classify is callable in isolation by tests + ad-hoc consumers.
-func classify(prev, cur telemetry.Snapshot, opts SelfWatchOptions) (Level, float32) {
+func classify(prev, cur telemetry.Snapshot, opts SelfWatchOptions) (level Level, fraction float32) {
 	opts.withDefaults()
 	dEvents := int64(cur.EventsProduced) - int64(prev.EventsProduced)
 	dDrops := int64(cur.EventsDropped) - int64(prev.EventsDropped)

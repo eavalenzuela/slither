@@ -3,16 +3,16 @@
 //
 // Two pressure inputs:
 //
-//   1. Server-pushed BackpressureSignal — the server's CH writer fell
-//      behind. The Sink's handleServerMessage updates this cache;
-//      collectors consult it via ShouldSample.
+//  1. Server-pushed BackpressureSignal — the server's CH writer fell
+//     behind. The Sink's handleServerMessage updates this cache;
+//     collectors consult it via ShouldSample.
 //
-//   2. Agent self-pressure — the sink's outbound queue is dropping
-//      events faster than some threshold. A goroutine in app.Run
-//      polls telemetry counters every few seconds and sets the
-//      cache accordingly. This catches the case where the server
-//      hasn't (yet) seen the agent's drops because the connection
-//      itself is the bottleneck.
+//  2. Agent self-pressure — the sink's outbound queue is dropping
+//     events faster than some threshold. A goroutine in app.Run
+//     polls telemetry counters every few seconds and sets the
+//     cache accordingly. This catches the case where the server
+//     hasn't (yet) seen the agent's drops because the connection
+//     itself is the bottleneck.
 //
 // The two inputs collapse into a single pressure level via a max
 // merge — whichever is higher wins. Stale signals (older than
@@ -20,13 +20,13 @@
 //
 // Sampling policy (consulted via ShouldSample):
 //
-//   NORMAL      → keep everything
-//   ELEVATED    → drop ~50% of low-priority classes (NetworkActivity
-//                 events that don't carry IOC hits;
-//                 FileSystemActivity events on non-rule paths).
-//                 Process events + detection findings + heartbeats
-//                 + response results always pass.
-//   CRITICAL    → drop ~90% of the same low-priority classes.
+//	NORMAL      → keep everything
+//	ELEVATED    → drop ~50% of low-priority classes (NetworkActivity
+//	              events that don't carry IOC hits;
+//	              FileSystemActivity events on non-rule paths).
+//	              Process events + detection findings + heartbeats
+//	              + response results always pass.
+//	CRITICAL    → drop ~90% of the same low-priority classes.
 //
 // The split between low-priority and high-priority is principled:
 // process exec/exit + detection findings carry the most operator

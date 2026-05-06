@@ -426,11 +426,11 @@ func (p *Process) DispatchLiveQuery(ctx context.Context, req *pb.LiveQueryReques
 	// supervisor's routeLiveQueryReply never wedges. Capped at a sane
 	// upper bound — extensions that try to overflow are throttled by
 	// the agent's row-cap enforcement before getting here.
-	cap := int(req.GetMaxRows()) + 1
-	if cap <= 0 || cap > 65536 {
-		cap = 65536
+	chCap := int(req.GetMaxRows()) + 1
+	if chCap <= 0 || chCap > 65536 {
+		chCap = 65536
 	}
-	resultCh := make(chan *pb.ExtensionToAgent, cap)
+	resultCh := make(chan *pb.ExtensionToAgent, chCap)
 	p.liveQueriesMu.Lock()
 	if _, dup := p.liveQueries[req.GetQueryId()]; dup {
 		p.liveQueriesMu.Unlock()

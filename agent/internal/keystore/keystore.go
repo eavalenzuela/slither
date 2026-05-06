@@ -134,12 +134,6 @@ func AutoSelectWithOptions(stateDir string, opts AutoSelectOptions) Store {
 // Linux returns a Keyring instance after a successful add_key probe.
 func tryKeyring() (Store, error) { return tryKeyringPlatform() }
 
-// errUnsupported is the canonical "this platform doesn't have a
-// kernel keyring" sentinel. Callers don't usually inspect it —
-// AutoSelect short-circuits on any error — but tests find it
-// useful for assertions.
-var errUnsupported = errors.New("keystore: kernel keyring unsupported on this platform")
-
 // formatProbeError annotates errors from the keyring probe with the
 // store name so log lines stay greppable.
 func formatProbeError(err error) error {

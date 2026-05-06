@@ -14,7 +14,7 @@ import (
 // its Read/Write — syscall semantics map to socket(2) directly). The
 // extension end is returned as *os.File so it can be passed via
 // cmd.ExtraFiles, where it lands at FD 3 in the child.
-func socketpair() (agent *os.File, ext *os.File, err error) {
+func socketpair() (agent, ext *os.File, err error) {
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
 	if err != nil {
 		return nil, nil, fmt.Errorf("socketpair: %w", err)

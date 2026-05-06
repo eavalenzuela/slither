@@ -56,7 +56,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	//      signal, not an immediate exfil concern).
 	//   2. SetDumpable next — closes the door on future PTRACE_ATTACH
 	//      and on /proc/<pid> reads from non-owner UIDs.
-	//   3. LockdownStateDirs — defense in depth atop systemd's
+	//   3. LockdownStateDirs — defence in depth atop systemd's
 	//      StateDirectory= (irrelevant in containers).
 	// Each call is best-effort + logs on failure rather than aborting
 	// startup. CheckNotTraced is the one exception: tracer-attached
@@ -80,7 +80,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 	// can call this before BPF load because ambient isn't consulted
 	// during bpf(2) calls; it's purely an exec-time inheritance knob.
 	// Phase 5 #100's quarantine subprocess gets a strictly narrower
-	// effective cap set than this lower-bound, so this is defense in
+	// effective cap set than this lower-bound, so this is defence in
 	// depth for that path (and any future fork+exec we add).
 	if err := selfprotect.DropAmbientPostInit(); err != nil {
 		slog.Warn("selfprotect: ambient cap drop failed; continuing",

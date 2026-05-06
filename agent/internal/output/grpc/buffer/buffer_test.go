@@ -32,8 +32,8 @@ func TestBuffer_AppendThenReplayRoundTrip(t *testing.T) {
 
 	now := time.Now()
 	for i := 0; i < 5; i++ {
-		if _, err := b.Append(mkEnv(fmt.Sprintf("ev-%d", i), now)); err != nil {
-			t.Fatalf("Append %d: %v", i, err)
+		if _, appendErr := b.Append(mkEnv(fmt.Sprintf("ev-%d", i), now)); appendErr != nil {
+			t.Fatalf("Append %d: %v", i, appendErr)
 		}
 	}
 	// Force rotation so the first segment becomes sealed (replay
@@ -144,11 +144,11 @@ func TestBuffer_StaleRecordsDropped(t *testing.T) {
 
 	stale := time.Now().Add(-1 * time.Hour)
 	fresh := time.Now()
-	if _, err := b.Append(mkEnv("stale-1", stale)); err != nil {
-		t.Fatalf("Append stale: %v", err)
+	if _, appendErr := b.Append(mkEnv("stale-1", stale)); appendErr != nil {
+		t.Fatalf("Append stale: %v", appendErr)
 	}
-	if _, err := b.Append(mkEnv("fresh-1", fresh)); err != nil {
-		t.Fatalf("Append fresh: %v", err)
+	if _, appendErr := b.Append(mkEnv("fresh-1", fresh)); appendErr != nil {
+		t.Fatalf("Append fresh: %v", appendErr)
 	}
 	b.Close()
 

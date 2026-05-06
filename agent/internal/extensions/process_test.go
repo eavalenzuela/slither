@@ -74,7 +74,7 @@ func main() {
 		t.Fatalf("write src: %v", err)
 	}
 	bin := filepath.Join(dir, "stub-ext")
-	cmd := exec.Command("go", "build", "-o", bin, srcFile)
+	cmd := exec.CommandContext(t.Context(), "go", "build", "-o", bin, srcFile)
 	cmd.Env = append(os.Environ(), "GOFLAGS=", "GO111MODULE=on")
 	cmd.Dir = repoRoot(t)
 	out, err := cmd.CombinedOutput()
@@ -135,7 +135,7 @@ func TestProcess_HelloTimeoutKillsExtension(t *testing.T) {
 func TestProcess_UndeclaredCapabilityViolationTearsDown(t *testing.T) {
 	bin := stubExtensionBinary(t, "undeclared_event")
 	cfg := config.Extension{
-		Name: "stub",
+		Name:       "stub",
 		BinaryPath: bin,
 		// Operator authorises both capabilities — the extension
 		// declares only LIVE_QUERY_RESPOND on Hello, then tries to

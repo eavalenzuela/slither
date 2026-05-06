@@ -79,7 +79,7 @@ func main() {
 		t.Fatalf("write src: %v", err)
 	}
 	bin := filepath.Join(dir, "stub-livequery")
-	cmd := exec.Command("go", "build", "-o", bin, srcFile)
+	cmd := exec.CommandContext(t.Context(), "go", "build", "-o", bin, srcFile)
 	cmd.Dir = repoRoot(t)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

@@ -79,12 +79,6 @@ type ChainAppender interface {
 	Append(kind string, summary any) error
 }
 
-// SetAuditChain installs the optional Phase 5 #95 audit chain.
-// Calling with nil disables the chain. Safe to call before Run.
-func (e *engine) SetAuditChain(c ChainAppender) {
-	e.chain = c
-}
-
 // detectionBlockWait bounds how long Run waits for a DetectionFinding send
 // before declaring the sink broken. 200 ms is long enough to absorb a jittery
 // downstream flush, short enough that the diagnostic fires before operators
@@ -108,6 +102,12 @@ type engine struct {
 	replace  chan map[ocsf.ClassID][]CompiledRule
 	autoHook AutoRespondHook
 	chain    ChainAppender
+}
+
+// SetAuditChain installs the optional Phase 5 #95 audit chain.
+// Calling with nil disables the chain. Safe to call before Run.
+func (e *engine) SetAuditChain(c ChainAppender) {
+	e.chain = c
 }
 
 // New returns an Engine loaded with the given compiled rules.

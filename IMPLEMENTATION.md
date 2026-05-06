@@ -2207,6 +2207,42 @@ Secure Boot implementations).
      time and surface a clear "unknown host" error, or
      hostname-resolve via `pg.GetHostByName` before the CH query
      (paralleling the JSON API's `host_name` handling, #120(d)).
+- **Agent gosec triage (filed 2026-05-05).** Seven gosec findings
+  in the agent module that resurfaced once Phase 6 #121's CI fix
+  unblocked the lint stage. All are real questions to answer
+  deliberately rather than rubber-stamp with `//nolint`; CI stays
+  red on them until each gets a real disposition (fix-or-justify),
+  so this is a hard gate, not a backlog item:
+  1. **G404 — `agent/internal/backpressure/rng.go:12`.** Backoff
+     jitter uses `math/rand`. Cryptographically-weak RNG is
+     acceptable for jitter (predictability ≠ exploitability) but
+     should be either swapped for `crypto/rand` or annotated with
+     a "jitter only" justification; `gosec` cannot tell the
+     difference.
+  2. **G404 — `agent/internal/extensions/process.go:142`.** Same
+     class — `math/rand` for extension-restart jitter. Same
+     resolution.
+  3. **G204 — `agent/internal/extensions/process.go:179`.**
+     `exec.CommandContext(ctx, p.cfg.BinaryPath)` where
+     `BinaryPath` is operator-supplied via the agent config. The
+     extension supervisor *must* be able to launch arbitrary
+     paths (that is its job), but the chain of trust from
+     `agent.yaml` → exec needs an explicit "operator-controlled
+     path; cosign verify gates loading; no shell interpretation"
+     justification documented in code.
+  4. **G304 — `agent/internal/output/grpc/buffer/buffer.go:251`.**
+     Spool segment open on a path the buffer itself constructed
+     under `Options.Dir`. Not a file-inclusion vector — but the
+     justification deserves a comment so the next reviewer
+     doesn't have to re-derive it.
+  5. **G304 — `agent/internal/selfprotect/chain.go:107` and
+     `:317`.** Tamper-evident chain file open. Path is the
+     configured chain location, not user-controlled. Same shape
+     as (4).
+  6. **G104 — `agent/internal/selfprotect/chain.go:121`.**
+     Unhandled `f.Close()` on the recover-error path. Should be
+     `_ = f.Close()` plus a comment that the outer error already
+     wraps the real failure.
 - Explicitly gated on demand + funding; not on the default trajectory.
 
 ---

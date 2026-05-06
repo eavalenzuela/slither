@@ -21,13 +21,13 @@ func TestChainWriter_AppendsClean(t *testing.T) {
 	defer w.Close()
 
 	for i := 0; i < 5; i++ {
-		if err := w.Append("response_action", map[string]any{
+		if appendErr := w.Append("response_action", map[string]any{
 			"action_id": "fake-uuid",
 			"action":    "kill_process",
 			"target":    "1234",
 			"status":    "done",
-		}); err != nil {
-			t.Fatalf("Append %d: %v", i, err)
+		}); appendErr != nil {
+			t.Fatalf("Append %d: %v", i, appendErr)
 		}
 	}
 
@@ -51,8 +51,8 @@ func TestVerifyChain_DetectsRecordHashTamper(t *testing.T) {
 		t.Fatalf("OpenChain: %v", err)
 	}
 	for i := 0; i < 5; i++ {
-		if err := w.Append("kind", map[string]int{"i": i}); err != nil {
-			t.Fatalf("Append: %v", err)
+		if appendErr := w.Append("kind", map[string]int{"i": i}); appendErr != nil {
+			t.Fatalf("Append: %v", appendErr)
 		}
 	}
 	w.Close()
@@ -167,8 +167,8 @@ func TestChainWriter_RecoverContinuesSeq(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenChain 2: %v", err)
 	}
-	if err := w2.Append("k", map[string]string{"phase": "after-reopen"}); err != nil {
-		t.Fatalf("Append after reopen: %v", err)
+	if appendErr := w2.Append("k", map[string]string{"phase": "after-reopen"}); appendErr != nil {
+		t.Fatalf("Append after reopen: %v", appendErr)
 	}
 	w2.Close()
 

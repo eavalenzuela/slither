@@ -18,12 +18,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/t3rmit3/slither/agent/internal/keystore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+
+	"github.com/t3rmit3/slither/agent/internal/keystore"
 
 	pb "github.com/t3rmit3/slither/proto/gen/slither/v1"
 )
@@ -194,9 +195,9 @@ func TestEnroll_HappyPathWritesAllFiles(t *testing.T) {
 	// client.key on disk is mode 0600. Skip on keyring (no file
 	// to stat).
 	if store.Name() == "file" {
-		st, err := os.Stat(res.KeyPath)
-		if err != nil {
-			t.Fatalf("client.key missing on file store: %v", err)
+		st, statErr := os.Stat(res.KeyPath)
+		if statErr != nil {
+			t.Fatalf("client.key missing on file store: %v", statErr)
 		}
 		if mode := st.Mode().Perm(); mode != 0o600 {
 			t.Errorf("key perm = %o, want 0600", mode)

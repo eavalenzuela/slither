@@ -241,11 +241,11 @@ func (e *Executor) handle(ctx context.Context, req *pb.ResponseRequest) {
 // bloat the chain file. Callers wanting full detail consult the
 // server-side audit_log row.
 func truncateChainDetail(s string) string {
-	const max = 256
-	if len(s) <= max {
+	const limit = 256
+	if len(s) <= limit {
 		return s
 	}
-	return s[:max] + "…[truncated]"
+	return s[:limit] + "…[truncated]"
 }
 
 // emit pushes a result onto the outbound channel without blocking.
