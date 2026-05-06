@@ -122,8 +122,10 @@ type Server struct {
 }
 
 // New constructs the console router. Panics on misconfiguration — a
-// console without a session key cannot meaningfully run.
-func New(opts Options) *Server {
+// console without a session key cannot meaningfully run. ctx is used
+// for OIDC discovery only; the returned Server holds no reference to
+// it (handlers carry their own per-request contexts).
+func New(ctx context.Context, opts Options) *Server {
 	if opts.Store == nil {
 		panic("console.New: nil store")
 	}
@@ -160,7 +162,7 @@ func New(opts Options) *Server {
 		artefactDir:         opts.ArtefactDir,
 	}
 	if opts.OIDC.Enabled() {
-		auth, err := initOIDC(context.Background(), oidcConfig{
+		auth, err := initOIDC(ctx, oidcConfig{
 			IssuerURL:     opts.OIDC.IssuerURL,
 			ClientID:      opts.OIDC.ClientID,
 			ClientSecret:  opts.OIDC.ClientSecret,

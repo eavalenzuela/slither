@@ -46,9 +46,9 @@ func TestReadMigrationSection_UpAndDown(t *testing.T) {
 	// migrations have both per ADR-0033). Use the first such file.
 	var withDown string
 	for _, f := range files {
-		body, err := readMigrationSection(f.name, "Down")
-		if err != nil {
-			t.Fatalf("readMigrationSection Down %s: %v", f.name, err)
+		body, sErr := readMigrationSection(f.name, "Down")
+		if sErr != nil {
+			t.Fatalf("readMigrationSection Down %s: %v", f.name, sErr)
 		}
 		if !strings.HasPrefix(body, "-- (no Down section)") {
 			withDown = f.name

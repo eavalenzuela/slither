@@ -1,6 +1,7 @@
 package ch
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -38,8 +39,8 @@ func MigrateDown(ctx context.Context, dsn string) error {
 		return err
 	}
 	defer db.Close()
-	if err := prepareGoose(); err != nil {
-		return err
+	if pErr := prepareGoose(); pErr != nil {
+		return pErr
 	}
 	if err := goose.DownContext(ctx, db, "."); err != nil {
 		return fmt.Errorf("ch.MigrateDown: %w", err)
@@ -54,8 +55,8 @@ func Status(ctx context.Context, dsn string) error {
 		return err
 	}
 	defer db.Close()
-	if err := prepareGoose(); err != nil {
-		return err
+	if pErr := prepareGoose(); pErr != nil {
+		return pErr
 	}
 	return goose.StatusContext(ctx, db, ".")
 }
@@ -88,8 +89,8 @@ func dryRun(ctx context.Context, dsn string, w io.Writer, dir dryDirection) erro
 		return err
 	}
 	defer db.Close()
-	if err := prepareGoose(); err != nil {
-		return err
+	if pErr := prepareGoose(); pErr != nil {
+		return pErr
 	}
 
 	current, err := goose.GetDBVersionContext(ctx, db)
@@ -193,17 +194,17 @@ func readMigrationSection(name, section string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("ch.DryRun: read %s: %w", name, err)
 	}
-	marker := "-- +goose " + section
-	idx := strings.Index(string(body), marker)
+	marker := []byte("-- +goose " + section)
+	idx := bytes.Index(body, marker)
 	if idx < 0 {
 		return fmt.Sprintf("-- (no %s section)", section), nil
 	}
-	tail := string(body)[idx+len(marker):]
+	tail := body[idx+len(marker):]
 	// Stop at the next "-- +goose " marker if present.
-	if next := strings.Index(tail, "-- +goose "); next >= 0 {
+	if next := bytes.Index(tail, []byte("-- +goose ")); next >= 0 {
 		tail = tail[:next]
 	}
-	return strings.TrimSpace(tail), nil
+	return strings.TrimSpace(string(tail)), nil
 }
 
 func openSQL(dsn string) (*sql.DB, error) {

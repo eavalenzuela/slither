@@ -182,7 +182,7 @@ func RunBackpressureMonitor(ctx context.Context, hub *BackpressureHub, probe Sna
 
 // classifyServer mirrors the agent-side classify but with
 // server-tighter thresholds. Returns NORMAL when no events flowed.
-func classifyServer(prevDrops, prevEvents, curDrops, curEvents uint64, opts BackpressureMonitorOptions) (pb.BackpressureSignal_Level, float32) {
+func classifyServer(prevDrops, prevEvents, curDrops, curEvents uint64, opts BackpressureMonitorOptions) (level pb.BackpressureSignal_Level, dropFraction float32) {
 	opts.withDefaults()
 	dEvents := int64(curEvents) - int64(prevEvents)
 	dDrops := int64(curDrops) - int64(prevDrops)

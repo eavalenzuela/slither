@@ -158,7 +158,7 @@ func setupConsoleEnv(ctx context.Context, t *testing.T) *consoleEnv {
 		stopPG()
 		t.Fatalf("session key: %v", err)
 	}
-	svc := console.New(console.Options{
+	svc := console.New(ctx, console.Options{
 		Store:      store,
 		Telem:      telemetry.NewCounters(),
 		SessionKey: key,

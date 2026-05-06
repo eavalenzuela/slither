@@ -150,7 +150,7 @@ func setupHostsEnv(ctx context.Context, t *testing.T, role pg.UserRole) *hostsEn
 	}
 
 	key, _ := console.LoadOrCreateSessionKey("")
-	svc := console.New(console.Options{
+	svc := console.New(ctx, console.Options{
 		Store:      store,
 		Telem:      telemetry.NewCounters(),
 		SessionKey: key,

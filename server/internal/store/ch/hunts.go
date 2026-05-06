@@ -22,7 +22,7 @@ type HuntResultRow struct {
 // Each (cols, vals) pair is one CH row. Caller batches per-extension
 // chunk; this method runs a prepared insert per call so a slow CH
 // flush doesn't stall the agent's HuntResult Recv goroutine.
-func (s *Store) InsertHuntResults(ctx context.Context, queryID, hostID string, cols [][]string, vals [][]string) error {
+func (s *Store) InsertHuntResults(ctx context.Context, queryID, hostID string, cols, vals [][]string) error {
 	if len(cols) != len(vals) {
 		return errors.New("ch.InsertHuntResults: columns/values length mismatch")
 	}

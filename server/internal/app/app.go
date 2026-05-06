@@ -179,7 +179,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		slog.Warn("app: alert flow-graph cache disabled", "err", cacheErr)
 		graphCache = nil
 	}
-	consoleSvc := console.New(console.Options{
+	consoleSvc := console.New(ctx, console.Options{
 		Store:      pgStore,
 		Telem:      telem,
 		Bus:        bus,

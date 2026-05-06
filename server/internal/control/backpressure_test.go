@@ -88,14 +88,6 @@ func TestBackpressureHub_UnsubscribeCleansUp(t *testing.T) {
 	}
 }
 
-type fakeProbe struct {
-	events, drops uint64
-}
-
-func (f *fakeProbe) SnapshotForBackpressure() (uint64, uint64) {
-	return f.events, f.drops
-}
-
 func TestClassifyServer_DefaultsAndBoundaries(t *testing.T) {
 	t.Parallel()
 	opts := BackpressureMonitorOptions{}

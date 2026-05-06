@@ -164,7 +164,7 @@ func setupLiveEnv(ctx context.Context, t *testing.T) *liveEnv {
 
 	key, _ := console.LoadOrCreateSessionKey("")
 	bus := ingest.NewBus(nil)
-	svc := console.New(console.Options{
+	svc := console.New(ctx, console.Options{
 		Store:      store,
 		Telem:      telemetry.NewCounters(),
 		Bus:        bus,
