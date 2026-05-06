@@ -29,6 +29,13 @@ type EventsPageData struct {
 	QueryText     string
 	ParseError    string
 	UnknownTokens []string
+
+	// Phase 6 #121 follow-up #6 — when the operator's host: filter is
+	// a hostname that didn't resolve to any enrolled host,
+	// UnknownHost echoes the original input so the page can surface
+	// "no host named foo" rather than "search failed". Rows is left
+	// empty in this case (no CH query is issued).
+	UnknownHost string
 }
 
 // EventsHistoryData drives /events/history — the user's last-50

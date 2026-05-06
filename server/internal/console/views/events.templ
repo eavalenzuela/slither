@@ -22,6 +22,9 @@ templ Events(d EventsPageData) {
 			if len(d.UnknownTokens) > 0 {
 				<p class="muted">Unknown tokens (treated as raw substring): { joinTokens(d.UnknownTokens) }</p>
 			}
+			if d.UnknownHost != "" {
+				<p class="flash">No host named <code>{ d.UnknownHost }</code> is enrolled.</p>
+			}
 
 			<form method="get" action="/events" class="live-filters">
 				<label>

@@ -1,12 +1,15 @@
 package console
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/t3rmit3/slither/server/internal/console/views"
 	"github.com/t3rmit3/slither/server/internal/store/ch"
@@ -78,6 +81,29 @@ func (s *Server) eventsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Phase 6 #121 follow-up #6 — operators type hostnames into
+	// host:foo without knowing the row's UUID. Resolve hostnames here
+	// so SearchEvents always sees a UUID; on miss render an empty
+	// page with an "unknown host" notice rather than 500'ing.
+	hostInput := filter.HostID
+	resolved, rerr := resolveHostFilter(r.Context(), s.store, hostInput)
+	switch {
+	case errors.Is(rerr, pg.ErrHostNotFound):
+		render(w, r, views.Events(views.EventsPageData{
+			Filter:        viewFilter,
+			RawQuery:      r.URL.RawQuery,
+			QueryText:     rawQ,
+			ParseError:    parseError,
+			UnknownTokens: unknowns,
+			UnknownHost:   hostInput,
+		}))
+		return
+	case rerr != nil:
+		http.Error(w, "host lookup failed", http.StatusInternalServerError)
+		return
+	}
+	filter.HostID = resolved
+
 	rows, next, err := s.chStore.SearchEvents(r.Context(), filter, cursor, eventsPageSize)
 	if err != nil {
 		http.Error(w, "search failed", http.StatusInternalServerError)
@@ -93,6 +119,32 @@ func (s *Server) eventsList(w http.ResponseWriter, r *http.Request) {
 		ParseError:    parseError,
 		UnknownTokens: unknowns,
 	}))
+}
+
+// resolveHostFilter returns the UUID form of input. If input parses as
+// a UUID it's returned unchanged. If input is a hostname, lookup goes
+// through pg.GetHostByName; ErrHostNotFound surfaces unchanged so the
+// caller can render an "unknown host" notice. Phase 6 #121 follow-up
+// #6 — extracted for unit testability.
+func resolveHostFilter(ctx context.Context, store hostByNameLookup, input string) (string, error) {
+	if input == "" {
+		return "", nil
+	}
+	if _, err := uuid.Parse(input); err == nil {
+		return input, nil
+	}
+	row, err := store.GetHostByName(ctx, input)
+	if err != nil {
+		return "", err
+	}
+	return row.ID, nil
+}
+
+// hostByNameLookup is the pg.Store subset resolveHostFilter needs;
+// keeping it narrow lets the unit test stub without dragging the full
+// store interface in.
+type hostByNameLookup interface {
+	GetHostByName(ctx context.Context, hostname string) (pg.HostRow, error)
 }
 
 // eventsHistory renders /events/history — the user's last-50 query

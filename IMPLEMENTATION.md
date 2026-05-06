@@ -2198,15 +2198,18 @@ Secure Boot implementations).
      seal/unseal + PCR-bump validation needs either a custom
      `register-image` recipe in the docs or a Packer template
      under `deploy/cloud/aws/`.
-  6. **Events query parser host: axis hostname/UUID gap.**
-     `q=host:ip-172-31-26-27` writes the literal hostname into
-     `ParsedQuery.HostID`; downstream `ch.SearchEvents` calls
-     `uuid.Parse(filter.HostID)` which rejects hostnames, so the
-     page returns "search failed" instead of resolving the
-     hostname. Fix: parser should either UUID-validate at parse
-     time and surface a clear "unknown host" error, or
-     hostname-resolve via `pg.GetHostByName` before the CH query
-     (paralleling the JSON API's `host_name` handling, #120(d)).
+  6. ✅ **Events query parser host: axis hostname/UUID gap**
+     (resolved 2026-05-06). Picked the "hostname-resolve via
+     `pg.GetHostByName`" path so operators can keep typing
+     `host:ip-172-31-26-27` without knowing the row's UUID. The
+     parser stays dumb (any value lands in `ParsedQuery.HostID`);
+     `eventsList` runs `resolveHostFilter` before
+     `ch.SearchEvents` — UUID-shaped input passes through, hostname
+     input goes through `pg.GetHostByName`, miss renders an empty
+     page with a `No host named X is enrolled` notice rather than
+     500'ing. Same conjunctive form-driven path also benefits.
+     Five new unit tests on `resolveHostFilter` cover empty/UUID/
+     resolve/not-found/error-propagation.
 - Explicitly gated on demand + funding; not on the default trajectory.
 
 ---
