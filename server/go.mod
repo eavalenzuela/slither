@@ -7,6 +7,7 @@ require (
 	github.com/a-h/templ v0.3.1001
 	github.com/alexedwards/scs/pgxstore v0.0.0-20251002162104-209de6e426de
 	github.com/alexedwards/scs/v2 v2.9.0
+	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
@@ -17,6 +18,7 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/clickhouse v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.40.0
 	golang.org/x/crypto v0.49.0
+	golang.org/x/oauth2 v0.36.0
 	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
@@ -39,7 +41,6 @@ require (
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/containerd/platforms v0.2.1 // indirect
-	github.com/coreos/go-oidc/v3 v3.18.0 // indirect
 	github.com/cpuguy83/dockercfg v0.3.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
@@ -101,9 +102,8 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
-	golang.org/x/image v0.20.0 // indirect
+	golang.org/x/image v0.38.0 // indirect
 	golang.org/x/net v0.52.0 // indirect
-	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.36.0 // indirect

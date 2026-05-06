@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/cilium/ebpf v0.21.0
+	github.com/google/go-tpm v0.9.8
 	github.com/google/uuid v1.6.0
 	github.com/t3rmit3/slither/pkg v0.0.0
 	github.com/t3rmit3/slither/proto v0.0.0
@@ -14,13 +15,11 @@ require (
 )
 
 require (
-	github.com/google/go-tpm v0.9.8 // indirect
-	github.com/rogpeppe/go-internal v1.14.1 // indirect
-	go.opentelemetry.io/otel v1.41.0 // indirect
+	go.opentelemetry.io/otel/metric v1.41.0 // indirect
+	go.opentelemetry.io/otel/trace v1.41.0 // indirect
 	golang.org/x/net v0.52.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
-	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
 
 replace (
