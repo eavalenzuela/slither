@@ -43,6 +43,21 @@ We will not pursue legal action against researchers who:
 - Avoid privacy violations, service disruption, or data destruction.
 - Give us reasonable time to address issues before public disclosure.
 
+## Risk dispositioning
+
+Static-analysis findings (gosec, govulncheck) that we accept without code change are recorded here with explicit rationale. The bar is real justification, not noise suppression: every entry is a deliberate decision the next reviewer can second-guess. New `//nolint:gosec` annotations in agent/server code must reference this section.
+
+| ID | File:line | Class | Disposition |
+|---|---|---|---|
+| G404-1 | `agent/internal/backpressure/rng.go:12` | Weak PRNG | Sampling-decision RNG; uniform-enough is the only contract. Predictability is not exploitable — adversaries cannot influence backoff outcomes. |
+| G404-2 | `agent/internal/extensions/process.go:142` | Weak PRNG | Restart-backoff jitter, same class as G404-1. `crypto/rand` would add a syscall to a connection-recovery hot path for no security gain. |
+| G204-1 | `agent/internal/extensions/process.go:179` | Subprocess from variable | `BinaryPath` is operator-supplied via `agent.yaml`. The extension supervisor's job *is* to launch operator-declared paths. Trust controls: cosign-keyless signature verify (line 164) gates execution on every spawn, the path goes straight to `exec.CommandContext` (no shell interpretation), the operator allow list is config-frozen at startup. Removing the dynamic argument removes the feature. |
+| G304-1 | `agent/internal/output/grpc/buffer/buffer.go:251` | File inclusion via variable | Spool segment path is constructed by the buffer itself from operator-supplied `Options.Dir` plus an internal counter. Not request-derived. |
+| G304-2 | `agent/internal/selfprotect/chain.go:107` | File inclusion via variable | Tamper-evident chain file open, append mode. Path is the configured chain location, not request-derived. |
+| G304-3 | `agent/internal/selfprotect/chain.go:317` | File inclusion via variable | Same chain file, read mode (verify path). Same disposition as G304-2. |
+
+When a finding here becomes invalid (call site moves, control changes, threat model shifts), update the table — don't leave stale entries. New entries land alongside the `//nolint:gosec` annotation that references them.
+
 ## Pre-release status
 
 Slither is pre-alpha and has **not** undergone third-party security review. Assume vulnerabilities exist. Do not deploy to production systems yet.

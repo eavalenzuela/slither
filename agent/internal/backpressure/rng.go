@@ -9,5 +9,5 @@ import (
 // doesn't need crypto-strength randomness — uniform-enough is the
 // only contract.
 func defaultRng() float32 {
-	return rand.Float32()
+	return rand.Float32() //nolint:gosec // G404: sampling decision; predictability is not exploitable. See SECURITY.md "Risk dispositioning".
 }

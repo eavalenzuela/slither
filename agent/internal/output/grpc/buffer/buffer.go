@@ -248,7 +248,7 @@ func (b *Buffer) rotateLocked() error {
 	}
 	name := segmentName(b.counter)
 	path := filepath.Join(b.opts.Dir, name)
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // G304: path is buffer-constructed under operator-supplied Options.Dir; not request-derived. See SECURITY.md "Risk dispositioning".
 	if err != nil {
 		return fmt.Errorf("buffer.rotate: open %s: %w", path, err)
 	}

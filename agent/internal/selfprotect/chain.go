@@ -104,7 +104,7 @@ func OpenChain(path string) (*ChainWriter, error) {
 
 	// Open append-only. 0600 — the chain is the agent's tamper-
 	// evidence bookkeeping, not a syslog channel for everyone.
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600) //nolint:gosec // G304: path is the configured chain location, not request-derived. See SECURITY.md "Risk dispositioning".
 	if err != nil {
 		return nil, fmt.Errorf("selfprotect.OpenChain: %w", err)
 	}
@@ -118,7 +118,7 @@ func OpenChain(path string) (*ChainWriter, error) {
 			"chain_start": time.Now().UTC().Format(time.RFC3339Nano),
 		})
 		if err := w.append("chain.init", init); err != nil {
-			f.Close()
+			_ = f.Close()
 			return nil, fmt.Errorf("selfprotect.OpenChain: init record: %w", err)
 		}
 	}
@@ -314,7 +314,7 @@ func (e *ChainBreakError) Error() string {
 // A missing file is not an error — `walked=0, nil`. A fresh agent
 // that never fired a response or detection has no chain to verify.
 func VerifyChain(path string, since time.Time) (uint64, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // G304: path is the configured chain location, not request-derived. See SECURITY.md "Risk dispositioning".
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return 0, nil

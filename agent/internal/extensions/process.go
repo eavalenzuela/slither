@@ -139,7 +139,7 @@ func (p *Process) Run(ctx context.Context) error {
 
 		// Sleep with jittered backoff. Cap-and-jitter symmetric to the
 		// gRPC sink's reconnect schedule.
-		jitter := time.Duration((rand.Float64()*0.5 - 0.25) * float64(backoff))
+		jitter := time.Duration((rand.Float64()*0.5 - 0.25) * float64(backoff)) //nolint:gosec // G404: restart backoff jitter; predictability is not exploitable. See SECURITY.md "Risk dispositioning".
 		sleep := backoff + jitter
 		if sleep < minBackoff {
 			sleep = minBackoff
@@ -176,7 +176,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 	}
 	defer agentConn.Close()
 
-	cmd := exec.CommandContext(ctx, p.cfg.BinaryPath)
+	cmd := exec.CommandContext(ctx, p.cfg.BinaryPath) //nolint:gosec // G204: BinaryPath is operator-controlled via agent config; cosign verify (line 164) gates execution; argv has no shell interpretation. See SECURITY.md "Risk dispositioning".
 	cmd.ExtraFiles = []*os.File{extFile}
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
