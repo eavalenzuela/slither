@@ -58,6 +58,17 @@ func tryKeyringPlatform() (Store, error) {
 	if err != nil {
 		return nil, formatProbeError(err)
 	}
+	// Link @u into @s so this process possesses keys in @u. KEYCTL_READ
+	// is possession-checked: without the link, the default session-
+	// keyring chain doesn't include @u, so reading a freshly-added @u
+	// key returns EACCES even when the user-perm bits would grant it.
+	// Phase 6 #121 follow-up #3 — without this every host silently fell
+	// through to the file store, leaving ADR-0038's @u claim
+	// aspirational. Best-effort: when keyringID fell back to @s the
+	// link is a no-op error we ignore; if it fails for any other reason
+	// the probe READ below fails cleanly and AutoSelect drops to file.
+	_, _ = unix.KeyctlInt(unix.KEYCTL_LINK, ringID, unix.KEY_SPEC_SESSION_KEYRING, 0, 0)
+
 	// Probe: write + read + unlink a marker key. If any step fails,
 	// the keyring isn't reliably usable on this host.
 	probeDesc := keyringDescriptionPrefix + "probe"

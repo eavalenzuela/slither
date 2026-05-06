@@ -2174,22 +2174,22 @@ Secure Boot implementations).
      `net.enabled=false` on arm64. Fix: regenerate per-arch `.o`
      files via `bpf2go` in the build pipeline, ship them
      side-by-side, pick at load time.
-  3. **Keystore `@u` probe possession-traversal bug.**
-     `agent/internal/keystore/keyring/keyring_linux.go`'s
-     `tryKeyringPlatform()` adds a probe key to `@u` then reads
-     it back. The READ returns `EACCES` on every host shape
-     because the process doesn't possess `@u` (its session
-     keyring chain doesn't include `@u`). Linking `@u` into `@s`
-     before the read makes the probe succeed. Effective Phase 6
-     behaviour: every host falls through to the file store. Fix:
-     `keyctl_link(KEY_SPEC_USER_KEYRING, KEY_SPEC_SESSION_KEYRING)`
-     before the probe READ in `tryKeyringPlatform`.
-  4. **ADR-0038 effective-behaviour gap.** Direct consequence of
-     follow-up #3 — until the keystore probe lands `@u` correctly,
-     the threat-model claim about `@u` being the primary cert
-     store is aspirational. ADR-0038 needs a docs revision (or a
-     code fix that lets it match its current claims) when #3
-     ships.
+  3. ✅ **Keystore `@u` probe possession-traversal bug** (resolved
+     2026-05-06). `tryKeyringPlatform` now issues
+     `keyctl(KEYCTL_LINK, @u, @s)` before the probe READ, so the
+     calling process possesses `@u`'s contents and the read no
+     longer returns EACCES. Smoke-checked on this dev box —
+     `AutoSelect → kernel-keyring` (was `file` pre-fix). Fix is
+     per-process and re-issued on every agent start, so existing
+     fleets transparently switch to the keyring path on the next
+     restart with no operator action.
+  4. ✅ **ADR-0038 effective-behaviour gap** (resolved 2026-05-06).
+     Amendment block added to `docs/adr/0038-keystore-strategy.md`
+     recording the read-side possession subtlety + the one-line
+     fix; Migration and Validation sections amended in place. The
+     threat-model's `@u` claim (Surface 4) was already
+     forward-leaning from #105 and is now operative without
+     further edits.
   5. **NitroTPM AMI provisioning gap.** AWS NitroTPM 2.0 needs an
      AMI with `TpmSupport=v2.0` baked in; Canonical's stock
      Ubuntu 24.04 amd64 AMI ships with `TpmSupport=None`, so a

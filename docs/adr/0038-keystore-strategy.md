@@ -4,6 +4,23 @@
 
 **Date:** 2026-05-05
 
+**Amendment 2026-05-06:** Phase 6 #121 V9 capture revealed Gap A's
+"flip preference to `@u`" (recorded below) was not on its own
+sufficient to make the keyring path operative. KEYCTL_READ is
+possession-checked, and a process's default session-keyring chain
+does not include `@u`, so reading a freshly-added `@u` key returned
+EACCES — the probe failed and every host silently degraded to the
+file store. This ADR's Decision section described `@u` as the
+durable target, but until the read-side possession was fixed that
+claim was aspirational. The fix is a one-line
+`keyctl(KEYCTL_LINK, @u, @s)` in `tryKeyringPlatform` before the
+probe so the calling process possesses `@u`'s contents for the
+remainder of its lifetime; both the enroll subprocess and the
+long-lived agent service issue the link, so each gets read access
+to keys the other wrote. Decision and trade-off analysis below are
+unchanged; the Migration and Validation sections are amended in
+place to reflect the active fix.
+
 ## Context
 
 Phase 5 #98 (IMPLEMENTATION.md §10.2) shipped a kernel-keyring +
@@ -123,6 +140,14 @@ Existing fleets running the Phase 5 #98 code path still write to
   no-op upgrade** — no enroll re-issuance, no service restart
   ordering required.
 
+The 2026-05-06 amendment (`KEYCTL_LINK` of `@u` into `@s` in
+`tryKeyringPlatform`) is also a no-op upgrade for operators: the
+link is per-process and re-issued on every agent start, so the
+fix takes effect on the next service restart with no fleet-side
+action required. Hosts that had silently been on the file store
+since #117 shipped will transparently switch to the keyring path
+on the first restart after this fix lands.
+
 ## TPM-sealed variant (separate ADR pending #118)
 
 `agent.keystore.tpm: true` opts into PCR-bound sealing (Phase 6
@@ -147,6 +172,12 @@ Phase 6 #121 cloud-VM exit validation against:
 The keyring-vs-file choice is logged at agent boot via the
 existing `keystore: <name>` slog line so operators can verify the
 selected store post-enroll.
+
+Pre-amendment (Phase 6 #117 → #121 window) the boot line read
+`keystore: file` on every standard host because the probe READ
+failed silently. Post-amendment it reads `keystore: kernel-keyring`
+on every kernel ≥ 3.5 with CONFIG_KEYS — the threat-model claim
+about `@u` being primary is now operative.
 
 ## References
 
