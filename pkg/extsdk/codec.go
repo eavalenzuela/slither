@@ -14,8 +14,9 @@ import (
 	"fmt"
 	"io"
 
-	pb "github.com/t3rmit3/slither/proto/gen/slither/v1"
 	"google.golang.org/protobuf/proto"
+
+	pb "github.com/t3rmit3/slither/proto/gen/slither/v1"
 )
 
 // MaxMessageSize bounds an individual length-delimited frame. 16 MiB

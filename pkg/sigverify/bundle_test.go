@@ -21,7 +21,7 @@ func makeTarGz(t *testing.T, dst string, files map[string]string, typeflag byte)
 	for name, body := range files {
 		hdr := &tar.Header{
 			Name:     name,
-			Mode:     0644,
+			Mode:     0o644,
 			Size:     int64(len(body)),
 			Typeflag: typeflag,
 		}

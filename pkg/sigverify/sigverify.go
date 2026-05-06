@@ -79,7 +79,11 @@ func VerifyBlob(ctx context.Context, artefactPath, sigPath, certPath string, opt
 		"--certificate", certPath,
 		artefactPath,
 	}
-	cmd := exec.CommandContext(ctx, bin, args...)
+	// G204: bin is the configured cosign path (default "cosign", resolved
+	// via exec.LookPath above). args are fixed literals plus operator-
+	// supplied identity/issuer/paths — no shell interpretation, no
+	// attacker-controlled command synthesis.
+	cmd := exec.CommandContext(ctx, bin, args...) //nolint:gosec // see comment above
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// cosign exits non-zero on policy mismatch and on missing /
