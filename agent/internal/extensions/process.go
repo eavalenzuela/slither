@@ -181,8 +181,6 @@ func (p *Process) runOnce(ctx context.Context) error {
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 
-	applyRSSLimit(cmd, int64(p.cfg.RSSLimitMiB)<<20)
-
 	if err := cmd.Start(); err != nil {
 		_ = extFile.Close()
 		return fmt.Errorf("start: %w", err)
@@ -190,6 +188,21 @@ func (p *Process) runOnce(ctx context.Context) error {
 	// extFile belongs to the child after exec; close our copy so EOF
 	// propagates correctly when the child exits.
 	_ = extFile.Close()
+
+	// Set the child's RLIMIT_AS via prlimit(2) — applies to the
+	// just-started PID only, leaving the supervisor's heap unbounded.
+	// The pre-fix implementation called setrlimit on the supervisor
+	// itself, which OOM-killed the agent once its own heap grew past
+	// the limit (Phase 6 #121 follow-up #1). Best-effort: a non-root
+	// edge case where the call returns EPERM logs but doesn't fail
+	// the spawn — the extension runs without a memory bound, which
+	// matches the v1 contract (RSSLimitMiB is best-effort).
+	if err := applyChildRSSLimit(cmd.Process.Pid, int64(p.cfg.RSSLimitMiB)<<20); err != nil {
+		slog.Warn("ext: rss limit not applied",
+			"ext", p.cfg.Name,
+			"pid", cmd.Process.Pid,
+			"err", err)
+	}
 
 	p.mu.Lock()
 	p.current = cmd

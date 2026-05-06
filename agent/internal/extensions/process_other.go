@@ -5,7 +5,6 @@ package extensions
 import (
 	"errors"
 	"os"
-	"os/exec"
 )
 
 // socketpair on non-Linux returns an error — the supervisor is
@@ -15,4 +14,4 @@ func socketpair() (agent *os.File, ext *os.File, err error) {
 	return nil, nil, errors.New("extensions: supervisor is Linux-only")
 }
 
-func applyRSSLimit(_ *exec.Cmd, _ int64) {}
+func applyChildRSSLimit(_ int, _ int64) error { return nil }

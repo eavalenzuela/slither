@@ -5,8 +5,9 @@ package extensions
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // socketpair allocates a connected AF_UNIX SOCK_STREAM pair. The
@@ -30,32 +31,38 @@ func socketpair() (agent, ext *os.File, err error) {
 	return agent, ext, nil
 }
 
-// applyRSSLimit sets RLIMIT_AS on the child via cmd.SysProcAttr.
-// RLIMIT_AS bounds total virtual address-space — exceeding it
-// triggers the kernel's OOM path against this process, which on
-// modern Linux is a clean SIGKILL. The supervisor's restart loop
-// observes the abnormal exit and ticks ext_restarts.
+// applyChildRSSLimit sets RLIMIT_AS on a freshly-spawned child via
+// prlimit(2). RLIMIT_AS bounds total virtual address-space — exceeding
+// it triggers the kernel's OOM path against the offender, which on
+// modern Linux is a clean SIGKILL the supervisor's restart loop
+// observes via the abnormal exit (ext_restarts ticks).
 //
-// Set per-extension; configurable via the extension config block.
+// The previous implementation called setrlimit on the supervisor
+// process itself before exec, on the assumption that exec inherited
+// rlimits. That was both true and catastrophic: the supervisor *did*
+// inherit the limit (correct), but it also ran under it for the rest
+// of its lifetime — once the supervisor's own heap mmap'd past 256
+// MiB it OOM-killed the agent during the next ext.Hello read. Phase 6
+// #121 V1 caught this under signature_verification: disabled, where
+// the cosign verify-blob path that normally allocates ahead of the
+// frame read isn't taken; production paths that load cosign happened
+// to clear the limit before the read so the bug stayed hidden.
+//
+// prlimit(pid, ...) sets the rlimit on the named pid only. Kernel
+// allows this when the caller's uid/gid + capabilities permit
+// CAP_SYS_RESOURCE on the target — agent runs as root in the standard
+// deployment so the call always succeeds; non-root edge cases (a
+// rootless dev shell) get a noisy log but no fatal: the extension
+// still runs, just unbounded.
+//
 // Bytes <= 0 is a no-op.
-func applyRSSLimit(cmd *exec.Cmd, bytes int64) {
+func applyChildRSSLimit(pid int, bytes int64) error {
 	if bytes <= 0 {
-		return
+		return nil
 	}
-	if cmd.SysProcAttr == nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	rl := unix.Rlimit{Cur: uint64(bytes), Max: uint64(bytes)}
+	if err := unix.Prlimit(pid, unix.RLIMIT_AS, &rl, nil); err != nil {
+		return fmt.Errorf("prlimit RLIMIT_AS pid=%d bytes=%d: %w", pid, bytes, err)
 	}
-	// SysProcAttr in Go's stdlib doesn't expose RLIMIT directly; we
-	// install via a Setrlimit call in the child via setpgid + rlimit
-	// pattern. The most portable shim is to wrap the binary in a small
-	// preamble — but that adds complexity. Pragmatic v1: set the
-	// supervisor's own limits to a per-spawn floor, exec inherits.
-	// This is approximate (the supervisor itself runs under it for
-	// the duration of the spawn) but correct for the common case where
-	// the agent is the only process the supervisor forks.
-	//
-	// TODO(#108): replace with a per-child rlimit via prctl/seccomp
-	// preamble or a small Go helper that calls setrlimit before exec.
-	rl := syscall.Rlimit{Cur: uint64(bytes), Max: uint64(bytes)}
-	_ = syscall.Setrlimit(syscall.RLIMIT_AS, &rl)
+	return nil
 }

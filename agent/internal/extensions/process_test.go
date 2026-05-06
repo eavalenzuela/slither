@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/t3rmit3/slither/agent/internal/config"
 	"github.com/t3rmit3/slither/agent/internal/telemetry"
 	"github.com/t3rmit3/slither/pkg/extsdk"
@@ -267,3 +269,47 @@ func withEnv(t *testing.T, key, val string, fn func() error) error {
 // Quiet linter on imported but conditionally used packages.
 var _ = json.Unmarshal
 var _ = extsdk.MaxMessageSize
+
+// TestApplyChildRSSLimit_DoesNotAffectParent locks down Phase 6 #121
+// follow-up #1: the previous applyRSSLimit implementation called
+// syscall.Setrlimit on the supervisor process before exec, which made
+// the supervisor itself run under the limit and OOM-killed the agent
+// once its heap mmap'd past 256 MiB. This test asserts (a) the
+// supervisor's own RLIMIT_AS is untouched after applyChildRSSLimit,
+// and (b) the child PID actually has the limit set.
+func TestApplyChildRSSLimit_DoesNotAffectParent(t *testing.T) {
+	const childLimit = int64(128) << 20
+
+	var before unix.Rlimit
+	if err := unix.Getrlimit(unix.RLIMIT_AS, &before); err != nil {
+		t.Fatalf("getrlimit before: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	t.Cleanup(cancel)
+	cmd := exec.CommandContext(ctx, "sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() })
+
+	if err := applyChildRSSLimit(cmd.Process.Pid, childLimit); err != nil {
+		t.Fatalf("applyChildRSSLimit: %v", err)
+	}
+
+	var after unix.Rlimit
+	if err := unix.Getrlimit(unix.RLIMIT_AS, &after); err != nil {
+		t.Fatalf("getrlimit after: %v", err)
+	}
+	if before != after {
+		t.Errorf("supervisor RLIMIT_AS changed: before=%+v after=%+v", before, after)
+	}
+
+	var child unix.Rlimit
+	if err := unix.Prlimit(cmd.Process.Pid, unix.RLIMIT_AS, nil, &child); err != nil {
+		t.Fatalf("prlimit child: %v", err)
+	}
+	if child.Cur != uint64(childLimit) {
+		t.Errorf("child RLIMIT_AS Cur = %d, want %d", child.Cur, childLimit)
+	}
+}

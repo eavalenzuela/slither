@@ -2156,24 +2156,48 @@ Secure Boot implementations).
 - **Phase 6 #121 follow-ups (filed 2026-05-05).** Six bugs the
   operator-driven cloud-VM exit validation surfaced. None block
   Phase 6 close; all are picked up here on demand:
-  1. **Extension supervisor OOM under
-     `signature_verification: disabled`.** With cosign verify
-     turned off, the agent crashes with `runtime: out of memory`
-     during the Hello-frame read on the socketpair fd. Stack:
-     `extsdk.readUvarint → readFrame → ReadExtensionToAgent →
-     readHello`. Likely an interaction between the extension
-     child's `setrlimit(RLIMIT_AS)` and the parent's mmap-based
-     heap growth. Production has cosign on PATH so the path is
-     functionally unreachable — fix is operator-grade hygiene,
-     not user-facing.
+  1. ✅ **Extension supervisor OOM under
+     `signature_verification: disabled`** (resolved 2026-05-06).
+     Root cause was operator-grade but real: `applyRSSLimit`
+     called `syscall.Setrlimit` on the supervisor process before
+     `cmd.Start()` on the assumption that exec inherited rlimits.
+     That worked — and was catastrophic, since the supervisor
+     itself ran under the limit and OOM-killed the agent the
+     moment its own heap mmap'd past 256 MiB. The cosign
+     verify-blob path that normally allocates ahead of the Hello
+     read happened to clear the limit before the read on
+     production paths, hiding the bug everywhere except
+     `signature_verification: disabled`. Replaced with
+     `applyChildRSSLimit(pid, bytes)` using `unix.Prlimit(2)`
+     after `cmd.Start()` — applies to the named pid only; the
+     supervisor's heap stays unbounded. New
+     `TestApplyChildRSSLimit_DoesNotAffectParent` regression
+     test pins the contract.
   2. **arm64 BPF CO-RE relocation failure (net collector).**
      `agent/internal/bpf/src/*.o` are pre-compiled via `bpf2go`
      on amd64. arm64 kernel BTF rejects the net collector's
      `handle_inet_csk_accept` retprobe with `bad CO-RE
      relocation: invalid func unknown#195896080`. Workaround:
-     `net.enabled=false` on arm64. Fix: regenerate per-arch `.o`
-     files via `bpf2go` in the build pipeline, ship them
-     side-by-side, pick at load time.
+     `net.enabled=false` on arm64.
+     **Refined scope (2026-05-06):** Spike attempted
+     `bpf2go -target amd64,arm64`. Tracepoint-based collectors
+     (process, file) regenerate cleanly per-arch — no PT_REGS
+     macros, no arch-specific struct layout. Net (kprobes on
+     `inet_csk_accept` + `tcp_v4_connect`) failed because the
+     vendored `vmlinux.h` is amd64-derived: when bpf2go
+     cross-compiles for `__TARGET_ARCH_arm64`, the PT_REGS
+     macros expand to `(x)->regs[0]` but the vendored `pt_regs`
+     struct only has `di`/`si`/etc. Real fix needs either
+     (a) a vendored `vmlinux_arm64.h` paired with arch-conditional
+     includes in `vmlinux.h`, sourced from libbpf-bootstrap or
+     `bpftool btf dump` on an arm64 host; or
+     (b) per-arch CI runners that each generate their own
+     `vmlinux.h` via `bpftool btf dump` against the runner's own
+     kernel and run `make gen-bpf` natively. Either path is a
+     real eng chunk that this dev box can't fully satisfy alone
+     (no arm64 host, no pre-baked headers reachable from this
+     environment). Held until either the headers land or CI gets
+     an arm64 runner.
   3. ✅ **Keystore `@u` probe possession-traversal bug** (resolved
      2026-05-06). `tryKeyringPlatform` now issues
      `keyctl(KEYCTL_LINK, @u, @s)` before the probe READ, so the
