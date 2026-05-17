@@ -1,0 +1,28 @@
+title: Write to /etc/ld.so.preload
+id: 8b7c4d00-0001-4000-8000-00000000003c
+status: experimental
+description: |
+  A process wrote to /etc/ld.so.preload — the global dynamic-linker
+  preload list. Any shared object listed there is loaded into every
+  dynamically linked process on the host, which makes the file a
+  high-value rootkit / userland-implant persistence primitive.
+  T1574.006 (Hijack Execution Flow: Dynamic Linker Hijacking). The
+  file is essentially never written in normal operation, so the write
+  event itself is the signal; a small package-manager allowlist covers
+  the rare legitimate case.
+level: high
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.t1574.006
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection:
+    TargetFilename: /etc/ld.so.preload
+  benign_writer:
+    Image|endswith:
+      - /dpkg
+      - /rpm
+  condition: selection and not benign_writer

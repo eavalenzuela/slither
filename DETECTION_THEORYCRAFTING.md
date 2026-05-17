@@ -30,11 +30,13 @@ OCSF classes the agent currently emits (Phase 1 complete):
 
 **Open data gaps that limit detection design:**
 
-- `file_activity` rules can match the *actor process* but not the *target path
-  in Sigma syntax* — file-event rules today rely on `enricher` filters set
-  up at config time. To express "writes to `/etc/cron.d/*`" as a rule, we'd
-  need a `TargetFilename` (or similar) field exposed in the rule engine.
-  Cost: small. ~half-day.
+- ~~`file_activity` rules can't match the target path in Sigma syntax.~~
+  **Corrected 2026-05-17:** this gap does not exist. `pkg/ruleeval/fields.go`
+  already maps `TargetFilename` (plus `Filename` / `Path` aliases) onto the
+  file event's path, and eight shipped `file-*` rules use it
+  (`TargetFilename|startswith: /etc/cron.d/` etc.). Backlog #5/#9/#10 were
+  marked BLOCKED on a field that already existed — they shipped with no
+  engine work.
 - No `User` resolution beyond UID/name as captured at enrich time. No group
   membership, no `setuid`/`setgid` flagging on the exec event itself. T1548
   (Abuse Elevation) detection is hampered.
@@ -50,7 +52,7 @@ OCSF classes the agent currently emits (Phase 1 complete):
 
 ## Coverage map (current pack vs ATT&CK)
 
-Tactic-by-tactic snapshot of what's in `rules/linux/` right now (47 rules).
+Tactic-by-tactic snapshot of what's in `rules/linux/` right now (50 rules).
 
 ### Initial Access
 - **None directly.** Initial access is mostly network-edge, which is out of
@@ -75,10 +77,11 @@ Tactic-by-tactic snapshot of what's in `rules/linux/` right now (47 rules).
 - ✅ `proc-at-job-schedule` (T1053.001 at, parallel) — verify
 - ✅ `file-systemd-user-unit-write` (T1543.002 user systemd, parallel) — verify
 - ✅ `file-motd-script-drop` (T1037.004 motd, parallel) — verify
-- **Gaps:** systemd *system* unit creation/modification (T1543.002 root variant),
-  `update-alternatives` link manipulation, PAM module drop, LD_PRELOAD env
-  in shell init dotfiles, `/etc/profile.d/*` script drop, kernel module
-  install (T1547.006).
+- ✅ `file-systemd-system-unit-write` (T1543.002 system unit)
+- ✅ `file-ld-preload-write` (T1574.006 dynamic-linker hijack)
+- **Gaps:** `update-alternatives` link manipulation, `/etc/profile.d/*`
+  script drop, kernel module install (T1547.006). The dotfile `LD_PRELOAD=`
+  variant is unreachable — file events carry no content (see backlog #9).
 
 ### Privilege Escalation (T1548, T1068)
 - ✅ `proc-chmod-world-writable` (T1222.002 perms manipulation)
@@ -108,6 +111,7 @@ Tactic-by-tactic snapshot of what's in `rules/linux/` right now (47 rules).
 - ✅ `proc-procfs-environ-scrape` (T1552.001 env-from-/proc, parallel) — verify
 - ✅ `proc-history-cred-grep` (T1552.003 shell history, parallel) — verify
 - ✅ `proc-ssh-private-key-access` (T1552.004, parallel) — verify
+- ✅ `file-pam-module-drop` (T1556.003 malicious PAM module)
 - **Gaps:** GCP/Azure cloud cred files (analogue to AWS), kubeconfig
   read by non-kubectl process, docker config.json read, gnome-keyring DB
   files, browser cookie/login DB files, `gpg --export-secret-keys`,
@@ -211,15 +215,16 @@ disambiguating conjunction**, **severity**, **data dependency**, **noise risk**.
   the rule field. Cost: medium — process.bpf.c would need to read `/proc/[pid]/environ`
   on exec or capture from `bprm->envp`.
 
-### 5. `file-systemd-system-unit-write` — high — needs file-target field
-- **Fires when:** any process writes to `/etc/systemd/system/*.service` or
-  `/usr/lib/systemd/system/*.service` AND the writing process is not in
-  {dpkg, rpm, systemctl, systemd-sysv-generator}.
-- **Why not noisy:** parent allowlist excludes the entire legitimate path.
-- **Data:** **BLOCKED** on `TargetFilename` field in file_activity rule
-  surface. Today the file enricher filters at config time; rules can't
-  match path patterns. Cost: small — extend `agent/internal/ruleengine/fields.go`
-  to bind `TargetFilename` from the file-event payload.
+### 5. `file-systemd-system-unit-write` — high — ✅ SHIPPED (id …03b)
+- **Fires when:** a process writes a `.service`/`.timer`/`.socket` file under
+  a systemd system-unit directory AND the writing process is not in
+  {dpkg, rpm, systemctl, systemd, systemd-sysv-generator, apt, dnf, yum,
+  snapd, unattended-upgrade}.
+- **Why not noisy:** writer allowlist excludes the entire legitimate path.
+- **Data:** `TargetFilename` already exists (see corrected data-gap note
+  above) — no engine work. **Shipped 2026-05-17** as T1543.002. Broadened
+  to `.timer`/`.socket` beyond the doc's original `.service`-only scope;
+  both are equally valid persistence units.
 
 ### 6. `net-webhook-beacon` — medium — ✅ SHIPPED (id …039)
 - **Fires when:** process is `curl`/`wget` AND cmdline contains any of
@@ -257,19 +262,29 @@ disambiguating conjunction**, **severity**, **data dependency**, **noise risk**.
   Ships `status: experimental` like the rest of the pack; default-enabled
   vs -disabled is a server-side `rules.enabled` decision, still open below.
 
-### 9. `proc-ld-preload-shell-init` — medium — needs file-target field
-- **Fires when:** file write to `/etc/ld.so.preload`, or file write to any
-  `~/.bashrc`/`~/.profile`/`~/.bash_profile` that includes a `LD_PRELOAD=`
-  cmdline pattern.
-- **Data:** **BLOCKED** on `TargetFilename` field (same blocker as #5).
+### 9. `file-ld-preload-write` — high — ✅ SHIPPED (id …03c) — partial
+- **Fires when:** any process writes to `/etc/ld.so.preload`, excluding
+  dpkg/rpm.
+- **Data:** `TargetFilename` already exists — no engine work.
+  **Shipped 2026-05-17** as T1574.006, severity raised medium→high (a
+  global-preload SO is loaded into *every* process — that warrants
+  response). The dotfile half of the original idea (a `LD_PRELOAD=` line
+  appearing inside `~/.bashrc`) is **not shippable**: file events carry
+  the path and writer, not file *content* — there's no collector that
+  inspects written bytes. That clause is dropped, not parked.
 
-### 10. `file-pam-module-drop` — high — needs file-target field
-- **Fires when:** a non-root non-package-manager process writes to
-  `/lib/security/*.so` or `/usr/lib/x86_64-linux-gnu/security/*.so` (PAM
-  module path).
+### 10. `file-pam-module-drop` — high — ✅ SHIPPED (id …03d)
+- **Fires when:** a `.so` is written into a PAM module directory
+  (`/lib*/security/`, `/usr/lib*/security/`, the multiarch
+  `*-linux-gnu/security/` paths) by a process not in
+  {dpkg, rpm, apt, apt-get, dnf, yum}.
 - **Why not noisy:** PAM module install is exclusively a package-manager
   operation in normal ops.
-- **Data:** **BLOCKED** on `TargetFilename` field.
+- **Data:** `TargetFilename` already exists — no engine work.
+  **Shipped 2026-05-17** as T1556.003. The doc's "non-root" criterion was
+  dropped: a root-level attacker dropping a PAM module is precisely the
+  threat, so excluding root would be a hole. Package-manager exclusion
+  alone carries the rule.
 
 ## Phase-3-unlocks
 

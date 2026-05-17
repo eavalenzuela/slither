@@ -1,0 +1,40 @@
+title: PAM module written outside package management
+id: 8b7c4d00-0001-4000-8000-00000000003d
+status: experimental
+description: |
+  A shared object was written into a PAM module directory by a process
+  that is not a package manager. T1556.003 (Modify Authentication
+  Process: Pluggable Authentication Modules). A malicious PAM module is
+  a durable credential-theft and authentication-bypass mechanism; PAM
+  module installation in normal operation is exclusively a dpkg/rpm
+  operation, so the parent-process allowlist is the conjunction.
+level: high
+tags:
+  - attack.persistence
+  - attack.credential_access
+  - attack.t1556.003
+logsource:
+  product: linux
+  category: file_event
+detection:
+  pam_dir:
+    TargetFilename|startswith:
+      - /lib/security/
+      - /lib64/security/
+      - /usr/lib/security/
+      - /usr/lib64/security/
+      - /lib/x86_64-linux-gnu/security/
+      - /usr/lib/x86_64-linux-gnu/security/
+      - /lib/aarch64-linux-gnu/security/
+      - /usr/lib/aarch64-linux-gnu/security/
+  shared_object:
+    TargetFilename|endswith: .so
+  benign_writer:
+    Image|endswith:
+      - /dpkg
+      - /rpm
+      - /apt
+      - /apt-get
+      - /dnf
+      - /yum
+  condition: pam_dir and shared_object and not benign_writer

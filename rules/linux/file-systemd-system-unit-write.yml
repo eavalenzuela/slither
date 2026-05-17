@@ -1,0 +1,43 @@
+title: systemd system unit file written outside package management
+id: 8b7c4d00-0001-4000-8000-00000000003b
+status: experimental
+description: |
+  A .service / .timer / .socket unit file under a systemd system-unit
+  directory was written by a process that is not a package manager or
+  systemd itself. T1543.002 (Create or Modify System Process: systemd
+  Service). Legitimate unit installation is almost exclusively a
+  dpkg/rpm/systemctl operation; the parent-process allowlist is the
+  conjunction that separates persistence from normal provisioning.
+level: high
+tags:
+  - attack.persistence
+  - attack.t1543.002
+logsource:
+  product: linux
+  category: file_event
+detection:
+  unit_dir:
+    TargetFilename|startswith:
+      - /etc/systemd/system/
+      - /usr/lib/systemd/system/
+      - /lib/systemd/system/
+      - /run/systemd/system/
+  unit_suffix:
+    TargetFilename|endswith:
+      - .service
+      - .timer
+      - .socket
+  benign_writer:
+    Image|endswith:
+      - /dpkg
+      - /rpm
+      - /systemctl
+      - /systemd
+      - /systemd-sysv-generator
+      - /apt
+      - /apt-get
+      - /dnf
+      - /yum
+      - /snapd
+      - /unattended-upgrade
+  condition: unit_dir and unit_suffix and not benign_writer
