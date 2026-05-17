@@ -52,7 +52,7 @@ OCSF classes the agent currently emits (Phase 1 complete):
 
 ## Coverage map (current pack vs ATT&CK)
 
-Tactic-by-tactic snapshot of what's in `rules/linux/` right now (51 rules).
+Tactic-by-tactic snapshot of what's in `rules/linux/` right now (57 rules).
 
 ### Initial Access
 - **None directly.** Initial access is mostly network-edge, which is out of
@@ -65,7 +65,8 @@ Tactic-by-tactic snapshot of what's in `rules/linux/` right now (51 rules).
 - ✅ `proc-curl-pipe-shell` (T1059.004 + T1105)
 - ✅ `proc-python-inline-script` (T1059.006, tightened with payload tokens)
 - ✅ `proc-exec-from-world-writable` (T1059.004, tightened with parent excl.)
-- **Gaps:** perl/ruby one-liners (analogous to python), `awk system()`,
+- ✅ `proc-perl-ruby-reverse-shell` (T1059.006 perl/ruby/php one-liners)
+- **Gaps:** `awk system()`,
   `gawk @load`, busybox unusual subcommand misuse, `osascript`-style binary
   abuse (no Linux equivalent), in-memory loaders via `memfd_create` (needs
   syscall trace).
@@ -79,15 +80,17 @@ Tactic-by-tactic snapshot of what's in `rules/linux/` right now (51 rules).
 - ✅ `file-motd-script-drop` (T1037.004 motd, parallel) — verify
 - ✅ `file-systemd-system-unit-write` (T1543.002 system unit)
 - ✅ `file-ld-preload-write` (T1574.006 dynamic-linker hijack)
+- ✅ `proc-kmod-load-from-staging` (T1547.006 module load from staging dir)
 - **Gaps:** `update-alternatives` link manipulation, `/etc/profile.d/*`
-  script drop, kernel module install (T1547.006). The dotfile `LD_PRELOAD=`
+  script drop. The dotfile `LD_PRELOAD=`
   variant is unreachable — file events carry no content (see backlog #9).
 
 ### Privilege Escalation (T1548, T1068)
 - ✅ `proc-chmod-world-writable` (T1222.002 perms manipulation)
 - ✅ `proc-find-suid-discovery` (T1083 + recon for SUID escalation)
 - ✅ `proc-sudo-rights-probe` (T1548.003, parallel) — verify
-- **Gaps:** `setcap` invocation (capability escalation), `pkexec` abuse
+- ✅ `proc-setcap-privileged-grant` (T1548 capability escalation)
+- **Gaps:** `pkexec` abuse
   (CVE-2021-4034 family), `unshare`/`nsenter` unusual invocation, `dirtypipe`
   artefact patterns. Most of T1068 is exploit-specific and best caught by
   collector-level signals (e.g. `bpf_probe_read_kernel` from non-root) which
@@ -99,9 +102,9 @@ Tactic-by-tactic snapshot of what's in `rules/linux/` right now (51 rules).
 - ✅ `proc-security-tool-disable` (T1562.001 disable security units)
 - ✅ `proc-firewall-flush` (T1562.004 firewall flush)
 - ✅ `proc-history-disable` (T1070.003 clear command history)
-- **Gaps:** `auditctl -D` / `auditctl -e 0` (T1562.001 disable audit
-  ruleset specifically), `chattr +i` on log files, `wipe` / `shred`
-  against logs.
+- ✅ `proc-auditd-ruleset-disable` (T1562.001 in-place audit ruleset kill)
+- ✅ `proc-shred-wipe-logs` (T1070.002 secure-delete of system logs)
+- **Gaps:** `chattr +i` on log/persistence files (→ batch 2 B9).
 
 ### Credential Access (T1003, T1552, T1555)
 - ✅ `file-etc-shadow-access` (T1003.008 /etc/shadow read)
@@ -112,10 +115,10 @@ Tactic-by-tactic snapshot of what's in `rules/linux/` right now (51 rules).
 - ✅ `proc-history-cred-grep` (T1552.003 shell history, parallel) — verify
 - ✅ `proc-ssh-private-key-access` (T1552.004, parallel) — verify
 - ✅ `file-pam-module-drop` (T1556.003 malicious PAM module)
-- **Gaps:** GCP/Azure cloud cred files (analogue to AWS), kubeconfig
-  read by non-kubectl process, docker config.json read, gnome-keyring DB
-  files, browser cookie/login DB files, `gpg --export-secret-keys`,
-  `pass`/`gopass` invocation by non-interactive parent.
+- ✅ `proc-gpg-secret-key-export` (T1552.004 private-key export)
+- **Gaps:** GCP/Azure/k8s cloud cred files (→ batch 2 B6), gnome-keyring DB
+  files, browser cookie/login DB files, `pass`/`gopass` invocation by
+  non-interactive parent.
 
 ### Discovery (T1018, T1057, T1082, T1083, T1087)
 - ✅ `proc-find-suid-discovery` (T1083)
@@ -164,10 +167,15 @@ Tactic-by-tactic snapshot of what's in `rules/linux/` right now (51 rules).
 - **Gaps:** `cryptsetup luksFormat` against a mounted device, `wipefs`,
   mass-rename ransomware thresholding (needs Phase 3 — see below).
 
-## Backlog: proposed rules (next batch)
+## Backlog: proposed rules (batch 1 — drained)
 
 Ranked roughly by signal/effort. Each entry: **what fires**, **the
 disambiguating conjunction**, **severity**, **data dependency**, **noise risk**.
+
+**Status (2026-05-17):** 9 of 10 shipped. Only #4 (`proc-pkexec-suspicious-env`)
+remains — genuinely blocked on an `EnvVars` rule field, which is collector
+work in `process.bpf.c` (read `/proc/[pid]/environ` or `bprm->envp`), not a
+rule. See batch 2 below for the next round.
 
 ### 1. `proc-security-tool-disable` — high — ✅ SHIPPED (id …036)
 - **Fires when:** `systemctl` (or `service`) invoked with `stop|disable|mask|kill`
@@ -294,6 +302,120 @@ disambiguating conjunction**, **severity**, **data dependency**, **noise risk**.
   threat, so excluding root would be a hole. Package-manager exclusion
   alone carries the rule.
 
+## Backlog: proposed rules (batch 2)
+
+Drawn from the coverage-map gaps above, same entry format as batch 1.
+All ten match on data the agent ships today (process_creation +
+file_event); none need collector or engine work. Ranked by signal/effort.
+
+### B1. `proc-perl-ruby-reverse-shell` — high — ✅ SHIPPED (id …03f)
+- **Fires when:** `perl` / `ruby` / `php` invoked with `-e` (or php `-r`)
+  whose inline script carries socket-plus-exec tokens — the interpreter
+  analogue of `proc-python-inline-script` (T1059.006).
+- **Conjunction:** interpreter image + `-e`/`-r` flag + a payload token
+  (`IO::Socket`, `Socket::INET`, `fsockopen`, `exec(`, `/dev/tcp/`,
+  `dup2`, `>&`). Bare `perl -e` is a common admin one-liner; the payload
+  token is the disambiguator, exactly as in the Python rule.
+- **Severity:** high. **Data:** existing fields. **Noise:** low given the
+  token conjunction.
+
+### B2. `proc-auditd-ruleset-disable` — high — ✅ SHIPPED (id …040)
+- **Fires when:** `auditctl` invoked with `-e 0` (disable auditing) or
+  `-D` (delete all rules). T1562.001.
+- **Conjunction:** `Image|endswith /auditctl` + `CommandLine|contains`
+  one of ` -e 0`, ` -e0`, ` -D`.
+- **Severity:** high. **Data:** existing fields. **Noise:** very low —
+  almost never benign in steady state. Note overlap: `systemctl stop
+  auditd` is already caught by `proc-security-tool-disable`; this catches
+  the *in-place* ruleset kill that leaves the unit running and green.
+
+### B3. `proc-kmod-load-from-staging` — high — ✅ SHIPPED (id …041)
+- **Fires when:** `insmod` / `modprobe` / `kmod` loads a module from a
+  world-writable or non-standard path (`/tmp`, `/var/tmp`, `/dev/shm`,
+  `/home`). T1547.006 / T1014 (rootkit loader).
+- **Conjunction:** loader image + `CommandLine|contains` a staging-dir
+  path. Legitimate loads come from `/lib/modules/`; modprobe-by-name
+  carries no path and deliberately won't match (that's the boot noise).
+- **Severity:** high. **Data:** existing fields. **Noise:** low.
+
+### B4. `proc-setcap-privileged-grant` — high — ✅ SHIPPED (id …042)
+- **Fires when:** `setcap` grants an escalation-relevant capability —
+  `cap_setuid`, `cap_setgid`, `cap_dac_override`, `cap_dac_read_search`,
+  `cap_sys_admin`, `cap_sys_ptrace`, `cap_sys_module`, `cap_bpf` — with
+  an `+e` activation. T1548.
+- **Conjunction:** `Image|endswith /setcap` + a watched cap name + `+e`.
+  `cap_net_raw` / `cap_net_bind_service` are deliberately *off* the watch
+  list (ping/webservers legitimately get them); a dpkg/rpm parent
+  exclusion handles the rest of package-install noise.
+- **Severity:** high. **Data:** existing fields. **Noise:** low.
+
+### B5. `proc-gpg-secret-key-export` — medium — ✅ SHIPPED (id …043)
+- **Fires when:** `gpg` / `gpg2` invoked with `--export-secret-keys` or
+  `--export-secret-subkeys`. T1552.004.
+- **Conjunction:** gpg image + `CommandLine|contains --export-secret`.
+- **Severity:** medium — exporting private key material is deliberate and
+  uncommon, but backup tooling occasionally does it. **Data:** existing
+  fields. **Noise:** low.
+
+### B6. `file-cloud-cred-file-read` — medium — ready
+- **Fires when:** a non-first-party process reads a non-AWS cloud
+  credential file — `~/.config/gcloud/`, `~/.azure/`, `~/.kube/config`,
+  `~/.docker/config.json`, `~/.config/gh/hosts.yml`. Extends
+  `file-aws-credentials-read` to the rest of the cloud cred surface
+  (T1552.001).
+- **Conjunction:** `TargetFilename|contains` the cred path AND
+  `Image|endswith` *not* in {gcloud, gsutil, az, kubectl, helm, docker,
+  dockerd, gh}.
+- **Severity:** medium. **Data:** file_event read events (proven by
+  `file-etc-shadow-access` / `file-aws-credentials-read`); `TargetFilename`
+  exists. **Noise:** medium — `~/.kube/config` is the noisiest member
+  (editors, tab-completion); split it to its own rule if it dominates.
+
+### B7. `proc-packet-capture-to-file` — medium — ready
+- **Fires when:** `tcpdump` / `tshark` / `dumpcap` invoked with a
+  write-to-file flag (`-w`). T1040 — capture-to-file is the staging tell
+  versus live troubleshooting.
+- **Conjunction:** capture-tool image + `CommandLine|contains ' -w '`.
+- **Severity:** medium. **Data:** existing fields. **Noise:** medium —
+  netops debugging writes pcaps too; pair with a non-root / unusual-parent
+  refinement in production.
+
+### B8. `proc-shred-wipe-logs` — high — ✅ SHIPPED (id …044)
+- **Fires when:** `shred` / `wipe` / `srm` targets a system log path.
+  Complements `proc-log-truncate` — truncate is recoverable-ish, secure
+  deletion is destruction. T1070.002 + T1485.
+- **Conjunction:** tool image + `CommandLine|contains` `/var/log` or a
+  known log basename (`/auth.log`, `/secure`, `/syslog`, `/messages`,
+  `/wtmp`, `/btmp`, `/lastlog`).
+- **Severity:** high. **Data:** existing fields. **Noise:** very low.
+
+### B9. `proc-chattr-immutable-set` — medium — ready
+- **Fires when:** `chattr +i` / `+a` applied to a sensitive path — a log
+  file, an `/etc` config, an `authorized_keys`, a persistence file. Two
+  reads: locking a log so it can't be rotated/cleared, or locking a
+  backdoor file so the operator can't remove it. T1222.002 / T1565.001.
+- **Conjunction:** `Image|endswith /chattr` + `CommandLine|contains`
+  `+i`/`+a` + a sensitive-path token.
+- **Severity:** medium. **Data:** existing fields. **Noise:** low-medium.
+
+### B10. `proc-tunnel-tool-exec` — medium — ready
+- **Fires when:** a userland tunneling / reverse-proxy tool runs —
+  `chisel`, `frpc`/`frps`, `gost`, `ngrok`, `cloudflared tunnel`,
+  `pagekite` — or `ssh` with `-R` / `-D` (reverse / dynamic forward).
+  T1572 / T1090 — single-host tell for lateral movement and C2 egress.
+- **Conjunction:** image endswith a tunnel binary, OR (`ssh` image +
+  `CommandLine|contains ' -R '`/`' -D '`).
+- **Severity:** medium. **Data:** existing fields. **Noise:** medium —
+  `ngrok`/`cloudflared` and `ssh -R` have legitimate dev / jump-host uses;
+  ship default-disabled or environment-scoped.
+
+**Still genuinely blocked (not re-proposed):**
+- In-memory execution via `memfd_create` + `execveat` — needs a syscall
+  trace the agent doesn't collect.
+- The dotfile `LD_PRELOAD=` content match (batch 1 #9) — file events
+  carry path + writer, never written bytes.
+- `proc-pkexec-suspicious-env` (batch 1 #4) — needs an `EnvVars` field.
+
 ## Stateful / correlation candidates
 
 Patterns that need the stateful runtime. **Phase 3 closed 2026-04-29** —
@@ -335,3 +457,13 @@ evaluator, which is why they are not yet rules.
 - _Operator UX: does flagging a "verify" parallel-process rule above mean
   we re-review them as a batch, or trust the parallel author and audit
   spot-checks only?_
+- _Default-disabled rules: crypto-miner (batch 1 #8), `proc-packet-capture-
+  to-file` (B7) and `proc-tunnel-tool-exec` (B10) all have legitimate-use
+  noise that argues for ship-default-disabled. There's no `enabled:` key in
+  the rule YAML — enablement is the server-side `rules.enabled` flag. Do we
+  want a YAML `status:` value (e.g. `status: deprecated`/a new `optional`)
+  or a doc-level convention that the seed migration inserts these rows
+  disabled? Worth an ADR if it touches the rule schema._
+- _`file-cloud-cred-file-read` (B6): ship `~/.kube/config` in the same rule
+  or split it out? It is the highest-FP member of the set (editors,
+  shell completion). Decide at implementation time against test noise._

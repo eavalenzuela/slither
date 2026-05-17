@@ -1,0 +1,30 @@
+title: Kernel module loaded from a staging directory
+id: 8b7c4d00-0001-4000-8000-000000000041
+status: experimental
+description: |
+  insmod / modprobe / kmod loaded a module via a path under a
+  world-writable or non-standard staging directory (/tmp, /var/tmp,
+  /dev/shm, /home). T1547.006 (Kernel Modules and Extensions) / T1014
+  (Rootkit). Legitimate module loads resolve out of /lib/modules/;
+  modprobe-by-name carries no path and deliberately does not match —
+  that is the boot-time noise this rule avoids.
+level: high
+tags:
+  - attack.persistence
+  - attack.t1547.006
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  loader:
+    Image|endswith:
+      - /insmod
+      - /modprobe
+      - /kmod
+  staging_path:
+    CommandLine|contains:
+      - /tmp/
+      - /var/tmp/
+      - /dev/shm/
+      - /home/
+  condition: loader and staging_path

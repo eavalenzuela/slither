@@ -1,0 +1,42 @@
+title: Perl/Ruby/PHP inline script with reverse-shell tokens
+id: 8b7c4d00-0001-4000-8000-00000000003f
+status: experimental
+description: |
+  perl / ruby / php invoked with an inline script (-e or php -r) whose
+  body carries socket-creation or stdio-redirection tokens characteristic
+  of a reverse shell or in-memory loader. T1059.006 (Command and Scripting
+  Interpreter). The interpreter analogue of proc-python-inline-script:
+  bare `perl -e` one-liners are ordinary admin glue, so the conjunction
+  with a socket / dup2 / interactive-shell token is the actual signal.
+level: high
+tags:
+  - attack.execution
+  - attack.t1059.006
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  interpreter:
+    Image|endswith:
+      - /perl
+      - /ruby
+      - /php
+    CommandLine|contains:
+      - ' -e '
+      - " -e'"
+      - ' -e"'
+      - ' -r '
+      - " -r'"
+  payload_tokens:
+    CommandLine|contains:
+      - 'IO::Socket'
+      - 'Socket::INET'
+      - 'sockaddr_in'
+      - 'fsockopen'
+      - 'TCPSocket'
+      - '/dev/tcp/'
+      - 'dup2'
+      - '/bin/sh -i'
+      - '/bin/bash -i'
+      - 'sh -i 2>&1'
+  condition: interpreter and payload_tokens

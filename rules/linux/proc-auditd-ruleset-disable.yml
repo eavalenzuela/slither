@@ -1,0 +1,27 @@
+title: auditd ruleset disabled in place
+id: 8b7c4d00-0001-4000-8000-000000000040
+status: experimental
+description: |
+  auditctl invoked to disable auditing (`-e 0`) or delete the entire
+  audit ruleset (`-D`). T1562.001 (Impair Defenses: Disable or Modify
+  Tools). This is the in-place kill that leaves the auditd unit running
+  and green — distinct from `systemctl stop auditd`, which
+  proc-security-tool-disable already catches. An `auditctl -e 0` / `-D`
+  in steady-state operation is almost never benign.
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  auditctl:
+    Image|endswith:
+      - /auditctl
+  disable_action:
+    CommandLine|contains:
+      - ' -e 0'
+      - ' -e0'
+      - ' -D'
+  condition: auditctl and disable_action

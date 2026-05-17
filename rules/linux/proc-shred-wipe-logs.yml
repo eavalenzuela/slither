@@ -1,0 +1,36 @@
+title: System log securely deleted with shred/wipe
+id: 8b7c4d00-0001-4000-8000-000000000044
+status: experimental
+description: |
+  shred / wipe / srm invoked against a system log or accounting file
+  (/var/log paths, auth.log, secure, syslog, messages, wtmp, btmp,
+  lastlog) or shell history. T1070.002 (Indicator Removal: Clear Linux
+  System Logs). Complements proc-log-truncate — truncation is roughly
+  recoverable, secure deletion is destruction. Secure-deleting a log
+  file is essentially never benign.
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1070.002
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  wipe_tool:
+    Image|endswith:
+      - /shred
+      - /wipe
+      - /srm
+  log_target:
+    CommandLine|contains:
+      - /var/log
+      - /auth.log
+      - /secure
+      - /syslog
+      - /messages
+      - /kern.log
+      - /wtmp
+      - /btmp
+      - /lastlog
+      - /.bash_history
+  condition: wipe_tool and log_target

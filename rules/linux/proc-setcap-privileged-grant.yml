@@ -1,0 +1,51 @@
+title: Privileged capability granted to a binary via setcap
+id: 8b7c4d00-0001-4000-8000-000000000042
+status: experimental
+description: |
+  setcap granted an escalation-relevant file capability (cap_setuid,
+  cap_dac_override, cap_sys_admin, cap_sys_ptrace, cap_sys_module,
+  cap_bpf, …) to a binary with an effective+permitted activation.
+  T1548 (Abuse Elevation Control Mechanism) — a capability-bearing
+  binary is a durable, SUID-free privilege-escalation primitive.
+  cap_net_raw / cap_net_bind_service are deliberately not watched
+  (ping and web servers legitimately receive them), and a
+  package-manager parent is excluded.
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.t1548
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  setcap:
+    Image|endswith:
+      - /setcap
+  privileged_cap:
+    CommandLine|contains:
+      - cap_setuid
+      - cap_setgid
+      - cap_dac_override
+      - cap_dac_read_search
+      - cap_sys_admin
+      - cap_sys_ptrace
+      - cap_sys_module
+      - cap_sys_rawio
+      - cap_bpf
+      - cap_chown
+  activation:
+    CommandLine|contains:
+      - +ep
+      - +eip
+      - +ei
+      - =ep
+      - =eip
+  benign_parent:
+    ParentImage|endswith:
+      - /dpkg
+      - /rpm
+      - /apt
+      - /apt-get
+      - /dnf
+      - /yum
+  condition: setcap and privileged_cap and activation and not benign_parent
