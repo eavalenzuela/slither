@@ -1,0 +1,42 @@
+title: Cloud credential file read outside its first-party CLI
+id: 8b7c4d00-0001-4000-8000-000000000045
+status: experimental
+description: |
+  A GCP / Azure / Kubernetes / Docker / GitHub credential file was read
+  by a process that is not the matching first-party CLI. T1552.001
+  (Unsecured Credentials: Credentials In Files). Extends
+  file-aws-credentials-read to the rest of the cloud-credential surface.
+  The first-party-CLI allowlist is the conjunction — gcloud reading
+  ~/.config/gcloud is normal; cat / a shell / an unknown binary reading
+  it is the signal.
+level: medium
+tags:
+  - attack.credential_access
+  - attack.t1552.001
+logsource:
+  product: linux
+  category: file_event
+detection:
+  cred_file:
+    TargetFilename|contains:
+      - /.config/gcloud/
+      - /.azure/
+      - /.kube/config
+      - /.docker/config.json
+      - /.config/gh/hosts.yml
+      - /.config/doctl/
+  first_party_cli:
+    Image|endswith:
+      - /gcloud
+      - /gsutil
+      - /bq
+      - /az
+      - /kubectl
+      - /helm
+      - /k9s
+      - /docker
+      - /dockerd
+      - /containerd
+      - /gh
+      - /doctl
+  condition: cred_file and not first_party_cli

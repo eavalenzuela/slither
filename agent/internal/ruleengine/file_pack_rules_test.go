@@ -64,6 +64,13 @@ func TestNewFileRulesFireAndExclude(t *testing.T) {
 			"/lib/x86_64-linux-gnu/security/pam_evil.so", "/tmp/implant", 1},
 		{"pam-dpkg", "rules/linux/file-pam-module-drop.yml",
 			"/usr/lib/x86_64-linux-gnu/security/pam_unix.so", "/usr/bin/dpkg", 0},
+
+		{"cloud-cred-by-cat", "rules/linux/file-cloud-cred-file-read.yml",
+			"/home/u/.kube/config", "/usr/bin/cat", 1},
+		{"cloud-cred-by-kubectl", "rules/linux/file-cloud-cred-file-read.yml",
+			"/home/u/.kube/config", "/usr/bin/kubectl", 0},
+		{"cloud-cred-unrelated-path", "rules/linux/file-cloud-cred-file-read.yml",
+			"/home/u/.config/other/settings", "/usr/bin/cat", 0},
 	}
 	for _, tc := range cases {
 		tc := tc

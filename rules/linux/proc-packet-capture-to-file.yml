@@ -1,0 +1,31 @@
+title: Packet capture written to file
+id: 8b7c4d00-0001-4000-8000-000000000046
+status: experimental
+description: |
+  tcpdump / tshark / dumpcap invoked with a write-to-file flag (-w).
+  T1040 (Network Sniffing). Capture-to-file is the staging tell that
+  separates a collection attempt from live interactive troubleshooting.
+  Network operators write pcaps too, so this is medium severity — pair
+  with a non-root or unusual-parent refinement in production if it is
+  noisy on a given fleet.
+level: medium
+tags:
+  - attack.collection
+  - attack.credential_access
+  - attack.t1040
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  capture_tool:
+    Image|endswith:
+      - /tcpdump
+      - /tshark
+      - /dumpcap
+  write_flag:
+    CommandLine|contains:
+      - ' -w '
+      - ' -w/'
+      - ' -w.'
+      - ' --write-file'
+  condition: capture_tool and write_flag

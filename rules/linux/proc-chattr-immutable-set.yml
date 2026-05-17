@@ -1,0 +1,38 @@
+title: Immutable/append-only attribute set on a sensitive path
+id: 8b7c4d00-0001-4000-8000-000000000047
+status: experimental
+description: |
+  chattr applied the immutable (+i) or append-only (+a) attribute to a
+  sensitive path — a system log, an /etc config, an SSH authorized_keys,
+  or shell history. T1222.002 (Linux File and Directory Permissions
+  Modification) / T1565.001. Two adversary uses: locking a log file so
+  it can no longer be rotated or cleared, or locking a backdoor file so
+  the operator cannot remove it. The sensitive-path conjunction keeps an
+  otherwise rare admin command tightly scoped.
+level: medium
+tags:
+  - attack.defense_evasion
+  - attack.persistence
+  - attack.t1222.002
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  chattr:
+    Image|endswith:
+      - /chattr
+  immutable_flag:
+    CommandLine|contains:
+      - ' +i'
+      - ' +a'
+      - ' +ai'
+      - ' +ia'
+  sensitive_path:
+    CommandLine|contains:
+      - /var/log
+      - /etc/
+      - /.ssh/
+      - authorized_keys
+      - /.bash_history
+      - /root/
+  condition: chattr and immutable_flag and sensitive_path

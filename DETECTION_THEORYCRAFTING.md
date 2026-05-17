@@ -52,7 +52,7 @@ OCSF classes the agent currently emits (Phase 1 complete):
 
 ## Coverage map (current pack vs ATT&CK)
 
-Tactic-by-tactic snapshot of what's in `rules/linux/` right now (57 rules).
+Tactic-by-tactic snapshot of what's in `rules/linux/` right now (61 rules).
 
 ### Initial Access
 - **None directly.** Initial access is mostly network-edge, which is out of
@@ -104,7 +104,8 @@ Tactic-by-tactic snapshot of what's in `rules/linux/` right now (57 rules).
 - ✅ `proc-history-disable` (T1070.003 clear command history)
 - ✅ `proc-auditd-ruleset-disable` (T1562.001 in-place audit ruleset kill)
 - ✅ `proc-shred-wipe-logs` (T1070.002 secure-delete of system logs)
-- **Gaps:** `chattr +i` on log/persistence files (→ batch 2 B9).
+- ✅ `proc-chattr-immutable-set` (T1222.002 immutable attr on sensitive path)
+- **Gaps:** none currently tracked.
 
 ### Credential Access (T1003, T1552, T1555)
 - ✅ `file-etc-shadow-access` (T1003.008 /etc/shadow read)
@@ -116,9 +117,9 @@ Tactic-by-tactic snapshot of what's in `rules/linux/` right now (57 rules).
 - ✅ `proc-ssh-private-key-access` (T1552.004, parallel) — verify
 - ✅ `file-pam-module-drop` (T1556.003 malicious PAM module)
 - ✅ `proc-gpg-secret-key-export` (T1552.004 private-key export)
-- **Gaps:** GCP/Azure/k8s cloud cred files (→ batch 2 B6), gnome-keyring DB
-  files, browser cookie/login DB files, `pass`/`gopass` invocation by
-  non-interactive parent.
+- ✅ `file-cloud-cred-file-read` (T1552.001 GCP/Azure/k8s/Docker cred files)
+- **Gaps:** gnome-keyring DB files, browser cookie/login DB files,
+  `pass`/`gopass` invocation by non-interactive parent.
 
 ### Discovery (T1018, T1057, T1082, T1083, T1087)
 - ✅ `proc-find-suid-discovery` (T1083)
@@ -130,16 +131,17 @@ Tactic-by-tactic snapshot of what's in `rules/linux/` right now (57 rules).
   `ldapsearch` against AD, `arp -a`/`ip neigh` lateral discovery,
   cloud-metadata via DNS (`metadata.google.internal`).
 
-### Lateral Movement
-- **None.** Mostly needs network correlation across hosts (Phase 3+).
-  Single-host signals: `ssh -o StrictHostKeyChecking=no` (proxying),
-  `socat TCP-LISTEN`, `chisel client`/`server`, `frp`, `gost`.
+### Lateral Movement / Tunneling
+- ✅ `proc-tunnel-tool-exec` (T1572/T1090 — chisel/frp/gost/ngrok/cloudflared,
+  `ssh -R`/`-D`)
+- **Gaps:** cross-host correlation (lateral SSH spread etc.) still needs the
+  server-side stateful evaluator — see the stateful-candidates section.
 
 ### Collection (T1005, T1056, T1113)
-- **None directly.** Mostly file-read patterns that overlap with cred-access.
-  Candidates: `tcpdump`/`tshark` invocation by non-root or in user shells,
-  `/dev/snd/*` open by non-pulseaudio (mic capture), `xinput` / `xev`
-  on `:0` (keylogger).
+- ✅ `proc-packet-capture-to-file` (T1040 — tcpdump/tshark `-w`)
+- **Gaps:** `/dev/snd/*` open by non-pulseaudio (mic capture), `xinput` /
+  `xev` on `:0` (keylogger). Both need a device-open signal the file
+  collector does not surface as a rule field today.
 
 ### Command & Control (T1071, T1090, T1102, T1573)
 - ✅ `net-cloud-metadata-egress` (cloud IMDS abuse)
@@ -302,11 +304,16 @@ rule. See batch 2 below for the next round.
   threat, so excluding root would be a hole. Package-manager exclusion
   alone carries the rule.
 
-## Backlog: proposed rules (batch 2)
+## Backlog: proposed rules (batch 2 — drained)
 
 Drawn from the coverage-map gaps above, same entry format as batch 1.
 All ten match on data the agent ships today (process_creation +
 file_event); none need collector or engine work. Ranked by signal/effort.
+
+**Status (2026-05-17):** all 10 shipped (ids …03f–…048). Next batch is
+unwritten — the remaining coverage-map gaps are either collector-blocked
+(device-open signals, syscall trace) or want the server-side stateful
+evaluator (cross-host correlation).
 
 ### B1. `proc-perl-ruby-reverse-shell` — high — ✅ SHIPPED (id …03f)
 - **Fires when:** `perl` / `ruby` / `php` invoked with `-e` (or php `-r`)
@@ -357,7 +364,7 @@ file_event); none need collector or engine work. Ranked by signal/effort.
   uncommon, but backup tooling occasionally does it. **Data:** existing
   fields. **Noise:** low.
 
-### B6. `file-cloud-cred-file-read` — medium — ready
+### B6. `file-cloud-cred-file-read` — medium — ✅ SHIPPED (id …045)
 - **Fires when:** a non-first-party process reads a non-AWS cloud
   credential file — `~/.config/gcloud/`, `~/.azure/`, `~/.kube/config`,
   `~/.docker/config.json`, `~/.config/gh/hosts.yml`. Extends
@@ -371,7 +378,7 @@ file_event); none need collector or engine work. Ranked by signal/effort.
   exists. **Noise:** medium — `~/.kube/config` is the noisiest member
   (editors, tab-completion); split it to its own rule if it dominates.
 
-### B7. `proc-packet-capture-to-file` — medium — ready
+### B7. `proc-packet-capture-to-file` — medium — ✅ SHIPPED (id …046)
 - **Fires when:** `tcpdump` / `tshark` / `dumpcap` invoked with a
   write-to-file flag (`-w`). T1040 — capture-to-file is the staging tell
   versus live troubleshooting.
@@ -389,7 +396,7 @@ file_event); none need collector or engine work. Ranked by signal/effort.
   `/wtmp`, `/btmp`, `/lastlog`).
 - **Severity:** high. **Data:** existing fields. **Noise:** very low.
 
-### B9. `proc-chattr-immutable-set` — medium — ready
+### B9. `proc-chattr-immutable-set` — medium — ✅ SHIPPED (id …047)
 - **Fires when:** `chattr +i` / `+a` applied to a sensitive path — a log
   file, an `/etc` config, an `authorized_keys`, a persistence file. Two
   reads: locking a log so it can't be rotated/cleared, or locking a
@@ -398,7 +405,7 @@ file_event); none need collector or engine work. Ranked by signal/effort.
   `+i`/`+a` + a sensitive-path token.
 - **Severity:** medium. **Data:** existing fields. **Noise:** low-medium.
 
-### B10. `proc-tunnel-tool-exec` — medium — ready
+### B10. `proc-tunnel-tool-exec` — medium — ✅ SHIPPED (id …048)
 - **Fires when:** a userland tunneling / reverse-proxy tool runs —
   `chisel`, `frpc`/`frps`, `gost`, `ngrok`, `cloudflared tunnel`,
   `pagekite` — or `ssh` with `-R` / `-D` (reverse / dynamic forward).

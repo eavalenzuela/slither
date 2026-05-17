@@ -1,0 +1,42 @@
+title: Userland tunneling or reverse-proxy tool executed
+id: 8b7c4d00-0001-4000-8000-000000000048
+status: experimental
+description: |
+  A userland tunneling / reverse-proxy tool ran (chisel, frpc/frps,
+  gost, ngrok, cloudflared, pagekite, sshuttle), or ssh was invoked with
+  a reverse (-R) or dynamic/SOCKS (-D) port-forward. T1572 (Protocol
+  Tunneling) / T1090 (Proxy) — a single-host tell for lateral movement
+  and C2 egress that punches through perimeter controls. ngrok,
+  cloudflared and `ssh -R` all have legitimate dev / jump-host uses, so
+  this is medium severity and a default-disabled / environment-scoped
+  candidate.
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1572
+  - attack.t1090
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  tunnel_binary:
+    Image|endswith:
+      - /chisel
+      - /frpc
+      - /frps
+      - /gost
+      - /ngrok
+      - /cloudflared
+      - /pagekite
+      - /sshuttle
+      - /ssf
+  ssh_client:
+    Image|endswith:
+      - /ssh
+  ssh_forward_flag:
+    CommandLine|contains:
+      - ' -R '
+      - ' -D '
+      - ' -R'
+      - ' -D'
+  condition: tunnel_binary or (ssh_client and ssh_forward_flag)
