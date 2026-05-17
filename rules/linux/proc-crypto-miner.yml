@@ -1,0 +1,43 @@
+title: Cryptocurrency miner execution
+id: 8b7c4d00-0001-4000-8000-00000000003a
+status: experimental
+description: |
+  A process whose image name matches a well-known cryptocurrency miner
+  (xmrig, t-rex, phoenixminer, and friends), or any process whose command
+  line carries an unmistakable mining argument (a stratum+tcp:// pool URI,
+  `--coin monero`, a cryptonight algorithm flag). T1496 (Resource
+  Hijacking). The binary names and pool-URI scheme are distinctive enough
+  to fire on their own. Legitimate mining hosts exist — disable this rule
+  or scope it to non-GPU hosts where mining is sanctioned.
+level: medium
+tags:
+  - attack.impact
+  - attack.t1496
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  miner_binary:
+    Image|endswith:
+      - /xmrig
+      - /t-rex
+      - /phoenixminer
+      - /lolminer
+      - /teamredminer
+      - /nbminer
+      - /ethminer
+      - /cgminer
+      - /bfgminer
+      - /cpuminer
+      - /minerd
+      - /xmr-stak
+  miner_cmdline:
+    CommandLine|contains:
+      - 'stratum+tcp://'
+      - 'stratum+ssl://'
+      - 'stratum2+tcp://'
+      - '--coin monero'
+      - '--algo cryptonight'
+      - '--algo randomx'
+      - '--donate-level'
+  condition: miner_binary or miner_cmdline

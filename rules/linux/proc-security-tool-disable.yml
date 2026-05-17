@@ -1,0 +1,41 @@
+title: Security or monitoring service stopped
+id: 8b7c4d00-0001-4000-8000-000000000036
+status: experimental
+description: |
+  systemctl / service invoked with stop, disable, or mask against a
+  security- or monitoring-relevant unit (auditd, slither-agent itself,
+  osqueryd, a CrowdStrike / Wazuh / ClamAV daemon). T1562.001 (Impair
+  Defenses: Disable or Modify Tools). The unit-name allowlist is the
+  conjunction: admins stop nginx-style units constantly, but stopping
+  these specific units in steady-state ops is the signal.
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  svc_tool:
+    Image|endswith:
+      - /systemctl
+      - /service
+  disable_action:
+    CommandLine|contains:
+      - ' stop'
+      - ' disable'
+      - ' mask'
+      - ' kill'
+  security_unit:
+    CommandLine|contains:
+      - auditd
+      - slither-agent
+      - osqueryd
+      - falcon-sensor
+      - crowdstrike-falcon
+      - falcon-kernel
+      - wazuh-agent
+      - clamav-daemon
+      - clamav-freshclam
+      - sysmon
+  condition: svc_tool and disable_action and security_unit

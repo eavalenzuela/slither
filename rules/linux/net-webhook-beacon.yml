@@ -1,0 +1,44 @@
+title: HTTP client posting to a chat-webhook beacon endpoint
+id: 8b7c4d00-0001-4000-8000-000000000039
+status: experimental
+description: |
+  curl / wget invoked with a URL pointing at a chat-service webhook or
+  request-capture endpoint (Discord webhook, Telegram bot API, Slack
+  incoming webhook, webhook.site, Pipedream). T1102 / T1567 — these
+  endpoints are a common low-effort C2 and exfiltration channel because
+  they need no attacker-owned infrastructure. The parent allowlist
+  excludes CI runners, where webhook POSTs are a normal notification
+  pattern.
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1102
+  - attack.exfiltration
+  - attack.t1567
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  http_client:
+    Image|endswith:
+      - /curl
+      - /wget
+  webhook_endpoint:
+    CommandLine|contains:
+      - 'discord.com/api/webhooks/'
+      - 'discordapp.com/api/webhooks/'
+      - 'api.telegram.org/bot'
+      - 'hooks.slack.com/services/'
+      - 'webhook.site/'
+      - '.m.pipedream.net'
+      - 'pipedream.com/'
+  ci_parent:
+    ParentImage|endswith:
+      - /Runner.Listener
+      - /runner
+      - /run-runner
+      - /gitlab-runner
+      - /buildkite-agent
+      - /jenkins
+      - /agent-worker
+  condition: http_client and webhook_endpoint and not ci_parent

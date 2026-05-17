@@ -1,0 +1,53 @@
+title: Host firewall flushed or disabled
+id: 8b7c4d00-0001-4000-8000-000000000038
+status: experimental
+description: |
+  A host firewall ruleset was flushed or the firewall service was
+  disabled: iptables/ip6tables -F or -X, `nft flush ruleset`,
+  `nft delete table`, `ufw disable`/`ufw reset`, `firewall-cmd
+  --panic-off`, or systemctl stopping firewalld/nftables/ufw.
+  T1562.004 (Impair Defenses: Disable or Modify System Firewall).
+  Firewall flush is rare in steady-state ops; may fire during initial
+  provisioning, in which case exclude the cloud-init / config-management
+  parent in production.
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1562.004
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  fw_tool:
+    Image|endswith:
+      - /iptables
+      - /ip6tables
+      - /iptables-legacy
+      - /nft
+      - /ufw
+      - /firewall-cmd
+  fw_flush_action:
+    CommandLine|contains:
+      - ' -F'
+      - ' --flush'
+      - ' -X'
+      - 'flush ruleset'
+      - 'delete table'
+      - ' disable'
+      - ' reset'
+      - '--panic-off'
+  svc_tool:
+    Image|endswith:
+      - /systemctl
+      - /service
+  svc_disable_action:
+    CommandLine|contains:
+      - ' stop'
+      - ' disable'
+      - ' mask'
+  fw_unit:
+    CommandLine|contains:
+      - firewalld
+      - nftables
+      - ' ufw'
+  condition: (fw_tool and fw_flush_action) or (svc_tool and svc_disable_action and fw_unit)

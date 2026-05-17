@@ -1,0 +1,43 @@
+title: Shell history disabled or cleared
+id: 8b7c4d00-0001-4000-8000-000000000037
+status: experimental
+description: |
+  An interactive shell (bash/sh/zsh) was invoked with -c carrying an
+  idiom that disables or wipes command history: `history -c`, an
+  HISTFILE/HISTSIZE reset, an `unset HISTFILE`, or a redirect that
+  truncates the history file. T1070.003 (Indicator Removal: Clear
+  Command History). These idioms are deliberately uncommon in normal
+  operation; the conjunction with a `-c` shell invocation is the signal.
+level: medium
+tags:
+  - attack.defense_evasion
+  - attack.t1070.003
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  shell_dash_c:
+    Image|endswith:
+      - /bash
+      - /sh
+      - /zsh
+      - /dash
+      - /ksh
+    CommandLine|contains:
+      - ' -c '
+  history_idiom:
+    CommandLine|contains:
+      - 'history -c'
+      - 'history -w'
+      - 'unset HISTFILE'
+      - 'HISTFILE=/dev/null'
+      - 'HISTFILE='
+      - 'HISTSIZE=0'
+      - 'HISTFILESIZE=0'
+      - 'set +o history'
+      - '>~/.bash_history'
+      - '> ~/.bash_history'
+      - '>$HISTFILE'
+      - '> $HISTFILE'
+      - '/dev/null > ~/.bash_history'
+  condition: shell_dash_c and history_idiom
