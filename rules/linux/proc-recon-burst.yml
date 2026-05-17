@@ -1,0 +1,40 @@
+title: Identity and host reconnaissance burst
+id: 8b7c4d00-0001-4000-8000-00000000003e
+status: experimental
+description: |
+  Three or more identity- / host-reconnaissance command executions
+  (whoami, id, groups, hostname, uname, w, who, last, lsb_release, …)
+  sharing one parent shell within 30 seconds. T1033 / T1082 / T1087 —
+  post-compromise situational-awareness sweep. Any one of these commands
+  in isolation is ordinary admin behaviour; the burst under a single
+  shell session is the signal, so this is a bounded-stateful rule
+  (`count() by ParentProcessId`) rather than a per-event match.
+  The 30 s window keeps it edge-eligible (well under the 300 s
+  bounded-stateful cap), so it fires without a server round-trip.
+level: high
+tags:
+  - attack.discovery
+  - attack.t1033
+  - attack.t1082
+  - attack.t1087
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  recon_tool:
+    Image|endswith:
+      - /whoami
+      - /id
+      - /groups
+      - /hostname
+      - /uname
+      - /w
+      - /who
+      - /last
+      - /lastlog
+      - /lsb_release
+      - /hostnamectl
+      - /arch
+      - /uptime
+  condition: recon_tool | count() by ParentProcessId > 2
+timeframe: 30s

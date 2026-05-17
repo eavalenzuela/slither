@@ -52,7 +52,7 @@ OCSF classes the agent currently emits (Phase 1 complete):
 
 ## Coverage map (current pack vs ATT&CK)
 
-Tactic-by-tactic snapshot of what's in `rules/linux/` right now (50 rules).
+Tactic-by-tactic snapshot of what's in `rules/linux/` right now (51 rules).
 
 ### Initial Access
 - **None directly.** Initial access is mostly network-edge, which is out of
@@ -122,8 +122,8 @@ Tactic-by-tactic snapshot of what's in `rules/linux/` right now (50 rules).
 - ✅ `proc-host-recon-hostnamectl` (T1082, parallel) — verify
 - ✅ `proc-network-listen-enum` (T1049, parallel) — verify
 - ✅ `proc-process-enum-to-file` (T1057, parallel) — verify
-- **Gaps:** `id`/`whoami`/`groups` burst (sequence — needs Phase 3),
-  `/etc/passwd`/`/etc/group` enumeration via `cut`/`awk`, `getent`,
+- ✅ `proc-recon-burst` (T1033/T1082/T1087 — stateful identity-recon burst)
+- **Gaps:** `/etc/passwd`/`/etc/group` enumeration via `cut`/`awk`, `getent`,
   `ldapsearch` against AD, `arp -a`/`ip neigh` lateral discovery,
   cloud-metadata via DNS (`metadata.google.internal`).
 
@@ -239,15 +239,23 @@ disambiguating conjunction**, **severity**, **data dependency**, **noise risk**.
   Pipedream. CI-runner parent allowlist excludes notification POSTs. ngrok
   staging endpoints deliberately left out — too broad for `medium`.
 
-### 7. `proc-cred-discovery-burst` — high — BLOCKED on Phase 3
-- **Fires when:** ≥3 of {`whoami`, `id`, `groups`, `hostname`, `uname -a`,
-  `cat /etc/passwd`, `cat /etc/os-release`} from the same shell session
-  within 30s.
+### 7. `proc-recon-burst` — high — ✅ SHIPPED (id …03e)
+- **Fires when:** ≥3 identity/host-recon command executions
+  (whoami, id, groups, hostname, uname, w, who, last, lastlog,
+  lsb_release, hostnamectl, arch, uptime) sharing one parent shell
+  (`count() by ParentProcessId > 2`) within 30s.
 - **Why not noisy:** the burst is the signal; any one of these in isolation
   is normal admin behaviour.
-- **Data:** **BLOCKED** on stateful detection (Phase 3 — ADR-0019). Sigma
-  doesn't natively express this; either compile to a stateful evaluator or
-  rely on a separate correlation engine.
+- **Data:** ~~BLOCKED on Phase 3 stateful detection.~~ **Unblocked —
+  Phase 3 closed 2026-04-29.** The bounded-stateful runtime (#56) and
+  `| count() [by F] OP N` + `timeframe` are shipped. **Shipped 2026-05-17**
+  as the pack's first stateful rule: 30s window → classifies `edge_only`
+  (well under the 300s bounded-stateful cap), fires without a server
+  round-trip. Grouping key is `ParentProcessId` — the parent shell PID is
+  the available proxy for "same session" (no session-id field today).
+  `cat /etc/passwd|os-release` from the doc's original set are *not* in
+  the tool list: matching `cat` would dominate the count and swamp the
+  signal. /etc/passwd reads are already covered by `proc-passwd-file-read`.
 
 ### 8. `proc-crypto-miner` — medium — ✅ SHIPPED (id …03a)
 - **Fires when:** `Image|endswith` any of `/xmrig`, `/t-rex`, `/phoenixminer`,
@@ -286,22 +294,29 @@ disambiguating conjunction**, **severity**, **data dependency**, **noise risk**.
   threat, so excluding root would be a hole. Package-manager exclusion
   alone carries the rule.
 
-## Phase-3-unlocks
+## Stateful / correlation candidates
 
-Detection patterns that need Phase 3 capabilities (per ADR-0019: edge
-eligibility, stateful detection, hunt). Park here until #46 closes.
+Patterns that need the stateful runtime. **Phase 3 closed 2026-04-29** —
+the bounded-stateful engine, `count()`/`timeframe`, and edge eligibility
+all shipped, so a `count()`-shaped rule with a ≤300s window is now
+writeable directly (see `proc-recon-burst`, the first one shipped). The
+entries below still need a missing *data source* or a server-side
+evaluator, which is why they are not yet rules.
 
 - **Beaconing cadence**: same `(host, dst_ip, dst_port, process)` tuple
-  emitting connections at near-constant intervals over ≥10 min. Stateful.
+  emitting connections at near-constant intervals over ≥10 min. Needs a
+  cadence/variance aggregator beyond `count()` — not just a threshold.
 - **Failed-then-successful auth**: SSH/sudo failure burst followed by success
   on same `User`. Needs auth event source we don't ship yet.
 - **Process-tree depth anomaly**: shell ⇒ shell ⇒ shell ≥ depth-3 from
   non-shell entry (nginx, postgres, sshd). Needs grandparent chain.
-- **Recon burst** (#7 above).
+- ✅ **Recon burst** (#7 above) — shipped 2026-05-17 as `proc-recon-burst`.
 - **Mass-rename ransomware**: ≥N file rename events with new extension
-  matching `.crypt|.locked|.encrypted|...` within window.
+  matching `.crypt|.locked|.encrypted|...` within window. Writeable as a
+  stateful file_event rule once a `TargetFilename`-suffix `count()` is
+  confirmed to compile — candidate for the next batch.
 - **Lateral SSH spread**: same `User` SSH-ing to ≥N internal IPs in window.
-  Cross-host correlation; needs server-side stateful evaluator.
+  Cross-host correlation; needs the server-side stateful evaluator.
 
 ## Decisions / open questions
 
