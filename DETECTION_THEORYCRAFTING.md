@@ -166,8 +166,8 @@ Tactic-by-tactic snapshot of what's in `rules/linux/` right now (61 rules).
 - ✅ `proc-crypto-miner` (T1496 resource hijacking)
 - ✅ `proc-disk-wipe-dd` (T1485 / T1561 — `dd` against block devices)
 - ✅ `file-ransomware-marker` (T1486 — ransom-extension file markers)
-- **Gaps:** `cryptsetup luksFormat` against a mounted device, `wipefs`,
-  mass-rename ransomware thresholding (needs Phase 3 — see below).
+- ✅ `file-mass-rename-ransomware` (T1486 — volumetric encrypt-in-progress)
+- **Gaps:** `cryptsetup luksFormat` against a mounted device, `wipefs`.
 
 ## Backlog: proposed rules (batch 1 — drained)
 
@@ -440,10 +440,15 @@ evaluator, which is why they are not yet rules.
 - **Process-tree depth anomaly**: shell ⇒ shell ⇒ shell ≥ depth-3 from
   non-shell entry (nginx, postgres, sshd). Needs grandparent chain.
 - ✅ **Recon burst** (#7 above) — shipped 2026-05-17 as `proc-recon-burst`.
-- **Mass-rename ransomware**: ≥N file rename events with new extension
-  matching `.crypt|.locked|.encrypted|...` within window. Writeable as a
-  stateful file_event rule once a `TargetFilename`-suffix `count()` is
-  confirmed to compile — candidate for the next batch.
+- ✅ **Mass-rename ransomware** — shipped 2026-05-22 as
+  `file-mass-rename-ransomware` (global `count() > 20` over a 60 s window).
+  `TargetFilename`-suffix `count()` confirmed to compile (same shape as
+  `proc-recon-burst`). Two spec corrections found while wiring it:
+  (1) `file_event` exposes no `ProcessId`, so the rule uses a global
+  counter, not `by ProcessId`; (2) for an in-place `rename(orig ->
+  orig.locked)` the new extension lands in OCSF `RenameTo`, which had no
+  Sigma field — added `RenameTo`/`NewFilename` to `fileAccessor` so both
+  the create-new-file and in-place-rename patterns are matched.
 - **Lateral SSH spread**: same `User` SSH-ing to ≥N internal IPs in window.
   Cross-host correlation; needs the server-side stateful evaluator.
 

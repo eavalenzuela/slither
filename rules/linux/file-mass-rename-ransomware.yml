@@ -1,0 +1,55 @@
+title: Mass file rename to ransomware extension
+id: 8b7c4d00-0001-4000-8000-000000000049
+status: experimental
+description: |
+  A burst of file events whose target name ends in a known ransomware
+  extension (.locked / .encrypted / .crypt / .ryuk / …) within a short
+  window. T1486 — Data Encrypted for Impact. The companion
+  file-ransomware-marker rule pages on a *single* such file; this rule
+  is the volumetric signal: encryption-in-progress across many files,
+  the point at which active response (kill / isolate) is warranted.
+  A single file gaining such an extension is ordinary (backup tools,
+  legit crypto); the sustained burst is the signal, so this is a
+  bounded-stateful global `count()` rule. The 60 s window stays well
+  under the 300 s bounded-stateful cap, so it fires edge-side without a
+  server round-trip.
+
+  Both ransomware I/O patterns are covered: the new extension appears in
+  TargetFilename when the family writes a fresh `orig.locked` and deletes
+  the original, and in RenameTo (OCSF rename destination, activity_id 6)
+  when it renames `orig -> orig.locked` in place. Matching either side
+  means in-place renamers are not silently missed.
+level: high
+tags:
+  - attack.impact
+  - attack.t1486
+logsource:
+  product: linux
+  category: file_event
+detection:
+  ext_in_target:
+    TargetFilename|endswith:
+      - .locked
+      - .encrypted
+      - .crypt
+      - .crypted
+      - .ransom
+      - .wcry
+      - .wncry
+      - .lockbit
+      - .ryuk
+      - .conti
+  ext_in_rename:
+    RenameTo|endswith:
+      - .locked
+      - .encrypted
+      - .crypt
+      - .crypted
+      - .ransom
+      - .wcry
+      - .wncry
+      - .lockbit
+      - .ryuk
+      - .conti
+  condition: (ext_in_target or ext_in_rename) | count() > 20
+timeframe: 60s

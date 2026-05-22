@@ -50,3 +50,40 @@ func TestEnvLookupOnProcessActivity(t *testing.T) {
 		t.Errorf("Lookup of unknown field should miss")
 	}
 }
+
+func TestEnvLookupRenameDestinationOnFileEvent(t *testing.T) {
+	ts := time.Now().UnixMilli()
+	ev := &ocsf.FileSystemActivity{
+		Metadata:   ocsf.Metadata{Version: ocsf.Version, OriginalT: ts, UID: "ev-r"},
+		ClassUID:   ocsf.ClassFileSystemActivity,
+		ClassName:  ocsf.ClassFileSystemActivity.String(),
+		ActivityID: ocsf.FileActivityRename,
+		Severity:   ocsf.SeverityInformational,
+		Time:       ocsf.TimeOCSF(ts),
+		File:       ocsf.File{Path: "/home/alice/report.docx", Name: "report.docx"},
+		RenameTo:   &ocsf.File{Path: "/home/alice/report.docx.locked", Name: "report.docx.locked"},
+	}
+	env := EnvFor(ev, AccessorFor(ruleast.CategoryFileEvent))
+
+	// The source path remains on TargetFilename; the .locked suffix is
+	// only reachable through RenameTo / NewFilename.
+	if v, ok := env.Lookup("TargetFilename"); !ok || len(v) == 0 || v[0] != "/home/alice/report.docx" {
+		t.Errorf("TargetFilename = %v (ok=%v), want the source path", v, ok)
+	}
+	for _, field := range []string{"RenameTo", "NewFilename"} {
+		v, ok := env.Lookup(field)
+		if !ok || len(v) == 0 || v[0] != "/home/alice/report.docx.locked" {
+			t.Errorf("Lookup(%q) = %v (ok=%v), want the rename destination", field, v, ok)
+		}
+	}
+
+	// A non-rename event carries no RenameTo, so the field must miss.
+	noRename := &ocsf.FileSystemActivity{
+		ClassUID:   ocsf.ClassFileSystemActivity,
+		ActivityID: ocsf.FileActivityCreate,
+		File:       ocsf.File{Path: "/tmp/x", Name: "x"},
+	}
+	if _, ok := EnvFor(noRename, AccessorFor(ruleast.CategoryFileEvent)).Lookup("RenameTo"); ok {
+		t.Errorf("RenameTo on a non-rename event should miss")
+	}
+}

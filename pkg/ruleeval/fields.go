@@ -61,9 +61,15 @@ var fileAccessor = Accessor{
 	"TargetFilename": fileTargetPath,
 	"Filename":       fileTargetPath,
 	"Path":           fileTargetPath,
-	"Image":          func(e ocsf.Event) []string { return procExePath(actorProcess(e)) },
-	"CommandLine":    func(e ocsf.Event) []string { return nonEmpty(actorProcess(e).Cmdline) },
-	"User":           actorUserName,
+	// Rename destination (OCSF RenameTo, activity_id 6). For an in-place
+	// rename the new extension lands here, not in File/TargetFilename —
+	// so a rule that wants to catch `orig -> orig.locked` must key on this
+	// field, while the create-new-file pattern stays on TargetFilename.
+	"RenameTo":    fileRenameToPath,
+	"NewFilename": fileRenameToPath,
+	"Image":       func(e ocsf.Event) []string { return procExePath(actorProcess(e)) },
+	"CommandLine": func(e ocsf.Event) []string { return nonEmpty(actorProcess(e).Cmdline) },
+	"User":        actorUserName,
 }
 
 // netAccessor maps Sigma network_connection fields onto ocsf.NetworkActivity.
@@ -167,6 +173,20 @@ func fileTargetPath(e ocsf.Event) []string {
 		out = append(out, f.File.Name)
 	}
 	return out
+}
+
+func fileRenameToPath(e ocsf.Event) []string {
+	f, ok := e.(*ocsf.FileSystemActivity)
+	if !ok || f.RenameTo == nil {
+		return nil
+	}
+	if f.RenameTo.Path != "" {
+		return []string{f.RenameTo.Path}
+	}
+	if f.RenameTo.Name != "" {
+		return []string{f.RenameTo.Name}
+	}
+	return nil
 }
 
 func netDstIP(e ocsf.Event) []string {
