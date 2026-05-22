@@ -70,6 +70,12 @@ var fileAccessor = Accessor{
 	"Image":       func(e ocsf.Event) []string { return procExePath(actorProcess(e)) },
 	"CommandLine": func(e ocsf.Event) []string { return nonEmpty(actorProcess(e).Cmdline) },
 	"User":        actorUserName,
+	// Actor PID — the process touching the file. Exposed so file_event
+	// rules can both partition (`count() by ProcessId`) and name a kill
+	// target (`slither.response.target_field: ProcessId`). Mirrors the
+	// process_creation accessor's ProcessId/PID pair.
+	"ProcessId": func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
+	"PID":       func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
 }
 
 // netAccessor maps Sigma network_connection fields onto ocsf.NetworkActivity.

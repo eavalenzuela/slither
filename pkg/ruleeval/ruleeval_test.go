@@ -60,10 +60,16 @@ func TestEnvLookupRenameDestinationOnFileEvent(t *testing.T) {
 		ActivityID: ocsf.FileActivityRename,
 		Severity:   ocsf.SeverityInformational,
 		Time:       ocsf.TimeOCSF(ts),
+		Actor:      ocsf.Actor{Process: ocsf.Process{PID: 4321, Name: "encryptor"}},
 		File:       ocsf.File{Path: "/home/alice/report.docx", Name: "report.docx"},
 		RenameTo:   &ocsf.File{Path: "/home/alice/report.docx.locked", Name: "report.docx.locked"},
 	}
 	env := EnvFor(ev, AccessorFor(ruleast.CategoryFileEvent))
+
+	// Actor PID is the kill target for ransomware response — must resolve.
+	if v, ok := env.Lookup("ProcessId"); !ok || len(v) == 0 || v[0] != "4321" {
+		t.Errorf("ProcessId = %v (ok=%v), want the actor PID", v, ok)
+	}
 
 	// The source path remains on TargetFilename; the .locked suffix is
 	// only reachable through RenameTo / NewFilename.

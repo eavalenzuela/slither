@@ -176,6 +176,52 @@ func TestAutoResponder_UnresolvableFieldStampsWouldHaveExecuted(t *testing.T) {
 	}
 }
 
+// A file_event-triggered ransomware rule resolves its kill target from
+// the actor PID (ProcessId on the file accessor) and submits a
+// KILL_PROCESS_TREE carrying that PID — the encryptor whose rename burst
+// crossed the threshold. Guards the file_event→kill wiring end to end.
+func TestAutoResponder_FileEventResolvesActorPIDForKillTree(t *testing.T) {
+	t.Parallel()
+	results := make(chan *pb.ResponseResult, 4)
+	exec := New(Options{Results: results, Telem: telemetry.NewCounters()})
+	captured := make(chan string, 1)
+	exec.SetHandler(pb.ResponseAction_RESPONSE_ACTION_KILL_PROCESS_TREE,
+		func(_ context.Context, req *pb.ResponseRequest) (pb.ResponseStatus, string, []byte) {
+			captured <- req.GetTarget()
+			return pb.ResponseStatus_RESPONSE_STATUS_DONE, "ok", nil
+		})
+
+	policy := func() *pb.HostPolicy { return &pb.HostPolicy{AllowKillTree: true} }
+	ar := NewAutoResponder(exec, policy)
+
+	finding := &ocsf.DetectionFinding{}
+	intent := &ruleast.ResponseIntent{
+		Action:      ruleast.ResponseActionKillProcessTree,
+		TargetField: "ProcessId",
+	}
+	ev := &ocsf.FileSystemActivity{
+		Metadata:   ocsf.Metadata{Version: ocsf.Version, UID: "auto-f"},
+		ClassUID:   ocsf.ClassFileSystemActivity,
+		ActivityID: ocsf.FileActivityRename,
+		Actor:      ocsf.Actor{Process: ocsf.Process{PID: 9182, Name: "encryptor"}},
+		File:       ocsf.File{Path: "/home/bob/q3.xlsx"},
+		RenameTo:   &ocsf.File{Path: "/home/bob/q3.xlsx.locked"},
+	}
+	ar.OnFinding(context.Background(), intent, false, ev, finding, ruleast.CategoryFileEvent)
+
+	if !finding.AutoResponseExecuted {
+		t.Error("AutoResponseExecuted = false on permissive kill-tree host")
+	}
+	select {
+	case got := <-captured:
+		if got != "9182" {
+			t.Errorf("kill-tree target = %q, want the actor PID 9182", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("kill-tree handler was never invoked")
+	}
+}
+
 // Phase 5 #88b: duplicate firings of the same rule against the same
 // target inside the dedupe window must not produce a second executor
 // submission. The finding still emits both times (it's an honest

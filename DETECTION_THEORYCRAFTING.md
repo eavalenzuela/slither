@@ -441,14 +441,32 @@ evaluator, which is why they are not yet rules.
   non-shell entry (nginx, postgres, sshd). Needs grandparent chain.
 - ✅ **Recon burst** (#7 above) — shipped 2026-05-17 as `proc-recon-burst`.
 - ✅ **Mass-rename ransomware** — shipped 2026-05-22 as
-  `file-mass-rename-ransomware` (global `count() > 20` over a 60 s window).
-  `TargetFilename`-suffix `count()` confirmed to compile (same shape as
-  `proc-recon-burst`). Two spec corrections found while wiring it:
-  (1) `file_event` exposes no `ProcessId`, so the rule uses a global
-  counter, not `by ProcessId`; (2) for an in-place `rename(orig ->
-  orig.locked)` the new extension lands in OCSF `RenameTo`, which had no
-  Sigma field — added `RenameTo`/`NewFilename` to `fileAccessor` so both
-  the create-new-file and in-place-rename patterns are matched.
+  `file-mass-rename-ransomware` (`count() by ProcessId > 20` over a 60 s
+  window). `TargetFilename`-suffix `count()` confirmed to compile (same
+  shape as `proc-recon-burst`). Spec corrections found while wiring it:
+  for an in-place `rename(orig -> orig.locked)` the new extension lands
+  in OCSF `RenameTo`, which had no Sigma field — added
+  `RenameTo`/`NewFilename` to `fileAccessor` so both the create-new-file
+  and in-place-rename patterns are matched.
+- ✅ **Ransomware auto-response** (2026-05-22) — the pack's first
+  `slither.response` rule: `file-mass-rename-ransomware` carries
+  `kill_process_tree` targeting `ProcessId`. Required exposing the actor
+  PID (`ProcessId`/`PID`) on `fileAccessor` — previously `file_event`
+  had no PID, so partitioning by PID *and* naming a kill target both
+  became possible at once. Partitioning by `ProcessId` (rather than a
+  global counter) makes the firing PID == the kill target, so the
+  response acts on the encryptor itself. Default-deny: detect-only until
+  `allow_kill_tree` is set on the host policy.
+  - **GAP — auto-isolate not yet expressible.** The `target_field` →
+    executor `Target` model is entity-centric (kill/quarantine consume a
+    PID/path). `isolate_host` reads `Target` as the mgmt-subnet CIDR
+    (`resolveMgmtSubnet`), so a `ProcessId`-derived target makes it fail
+    the CIDR parse, and an empty target trips `OnFinding`'s
+    non-empty-target gate into `would_have_executed`. Wiring a rule-driven
+    `isolate_host` needs `OnFinding` made action-aware: host-scoped
+    actions should skip target-field resolution and submit an empty
+    `Target` (→ autoderive mgmt subnet). Tracked for the response
+    follow-up; kill_process_tree shipped first as the higher-value action.
 - **Lateral SSH spread**: same `User` SSH-ing to ≥N internal IPs in window.
   Cross-host correlation; needs the server-side stateful evaluator.
 

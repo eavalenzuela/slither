@@ -10,15 +10,22 @@ description: |
   the point at which active response (kill / isolate) is warranted.
   A single file gaining such an extension is ordinary (backup tools,
   legit crypto); the sustained burst is the signal, so this is a
-  bounded-stateful global `count()` rule. The 60 s window stays well
-  under the 300 s bounded-stateful cap, so it fires edge-side without a
-  server round-trip.
+  bounded-stateful `count() by ProcessId` rule. The 60 s window stays
+  well under the 300 s bounded-stateful cap, so it fires edge-side
+  without a server round-trip.
 
   Both ransomware I/O patterns are covered: the new extension appears in
   TargetFilename when the family writes a fresh `orig.locked` and deletes
   the original, and in RenameTo (OCSF rename destination, activity_id 6)
   when it renames `orig -> orig.locked` in place. Matching either side
   means in-place renamers are not silently missed.
+
+  Partitioning by ProcessId means the PID whose burst crosses the
+  threshold is exactly the PID the auto-response targets, so the
+  kill_process_tree response below acts on the encryptor itself rather
+  than whichever event happened to arrive last. The response is
+  default-deny: detect-only hosts stamp would_have_executed until an
+  operator flips allow_kill_tree on the host policy.
 level: high
 tags:
   - attack.impact
@@ -51,5 +58,10 @@ detection:
       - .lockbit
       - .ryuk
       - .conti
-  condition: (ext_in_target or ext_in_rename) | count() > 20
+  condition: (ext_in_target or ext_in_rename) | count() by ProcessId > 20
 timeframe: 60s
+slither:
+  response:
+    action: kill_process_tree
+    target_field: ProcessId
+    immediate: true
