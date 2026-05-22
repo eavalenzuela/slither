@@ -222,6 +222,70 @@ func TestAutoResponder_FileEventResolvesActorPIDForKillTree(t *testing.T) {
 	}
 }
 
+// A host-scoped action (isolate_host) carries no target_field. OnFinding
+// must skip target resolution and submit an EMPTY Target so the executor's
+// isolate handler autoderives the mgmt subnet — not stamp would_have_executed
+// the way an unresolved entity target would. A second firing inside the
+// window dedupes on the per-action token so the host isn't re-isolated.
+func TestAutoResponder_HostScopedActionSubmitsEmptyTargetAndDedupes(t *testing.T) {
+	t.Parallel()
+	results := make(chan *pb.ResponseResult, 4)
+	exec := New(Options{Results: results, Telem: telemetry.NewCounters()})
+	captured := make(chan string, 4)
+	exec.SetHandler(pb.ResponseAction_RESPONSE_ACTION_ISOLATE_HOST,
+		func(_ context.Context, req *pb.ResponseRequest) (pb.ResponseStatus, string, []byte) {
+			captured <- req.GetTarget()
+			return pb.ResponseStatus_RESPONSE_STATUS_DONE, "isolated", nil
+		})
+
+	policy := func() *pb.HostPolicy { return &pb.HostPolicy{AllowIsolate: true} }
+	ar := NewAutoResponder(exec, policy)
+
+	intent := &ruleast.ResponseIntent{Action: ruleast.ResponseActionIsolateHost} // no TargetField
+	mkEvent := func() *ocsf.FileSystemActivity {
+		return &ocsf.FileSystemActivity{
+			Metadata:   ocsf.Metadata{Version: ocsf.Version, UID: "auto-iso"},
+			ClassUID:   ocsf.ClassFileSystemActivity,
+			ActivityID: ocsf.FileActivityRename,
+			Actor:      ocsf.Actor{Process: ocsf.Process{PID: 555, Name: "encryptor"}},
+			RenameTo:   &ocsf.File{Path: "/data/x.locked"},
+		}
+	}
+
+	f1 := &ocsf.DetectionFinding{}
+	f1.RuleInfo.UID = "rule-isolate-1"
+	ar.OnFinding(context.Background(), intent, false, mkEvent(), f1, ruleast.CategoryFileEvent)
+
+	if !f1.AutoResponseExecuted {
+		t.Error("AutoResponseExecuted = false on permissive isolate host")
+	}
+	if f1.AutoResponseWouldHaveExecuted {
+		t.Error("WouldHaveExecuted = true — host-scoped action must not need a resolved target")
+	}
+	select {
+	case got := <-captured:
+		if got != "" {
+			t.Errorf("isolate Target = %q, want empty (autoderive)", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("isolate handler was never invoked")
+	}
+
+	// Second firing of the same rule within the dedupe window: no second
+	// submission, and the finding claims neither executed nor would-have.
+	f2 := &ocsf.DetectionFinding{}
+	f2.RuleInfo.UID = "rule-isolate-1"
+	ar.OnFinding(context.Background(), intent, false, mkEvent(), f2, ruleast.CategoryFileEvent)
+	if f2.AutoResponseExecuted {
+		t.Error("second firing re-isolated the host inside the dedupe window")
+	}
+	select {
+	case <-captured:
+		t.Error("isolate handler invoked twice — dedupe failed for host-scoped action")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 // Phase 5 #88b: duplicate firings of the same rule against the same
 // target inside the dedupe window must not produce a second executor
 // submission. The finding still emits both times (it's an honest

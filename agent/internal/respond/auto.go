@@ -202,17 +202,29 @@ func (a *AutoResponder) OnFinding(ctx context.Context, intent *ruleast.ResponseI
 	}
 	finding.AutoResponseAction = string(intent.Action)
 
-	target := resolveTargetField(trigger, intent.TargetField, category)
-	if target == "" {
-		// Field never resolved — the compiler already validated that the
-		// field is referenced by some predicate, but the firing event
-		// might still leave it empty (e.g. a quarantine rule that
-		// matches on Image but the operator picked a target_field of
-		// CommandLine which was empty for this row). Treat as detect-
-		// only so the audit chain still records the rule's intent
-		// without an unresolvable Target landing on the wire.
-		finding.AutoResponseWouldHaveExecuted = true
-		return
+	// Host-scoped actions (isolate/unisolate) don't draw a target from
+	// the triggering event: the isolate handler autoderives the mgmt
+	// subnet from /proc/net/route and the unisolate handler ignores
+	// Target entirely. Resolving target_field here would at best produce
+	// a value the handler must discard and at worst a PID-shaped string
+	// that fails the isolate handler's CIDR parse. So we skip resolution
+	// and submit an empty Target; the dedupe key falls back to a stable
+	// per-(rule,action) token below so repeat firings don't re-isolate.
+	hostScoped := intent.Action.IsHostScoped()
+
+	var target string
+	if !hostScoped {
+		target = resolveTargetField(trigger, intent.TargetField, category)
+		if target == "" {
+			// Field never resolved — target_field is no longer required to
+			// appear in a predicate, and the firing event might still leave
+			// it empty (e.g. a quarantine rule matching on Image but
+			// target_field of CommandLine which was empty for this row).
+			// Treat as detect-only so the audit chain still records the
+			// rule's intent without an unresolvable Target on the wire.
+			finding.AutoResponseWouldHaveExecuted = true
+			return
+		}
 	}
 
 	policy := a.policy
@@ -233,7 +245,16 @@ func (a *AutoResponder) OnFinding(ctx context.Context, intent *ruleast.ResponseI
 	// executed/would_have_executed flags both false, which the
 	// console surfaces as "rule fired again on the same target;
 	// previous response is in flight or done".
-	if a.shouldDedupe(finding.RuleInfo.UID, target) {
+	// Host-scoped actions carry an empty Target, so dedupe on a stable
+	// per-action token instead — otherwise shouldDedupe's empty-target
+	// short-circuit would let every firing re-isolate the host, spamming
+	// audit rows (the iptables hook itself is idempotent, but the rows
+	// aren't). Entity-scoped actions keep deduping on the resolved target.
+	dedupeTarget := target
+	if hostScoped {
+		dedupeTarget = "host:" + string(intent.Action)
+	}
+	if a.shouldDedupe(finding.RuleInfo.UID, dedupeTarget) {
 		return
 	}
 

@@ -1,0 +1,61 @@
+title: Mass file rename to ransomware extension — host isolation
+id: 8b7c4d00-0001-4000-8000-00000000004a
+status: experimental
+description: |
+  Same detection as file-mass-rename-ransomware (a per-process burst of
+  >20 file events ending in a known ransomware extension within 60 s,
+  matched on either TargetFilename or RenameTo so both the create-new
+  and in-place-rename I/O patterns are caught — T1486). This companion
+  carries the host-scoped half of the response: isolate_host.
+
+  Ransomware rarely acts alone — encryption usually rides alongside
+  lateral spread (SMB/SSH) and C2 check-ins. kill_process_tree (the
+  sibling rule) stops local encryption; isolate_host fences the box to
+  the management subnet only, cutting spread and exfil. The two run as
+  separate rules because a ResponseIntent carries a single action; both
+  fire on the same burst so an operator who has enabled both policy bits
+  gets kill + isolate together.
+
+  isolate_host is host-scoped: it takes no target_field — the agent's
+  executor autoderives the management subnet from /proc/net/route. The
+  response is default-deny: detect-only hosts stamp would_have_executed
+  until an operator flips allow_isolate on the host policy. Pair with a
+  documented unisolate runbook; this rule does not auto-expire isolation.
+level: high
+tags:
+  - attack.impact
+  - attack.t1486
+logsource:
+  product: linux
+  category: file_event
+detection:
+  ext_in_target:
+    TargetFilename|endswith:
+      - .locked
+      - .encrypted
+      - .crypt
+      - .crypted
+      - .ransom
+      - .wcry
+      - .wncry
+      - .lockbit
+      - .ryuk
+      - .conti
+  ext_in_rename:
+    RenameTo|endswith:
+      - .locked
+      - .encrypted
+      - .crypt
+      - .crypted
+      - .ransom
+      - .wcry
+      - .wncry
+      - .lockbit
+      - .ryuk
+      - .conti
+  condition: (ext_in_target or ext_in_rename) | count() by ProcessId > 20
+timeframe: 60s
+slither:
+  response:
+    action: isolate_host
+    immediate: true

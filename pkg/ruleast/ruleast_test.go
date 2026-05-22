@@ -97,6 +97,7 @@ func TestCompileRejectsInvalid(t *testing.T) {
 		{"response-bad-action.yml", "not recognised"},
 		{"response-bad-target-field.yml", "identifier-shaped"},
 		{"response-empty-action.yml", "action required"},
+		{"response-missing-target-field.yml", "target_field required for action"},
 	}
 	for _, c := range cases {
 		c := c
@@ -764,6 +765,44 @@ func ruleGolden(r *Rule) map[string]any {
 		out["aggregation"] = aggregationGolden(r.Aggregation)
 	}
 	return out
+}
+
+// TestCompile_HostScopedResponseOmitsTargetField — isolate_host is
+// host-scoped, so the response block compiles with no target_field; the
+// resulting intent carries an empty TargetField and reports IsHostScoped.
+func TestCompile_HostScopedResponseOmitsTargetField(t *testing.T) {
+	src := []byte(`title: isolate-on-burst
+id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+description: host isolation, no target_field
+level: high
+logsource:
+  product: linux
+  category: file_event
+detection:
+  sel:
+    TargetFilename|endswith: .locked
+  condition: sel
+slither:
+  response:
+    action: isolate_host
+    immediate: true
+`)
+	art, _, _, err := Compile(src)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if art == nil || art.Response == nil {
+		t.Fatal("expected a response intent on the artefact")
+	}
+	if art.Response.Action != ResponseActionIsolateHost {
+		t.Errorf("action = %q, want isolate_host", art.Response.Action)
+	}
+	if art.Response.TargetField != "" {
+		t.Errorf("TargetField = %q, want empty for host-scoped action", art.Response.TargetField)
+	}
+	if !art.Response.Action.IsHostScoped() {
+		t.Error("IsHostScoped() = false for isolate_host")
+	}
 }
 
 // TestCompile_SnapshotFlag ensures the Phase 6 #111 `slither.snapshot:

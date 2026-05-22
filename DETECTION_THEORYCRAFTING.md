@@ -457,16 +457,22 @@ evaluator, which is why they are not yet rules.
   global counter) makes the firing PID == the kill target, so the
   response acts on the encryptor itself. Default-deny: detect-only until
   `allow_kill_tree` is set on the host policy.
-  - **GAP — auto-isolate not yet expressible.** The `target_field` →
-    executor `Target` model is entity-centric (kill/quarantine consume a
-    PID/path). `isolate_host` reads `Target` as the mgmt-subnet CIDR
-    (`resolveMgmtSubnet`), so a `ProcessId`-derived target makes it fail
-    the CIDR parse, and an empty target trips `OnFinding`'s
-    non-empty-target gate into `would_have_executed`. Wiring a rule-driven
-    `isolate_host` needs `OnFinding` made action-aware: host-scoped
-    actions should skip target-field resolution and submit an empty
-    `Target` (→ autoderive mgmt subnet). Tracked for the response
-    follow-up; kill_process_tree shipped first as the higher-value action.
+- ✅ **Ransomware host isolation** (2026-05-22) — shipped
+  `file-mass-rename-ransomware-isolate`, the host-scoped companion to the
+  kill rule (same per-PID burst detection, `isolate_host` response). Both
+  fire on one burst so an operator with both policy bits gets kill +
+  isolate. Closing the earlier gap required making the response model
+  action-aware rather than purely entity-centric:
+  - `ResponseAction.IsHostScoped()` distinguishes isolate/unisolate
+    (whole-host) from kill/quarantine/collect (per-event entity).
+  - The compiler makes `target_field` optional for host-scoped actions
+    (still required for entity-scoped) — `isolate_host` rules omit it.
+  - `OnFinding` skips target-field resolution for host-scoped actions and
+    submits an empty `Target` so the isolate handler autoderives the mgmt
+    subnet, and dedupes on a stable `host:<action>` token so repeat
+    firings don't re-isolate / spam audit rows.
+  - Default-deny: detect-only until `allow_isolate` is set on the host
+    policy. No auto-expire — pair with an unisolate runbook.
 - **Lateral SSH spread**: same `User` SSH-ing to ≥N internal IPs in window.
   Cross-host correlation; needs the server-side stateful evaluator.
 

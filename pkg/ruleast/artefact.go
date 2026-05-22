@@ -142,6 +142,19 @@ var allResponseActions = []ResponseAction{
 	ResponseActionCollectArtifacts,
 }
 
+// IsHostScoped reports whether the action targets the whole host rather
+// than an entity drawn from the triggering event. Host-scoped actions
+// (isolate / unisolate) ignore the per-event Target: the executor's
+// isolate handler autoderives the management subnet from /proc/net/route
+// and the unisolate handler takes no target at all. The compiler makes
+// target_field optional for these, and the agent's AutoResponder skips
+// target-field resolution and submits an empty Target. Entity-scoped
+// actions (kill / quarantine / collect) consume a PID or path and still
+// require a target_field.
+func (a ResponseAction) IsHostScoped() bool {
+	return a == ResponseActionIsolateHost || a == ResponseActionUnisolateHost
+}
+
 // ResponseIntent is the compiled form of a Sigma rule's optional
 // `slither.response` block (Phase 4 #82). The agent's edge auto-
 // respond engine (#83) reads this off the EdgeArtefact when the
@@ -149,10 +162,12 @@ var allResponseActions = []ResponseAction{
 // ServerPlan when stateful/correlated rules fire.
 //
 // TargetField names the OCSF/event field whose value the action's
-// Target should be drawn from. The compiler validates that the
-// field appears in at least one of the rule's selection predicates
-// — a typo'd target_field at compile time beats a silent miss at
-// runtime when the field never resolves.
+// Target should be drawn from (e.g. ProcessId → the PID to kill). The
+// compiler validates it is identifier-shaped but no longer requires it
+// to appear in a selection predicate; the agent's AutoResponder stamps
+// would_have_executed when it doesn't resolve at runtime. Empty is
+// permitted only for host-scoped actions (see IsHostScoped), which
+// ignore it.
 type ResponseIntent struct {
 	Action      ResponseAction `json:"action"`
 	TargetField string         `json:"target_field"`

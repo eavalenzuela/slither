@@ -1,0 +1,12 @@
+title: Entity-scoped response missing target_field
+id: invalid-0033
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: /bash
+  condition: selection
+slither:
+  response:
+    action: kill_process

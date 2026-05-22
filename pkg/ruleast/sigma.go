@@ -181,7 +181,9 @@ func compileSigma(src []byte) (*Rule, *sigmaYAML, error) {
 // Validation rules:
 //
 //   - action must be one of the six ADR-0034 classes.
-//   - target_field must be non-empty and identifier-shaped. Earlier
+//   - target_field must be identifier-shaped. Required for entity-scoped
+//     actions (kill/quarantine/collect); optional for host-scoped ones
+//     (isolate/unisolate), which ignore it. Earlier
 //     iterations required target_field to appear in a selection
 //     predicate, but kill_process commonly matches on Image (which
 //     binary fired) while targeting ProcessId (which PID to kill) —
@@ -211,9 +213,14 @@ func compileResponseIntent(rule *Rule, in *responseYAML) (*ResponseIntent, error
 	}
 	target := strings.TrimSpace(in.TargetField)
 	if target == "" {
-		return nil, fmt.Errorf("slither.response.target_field required")
-	}
-	if !isIdentifierShape(target) {
+		// Host-scoped actions (isolate/unisolate) don't draw a target
+		// from the event — the executor autoderives the mgmt subnet —
+		// so target_field is optional for them. Entity-scoped actions
+		// still need one to name the PID/path to act on.
+		if !action.IsHostScoped() {
+			return nil, fmt.Errorf("slither.response.target_field required for action %q", action)
+		}
+	} else if !isIdentifierShape(target) {
 		return nil, fmt.Errorf("slither.response.target_field %q must be identifier-shaped (alphanumeric, underscore, or dot)", target)
 	}
 	return &ResponseIntent{
