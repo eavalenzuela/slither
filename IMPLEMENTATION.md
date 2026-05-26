@@ -2138,7 +2138,68 @@ Secure Boot implementations).
 
 ## 9. Phase 7 — Platform Expansion (bullet, demand-driven)
 
-- macOS agent (Endpoint Security framework; Apple Developer ID required).
+- **macOS agent (scoped 2026-05-26, ADR-0041).** Endpoint Security (ES)
+  framework as the telemetry source; Apple Developer Program + restricted
+  `com.apple.developer.endpoint-security.client` entitlement + notarization
+  required for distribution. The collector seam is clean: a `darwin/arm64`
+  build already compiles for `respond` / `selfprotect` / `keystore` (their
+  `_other.go` no-op stubs); the only hard blocker is that all of
+  `agent/internal/collector` is `//go:build linux`. macOS events ride the
+  existing OCSF classes over the frozen `slither.v1` wire — no server, CH,
+  or console changes for detection-only. The darwin build needs
+  `CGO_ENABLED=1` + macOS CI runners (ES is a C framework; no cross-compile
+  from the Linux host). Three milestones:
+
+  - **M1 — telemetry (detection-only).**
+    1. **#M-A1 — ADR-0041** (this scope record; done).
+    2. **#M-A2 — make `darwin/arm64` compile.** Restructure `collector`
+       so the `Group` orchestrator is portable (move eBPF bits to
+       `*_linux.go`, add a no-op `collector_darwin.go` Group); add
+       `make build-agent-darwin` (CGO on) + a macOS CI runner that builds
+       and runs the already-portable unit tests. *Exit:* green darwin
+       build in CI; agent boots on a Mac and emits nothing.
+    3. **#M-B1 — Go↔ES cgo bridge (the make-or-break spike).** Minimal C
+       shim: create ES client, subscribe, marshal `ES_EVENT_TYPE_NOTIFY_EXEC`
+       across the cgo boundary into `RawProcessEvent`. Dev-signed,
+       SIP-disabled test Mac. Proves the whole architecture before the
+       Apple entitlement is granted.
+    4. **#M-B2 — process collector (`process_darwin.go`)** — full
+       exec/fork/exit (`NOTIFY_EXEC` / `_FORK` / `_EXIT`) feeding the
+       existing channel. ES carries argv/cwd/signing natively, so less
+       enricher work than the eBPF path.
+    5. **#M-B3 — file collector (`file_darwin.go`)** — `CREATE` / `WRITE`
+       (debounced on `CLOSE`, mirroring the eBPF approach) / `RENAME` /
+       `UNLINK` / `SETMODE` / `SETOWNER`, reusing the existing
+       include/exclude glob filter.
+    6. **#M-B4 — enricher darwin seam.** `libproc`-backed replacement
+       (`proc_pidpath`, `proc_pidinfo`) for the `/proc/<pid>/{stat,exe,
+       cmdline,cwd}` cache-miss reader.
+    7. **#M-C1 — network telemetry spike.** Measure NetworkExtension
+       (`NEFilterDataProvider`) cost/entitlement vs. shipping M1 with
+       `net.enabled=false` on darwin (mirrors the arm64 net-disabled
+       precedent, §9 #2). Decide; amend ADR-0041. Default lean:
+       net-disabled for M1, NetworkExtension as M2+.
+    8. **#M-C2 — M1 exit validation.** Doc-backed manual run on a real
+       Mac (mirrors #70 / #121): enroll a macOS agent to the existing
+       Linux server, push a macOS-relevant Sigma pack, drive a synthetic
+       scenario (suspicious exec chain + sensitive-file write), confirm
+       alerts land with correct lifecycle + flow graph. Captures under
+       `phase7_validation/macos-m1/`; narrative in
+       `docs/phase7-macos-validation.md`.
+
+  - **M2 — response parity.** `kill_darwin.go` (libproc ancestry walk —
+    no `PPid` field; `PROC_PIDTASKALLINFO`), `isolate_darwin.go` (pf
+    anchor via the existing `applier` interface seam at
+    `isolate_linux.go`), `collect_darwin.go` (libproc / `lsof` /
+    `log show`), Keychain-backed keystore. Quarantine + `log.chain` are
+    already POSIX-portable — they need only state-dir path selection.
+    NetworkExtension net collector lands here if #M-C1 chose it.
+
+  - **M3 — hardening + distribution.** `PT_DENY_ATTACH` selfprotect,
+    System Extension bundle embedded in a notarized `.app`, signed
+    `.pkg` installer, auto-update. Gated on Apple Developer Program
+    enrollment + entitlement grant + notarization (distribution only —
+    M1/M2 run dev-signed on the test Mac).
 - Windows agent (ETW-first; minifilter driver only if kernel-level file-write telemetry is needed; driver signing via EV cert).
 - **Tamper-chain hash recompute (carry-over from #112).** Phase 6 #112 ships
   count-based cross-check only — the agent's per-record hash includes
