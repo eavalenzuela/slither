@@ -28,6 +28,7 @@ import (
 	"github.com/t3rmit3/slither/server/internal/control"
 	"github.com/t3rmit3/slither/server/internal/grpcserv"
 	"github.com/t3rmit3/slither/server/internal/ingest"
+	"github.com/t3rmit3/slither/server/internal/ioc"
 	"github.com/t3rmit3/slither/server/internal/store/pg"
 	"github.com/t3rmit3/slither/server/internal/telemetry"
 )
@@ -175,7 +176,7 @@ func setupRulePushEnv(ctx context.Context, t *testing.T) *rulePushEnv {
 	}
 
 	telem := telemetry.NewCounters()
-	hub := control.NewHub(store, telem)
+	hub := control.NewHub(store, telem, ioc.New(store))
 	bus := ingest.NewBus(nil)
 
 	// Run the control runner; tighten debounce so the test asserts

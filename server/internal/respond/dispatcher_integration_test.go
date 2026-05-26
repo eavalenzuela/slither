@@ -191,7 +191,7 @@ func TestHub_OnResultTransitionsRow(t *testing.T) {
 		t.Fatalf("Dispatch: %v", err)
 	}
 
-	if err := h.OnResult(ctx, &pb.ResponseResult{
+	if err := h.OnResult(ctx, hostID, &pb.ResponseResult{
 		ControlId: row.ID,
 		Status:    pb.ResponseStatus_RESPONSE_STATUS_DONE,
 		Detail:    "killed pid 999",
