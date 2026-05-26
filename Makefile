@@ -122,6 +122,16 @@ build-agent: ## Build slither-agent → bin/
 	@mkdir -p $(BIN)
 	@cd agent && CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(BIN)/slither-agent ./cmd/slither-agent
 
+.PHONY: build-agent-darwin
+build-agent-darwin: ## Build slither-agent for darwin/{arm64,amd64} → bin/ (Phase 7 #M-A2)
+	@mkdir -p $(BIN)
+	@# M-A2: the darwin collector is a no-op stub (collector_other.go), so the
+	@# build is pure Go and cross-compiles from Linux with CGO_ENABLED=0.
+	@# #M-B1 wires the Endpoint Security cgo bridge — at that point this target
+	@# flips to CGO_ENABLED=1 and must run on a macOS host (no cross-compile).
+	@cd agent && GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(BIN)/slither-agent-darwin-arm64 ./cmd/slither-agent
+	@cd agent && GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(BIN)/slither-agent-darwin-amd64 ./cmd/slither-agent
+
 .PHONY: build-server
 build-server: ## Build slither-server → bin/
 	@mkdir -p $(BIN)

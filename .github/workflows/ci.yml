@@ -68,6 +68,42 @@ jobs:
       - name: Lint + vulncheck
         run: make lint
 
+  darwin:
+    name: darwin build + portable tests
+    runs-on: macos-14
+    # Phase 7 #M-A2 — prove the agent compiles and its platform-portable
+    # packages pass on a real macOS host. The Linux collectors / eBPF
+    # generation are build-tagged out here; what runs on darwin is the
+    # platform-neutral pipeline plus the non-Linux stubs (collector_other.go,
+    # hasher_other.go, the respond/selfprotect/keystore _other.go shims).
+    # macos-14 is arm64; a macos-13 (amd64) entry can be added later if the
+    # amd64 darwin path needs native coverage. Endpoint Security collectors
+    # (#M-B*) will flip build-agent-darwin to CGO_ENABLED=1 — still on this
+    # runner, no cross-compile.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+          cache-dependency-path: |
+            agent/go.sum
+            server/go.sum
+            pkg/go.sum
+            tools/go.sum
+
+      - name: Build agent (darwin/{arm64,amd64})
+        run: make build-agent-darwin
+
+      - name: Portable unit tests
+        # Linux-tagged packages compile to empty on darwin and are skipped
+        # by the ./... wildcard; the portable packages and _other.go stubs
+        # run natively.
+        run: cd agent && go test ./...
+
   reproducible:
     name: reproducible builds
     runs-on: ubuntu-24.04

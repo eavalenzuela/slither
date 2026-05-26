@@ -2152,12 +2152,26 @@ Secure Boot implementations).
 
   - **M1 — telemetry (detection-only).**
     1. **#M-A1 — ADR-0041** (this scope record; done).
-    2. **#M-A2 — make `darwin/arm64` compile.** Restructure `collector`
-       so the `Group` orchestrator is portable (move eBPF bits to
-       `*_linux.go`, add a no-op `collector_darwin.go` Group); add
-       `make build-agent-darwin` (CGO on) + a macOS CI runner that builds
-       and runs the already-portable unit tests. *Exit:* green darwin
-       build in CI; agent boots on a Mac and emits nothing.
+    2. ✅ **#M-A2 — make `darwin/arm64` compile** (done 2026-05-26).
+       Dropped the `//go:build linux` tag from `collector.go` so the
+       `Group` orchestrator + `Collector` interface are portable; the
+       eBPF-backed constructors stay Linux-tagged in `process.go` /
+       `file.go` / `net.go`, and a new `collector_other.go`
+       (`//go:build !linux`, matching the repo's `_other.go` stub
+       convention rather than a darwin-only file) supplies no-op
+       constructors that warn once and block until shutdown. A second
+       build seam surfaced once `collector` compiled: `enricher/hasher.go`
+       `statKey` read Linux-only `syscall.Stat_t` fields (`Dev` as uint64,
+       `Mtim`) — split into `hasher_linux.go` / `hasher_other.go`
+       (Darwin types `Dev` as int32 and carries mtime in `Mtimespec`).
+       Added `make build-agent-darwin` (builds darwin/{arm64,amd64};
+       CGO_ENABLED=0 for now since the stub is pure Go and cross-compiles
+       from Linux — #M-B1 flips it to CGO=1 on a macOS host) and a
+       `darwin` CI job on `macos-14` that builds the agent and runs the
+       portable `go test ./...` natively. *Exit met:* green darwin build,
+       agent boots and emits nothing (no-op collectors). Verified locally:
+       both Mach-O binaries built, linux build/test/lint unaffected,
+       darwin vet clean.
     3. **#M-B1 — Go↔ES cgo bridge (the make-or-break spike).** Minimal C
        shim: create ES client, subscribe, marshal `ES_EVENT_TYPE_NOTIFY_EXEC`
        across the cgo boundary into `RawProcessEvent`. Dev-signed,

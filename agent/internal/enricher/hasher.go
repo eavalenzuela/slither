@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"sync"
-	"syscall"
 )
 
 // hashKey identifies the content of a file by filesystem identity plus mtime,
@@ -160,18 +159,9 @@ func (h *hasher) failPending(key hashKey) {
 }
 
 // statKey stats path and derives the cache key. Symlinks are followed so the
-// key identifies the resolved file, not the link.
-func statKey(path string) (hashKey, bool) {
-	var st syscall.Stat_t
-	if err := syscall.Stat(path, &st); err != nil {
-		return hashKey{}, false
-	}
-	return hashKey{
-		dev:   st.Dev,
-		inode: st.Ino,
-		mtime: st.Mtim.Nano(),
-	}, true
-}
+// key identifies the resolved file, not the link. The body is platform-split
+// (hasher_linux.go / hasher_other.go) only because syscall.Stat_t field
+// types and the mtime accessor differ between Linux and Darwin.
 
 // sha256File streams the file through a SHA-256 hasher. Returns "" on any I/O
 // error — the caller treats that as "no hash available" and continues.

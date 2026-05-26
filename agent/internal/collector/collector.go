@@ -1,11 +1,12 @@
-//go:build linux
-
-// Package collector loads eBPF programs and drains their ringbuffers into
-// typed raw-event channels consumed by the enricher.
+// Package collector turns a platform's kernel telemetry into typed
+// raw-event channels consumed by the enricher.
 //
 // Each collector (process, file, net) owns its reader goroutine and its
-// output channel. The aggregate is wired by Group. The whole package is
-// Linux-only per ADR-0001.
+// output channel. The aggregate is wired by Group. The Group orchestrator
+// and the Collector interface are platform-neutral; the per-collector
+// constructors are platform-specific — eBPF on Linux (ADR-0010), Endpoint
+// Security on macOS (ADR-0041, Phase 7). Non-Linux builds compile against
+// no-op constructors in collector_other.go until those land.
 package collector
 
 import (
@@ -20,7 +21,7 @@ import (
 // ErrNotImplemented is returned by collectors that have not been wired yet.
 var ErrNotImplemented = errors.New("collector: not yet implemented")
 
-// Collector is a single eBPF-backed event source.
+// Collector is a single kernel-telemetry event source.
 type Collector interface {
 	// Name identifies the collector in logs (e.g. "process", "file", "net").
 	Name() string
