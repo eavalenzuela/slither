@@ -6,7 +6,9 @@ import (
 	"math/bits"
 	"net/netip"
 	"regexp"
+	"strconv"
 	"strings"
+	"unicode/utf16"
 
 	"gopkg.in/yaml.v3"
 )
@@ -321,7 +323,14 @@ func parseUintStrict(s string) (uint64, error) {
 		if r < '0' || r > '9' {
 			return 0, fmt.Errorf("non-digit %q", r)
 		}
-		n = n*10 + uint64(r-'0')
+		d := uint64(r - '0')
+		// Guard the accumulator against wrap: a silent overflow could turn
+		// a pathologically-long timeframe into a tiny window and ship an
+		// effectively-unbounded stateful rule.
+		if n > (^uint64(0)-d)/10 {
+			return 0, fmt.Errorf("value overflows uint64")
+		}
+		n = n*10 + d
 	}
 	return n, nil
 }
@@ -492,10 +501,38 @@ func parseFieldKey(key string) (string, Operator, Modifiers, error) {
 			if err := setOp(OpIOC, seg); err != nil {
 				return "", 0, 0, err
 			}
+		case "gt":
+			if err := setOp(OpGT, seg); err != nil {
+				return "", 0, 0, err
+			}
+		case "gte":
+			if err := setOp(OpGTE, seg); err != nil {
+				return "", 0, 0, err
+			}
+		case "lt":
+			if err := setOp(OpLT, seg); err != nil {
+				return "", 0, 0, err
+			}
+		case "lte":
+			if err := setOp(OpLTE, seg); err != nil {
+				return "", 0, 0, err
+			}
 		case "all":
 			mods |= ModAll
 		case "null":
 			mods |= ModNull
+		case "exists":
+			mods |= ModExists
+		case "cased":
+			mods |= ModCased
+		// Regex sub-modifiers set inline flags on the compiled pattern.
+		// They are only meaningful after `re`/`regex`; validated below.
+		case "i":
+			mods |= ModReI
+		case "m":
+			mods |= ModReM
+		case "s":
+			mods |= ModReS
 		case "base64":
 			mods |= ModBase64
 		case "base64offset":
@@ -506,8 +543,6 @@ func parseFieldKey(key string) (string, Operator, Modifiers, error) {
 			mods |= ModUTF16BE
 		case "utf16":
 			mods |= ModUTF16
-		case "cased":
-			return "", 0, 0, fmt.Errorf("modifier %q not supported (Sigma defaults are case-insensitive)", raw)
 		default:
 			return "", 0, 0, fmt.Errorf("unknown modifier %q", raw)
 		}
@@ -532,14 +567,35 @@ func validateModifierComposition(mods Modifiers, op Operator) error {
 	if mods.Has(ModNull) && mods != ModNull {
 		return fmt.Errorf("modifier \"null\" must be standalone (no other modifiers)")
 	}
+	if mods.Has(ModExists) && mods != ModExists {
+		return fmt.Errorf("modifier \"exists\" must be standalone (no other modifiers)")
+	}
+	if mods.Has(ModExists) && op != OpEquals {
+		return fmt.Errorf("modifier \"exists\" is a presence check and takes no match operator")
+	}
+	// Regex sub-flags (i/m/s) are only meaningful on a regex predicate.
+	reFlags := mods & (ModReI | ModReM | ModReS)
+	if reFlags != 0 && op != OpRegex {
+		return fmt.Errorf("regex flags (i/m/s) require the \"re\"/\"regex\" modifier")
+	}
 	if op == OpCIDR && mods != 0 {
 		return fmt.Errorf("modifier \"cidr\" composes with no other modifiers")
 	}
 	if op == OpIOC && mods != 0 {
 		return fmt.Errorf("modifier \"ioc\" composes with no other modifiers")
 	}
-	if op == OpRegex && mods&^ModAll != 0 {
-		return fmt.Errorf("modifier \"regex\" composes only with \"all\"")
+	if op == OpRegex && mods&^(ModAll|ModReI|ModReM|ModReS) != 0 {
+		return fmt.Errorf("modifier \"regex\" composes only with \"all\" and the i/m/s flags")
+	}
+	if op.isNumeric() && mods&^ModAll != 0 {
+		return fmt.Errorf("numeric modifier %q composes only with \"all\"", op)
+	}
+	if mods.Has(ModCased) {
+		switch op {
+		case OpEquals, OpContains, OpStartsWith, OpEndsWith:
+		default:
+			return fmt.Errorf("modifier \"cased\" composes only with string match operators")
+		}
 	}
 	encodings := mods & (ModBase64 | ModBase64Offset | ModUTF16LE | ModUTF16BE | ModUTF16)
 	if bits.OnesCount16(uint16(encodings&(ModBase64|ModBase64Offset))) > 1 {
@@ -565,8 +621,27 @@ func buildPredicate(field string, op Operator, mods Modifiers, raw any) (FieldPr
 		// Allow `Field|null: null` and `Field|null: true` interchangeably.
 		return FieldPredicate{Field: field, Op: op, Mods: mods}, nil
 	}
+	if mods.Has(ModExists) {
+		// "exists" is a boolean presence check. The value must be a bare
+		// true/false; anything else is a rule-author error worth failing
+		// loud on rather than guessing.
+		if len(values) != 1 || (values[0] != "true" && values[0] != "false") {
+			return FieldPredicate{}, fmt.Errorf("\"exists\" modifier requires a boolean value (true or false)")
+		}
+		return FieldPredicate{Field: field, Op: op, Mods: mods, existsWant: values[0] == "true"}, nil
+	}
 	if len(values) == 0 {
 		return FieldPredicate{}, fmt.Errorf("empty value list")
+	}
+	if op.isNumeric() {
+		// Validate every threshold parses as a number now so a typo fails
+		// compile rather than silently never matching at runtime.
+		for _, v := range values {
+			if _, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err != nil {
+				return FieldPredicate{}, fmt.Errorf("numeric modifier %q needs numeric values; %q does not parse", op, v)
+			}
+		}
+		return FieldPredicate{Field: field, Op: op, Mods: mods, Values: values}, nil
 	}
 	if op == OpIOC {
 		// IOC values are feed_ids — light validation here keeps a
@@ -583,11 +658,24 @@ func buildPredicate(field string, op Operator, mods Modifiers, raw any) (FieldPr
 	}
 	values = applyEncodingModifiers(values, mods)
 	pred := FieldPredicate{Field: field, Op: op, Mods: mods, Values: values}
+	// Precompute the case-folded form of each value for the
+	// case-insensitive substring operators so the runtime never re-folds
+	// a constant. Skipped when |cased is set (raw comparison wanted).
+	if !mods.Has(ModCased) {
+		switch op {
+		case OpContains, OpStartsWith, OpEndsWith:
+			pred.foldValues = make([]string, len(values))
+			for i, v := range values {
+				pred.foldValues[i] = strings.ToLower(v)
+			}
+		}
+	}
 	switch op {
 	case OpRegex:
+		flagPrefix := regexFlagPrefix(mods)
 		pred.regexps = make([]*regexp.Regexp, len(values))
 		for i, v := range values {
-			re, err := regexp.Compile(v)
+			re, err := regexp.Compile(flagPrefix + v)
 			if err != nil {
 				return FieldPredicate{}, fmt.Errorf("regex %q: %w", v, err)
 			}
@@ -610,6 +698,26 @@ func buildPredicate(field string, op Operator, mods Modifiers, raw any) (FieldPr
 		}
 	}
 	return pred, nil
+}
+
+// regexFlagPrefix renders the `(?ims)` inline-flag group the regex
+// sub-modifiers request, or "" when none are set. Order is fixed
+// (i, m, s) so the compiled form is deterministic.
+func regexFlagPrefix(mods Modifiers) string {
+	var flags []byte
+	if mods.Has(ModReI) {
+		flags = append(flags, 'i')
+	}
+	if mods.Has(ModReM) {
+		flags = append(flags, 'm')
+	}
+	if mods.Has(ModReS) {
+		flags = append(flags, 's')
+	}
+	if len(flags) == 0 {
+		return ""
+	}
+	return "(?" + string(flags) + ")"
 }
 
 // applyEncodingModifiers rewrites values into the encoded forms the
@@ -689,17 +797,19 @@ func base64Offsets(v string) []string {
 }
 
 func encodeUTF16LE(s string) string {
-	b := make([]byte, 0, len(s)*2)
-	for _, r := range s {
-		b = append(b, byte(r), byte(r>>8))
+	units := utf16.Encode([]rune(s))
+	b := make([]byte, 0, len(units)*2)
+	for _, u := range units {
+		b = append(b, byte(u), byte(u>>8))
 	}
 	return string(b)
 }
 
 func encodeUTF16BE(s string) string {
-	b := make([]byte, 0, len(s)*2)
-	for _, r := range s {
-		b = append(b, byte(r>>8), byte(r))
+	units := utf16.Encode([]rune(s))
+	b := make([]byte, 0, len(units)*2)
+	for _, u := range units {
+		b = append(b, byte(u>>8), byte(u))
 	}
 	return string(b)
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -46,6 +47,16 @@ const (
 	// the runtime resolves them via Env.MatchIOC. Composes with no
 	// other modifiers (#66).
 	OpIOC
+	// OpGT/OpGTE/OpLT/OpLTE are Sigma's numeric comparison modifiers
+	// (`|gt`, `|gte`, `|lt`, `|lte`). The field value and the predicate
+	// value are both parsed as numbers at runtime; a value that doesn't
+	// parse numerically never matches. Useful for ports, PIDs, sizes.
+	// They compose only with ModAll — encoding/CIDR/regex modifiers are
+	// rejected at compile time.
+	OpGT
+	OpGTE
+	OpLT
+	OpLTE
 )
 
 func (o Operator) String() string {
@@ -64,8 +75,22 @@ func (o Operator) String() string {
 		return "cidr"
 	case OpIOC:
 		return "ioc"
+	case OpGT:
+		return "gt"
+	case OpGTE:
+		return "gte"
+	case OpLT:
+		return "lt"
+	case OpLTE:
+		return "lte"
 	}
 	return fmt.Sprintf("op(%d)", o)
+}
+
+// isNumeric reports whether the operator is one of the numeric
+// comparison shapes (gt/gte/lt/lte).
+func (o Operator) isNumeric() bool {
+	return o == OpGT || o == OpGTE || o == OpLT || o == OpLTE
 }
 
 // Modifiers is a bitmask of the orthogonal Sigma modifiers that compose
@@ -99,6 +124,21 @@ const (
 	// ModUTF16: equivalent to ModUTF16LE plus a UTF-16 BOM (0xFF 0xFE)
 	// prefix on each value.
 	ModUTF16
+	// ModExists: presence check driven by a boolean value —
+	// `Field|exists: true` matches when the field is populated,
+	// `Field|exists: false` when it is absent. Standalone, like ModNull.
+	ModExists
+	// ModCased: switch the string match from Sigma's default
+	// case-insensitive comparison to a case-sensitive one. Composes with
+	// the string operators (equals/contains/startswith/endswith) and the
+	// encoding modifiers; rejected on cidr/ioc/regex/numeric operators.
+	ModCased
+	// ModReI/ModReM/ModReS are regex sub-modifiers (`|re|i`, `|re|m`,
+	// `|re|s`) that set the case-insensitive, multiline, and dot-all
+	// flags on the compiled pattern. Only valid alongside OpRegex.
+	ModReI
+	ModReM
+	ModReS
 )
 
 func (m Modifiers) Has(flag Modifiers) bool { return m&flag != 0 }
@@ -130,6 +170,21 @@ func (m Modifiers) String() string {
 	}
 	if m.Has(ModUTF16) {
 		parts = append(parts, "utf16")
+	}
+	if m.Has(ModExists) {
+		parts = append(parts, "exists")
+	}
+	if m.Has(ModCased) {
+		parts = append(parts, "cased")
+	}
+	if m.Has(ModReI) {
+		parts = append(parts, "re_i")
+	}
+	if m.Has(ModReM) {
+		parts = append(parts, "re_m")
+	}
+	if m.Has(ModReS) {
+		parts = append(parts, "re_s")
 	}
 	return strings.Join(parts, "|")
 }
@@ -312,6 +367,15 @@ type FieldPredicate struct {
 	FeedIDs []string
 	regexps []*regexp.Regexp
 	cidrs   []netip.Prefix // populated when Op == OpCIDR
+	// foldValues holds the pre-lowercased form of Values for the
+	// case-insensitive string operators (contains/startswith/endswith),
+	// computed once at compile time so the runtime hot path never
+	// re-folds a constant. Empty for cased/regex/cidr/numeric/ioc
+	// predicates. Indexed in lockstep with Values.
+	foldValues []string
+	// existsWant is the boolean carried by a `|exists` predicate: true
+	// means "match when present", false means "match when absent".
+	existsWant bool
 }
 
 // Eval returns true when the predicate's match condition holds against
@@ -326,6 +390,11 @@ type FieldPredicate struct {
 //   - default: Op-specific case-insensitive string match across the
 //     bound values × Values cross product.
 func (p *FieldPredicate) Eval(env Env) bool {
+	if p.Mods.Has(ModExists) {
+		bound, ok := env.Lookup(p.Field)
+		present := ok && len(bound) > 0
+		return present == p.existsWant
+	}
 	if p.Mods.Has(ModNull) {
 		bound, ok := env.Lookup(p.Field)
 		return !ok || len(bound) == 0
@@ -378,15 +447,28 @@ func (p *FieldPredicate) Eval(env Env) bool {
 }
 
 func (p *FieldPredicate) matchOne(have, want string, idx int) bool {
+	cased := p.Mods.Has(ModCased)
 	switch p.Op {
 	case OpEquals:
+		if cased {
+			return have == want
+		}
 		return strings.EqualFold(have, want)
 	case OpContains:
-		return strings.Contains(strings.ToLower(have), strings.ToLower(want))
+		if cased {
+			return strings.Contains(have, want)
+		}
+		return strings.Contains(strings.ToLower(have), p.fold(want, idx))
 	case OpStartsWith:
-		return strings.HasPrefix(strings.ToLower(have), strings.ToLower(want))
+		if cased {
+			return strings.HasPrefix(have, want)
+		}
+		return strings.HasPrefix(strings.ToLower(have), p.fold(want, idx))
 	case OpEndsWith:
-		return strings.HasSuffix(strings.ToLower(have), strings.ToLower(want))
+		if cased {
+			return strings.HasSuffix(have, want)
+		}
+		return strings.HasSuffix(strings.ToLower(have), p.fold(want, idx))
 	case OpRegex:
 		if idx < 0 || idx >= len(p.regexps) || p.regexps[idx] == nil {
 			return false
@@ -400,9 +482,39 @@ func (p *FieldPredicate) matchOne(have, want string, idx int) bool {
 		if err != nil {
 			return false
 		}
-		return p.cidrs[idx].Contains(addr)
+		// Dual-stack sockets surface v4-mapped v6 addresses
+		// (::ffff:a.b.c.d). Unmap so they still match v4 CIDR rules;
+		// no-op for genuine v6 addresses.
+		return p.cidrs[idx].Contains(addr.Unmap())
+	case OpGT, OpGTE, OpLT, OpLTE:
+		hv, herr := strconv.ParseFloat(have, 64)
+		wv, werr := strconv.ParseFloat(want, 64)
+		if herr != nil || werr != nil {
+			return false
+		}
+		switch p.Op {
+		case OpGT:
+			return hv > wv
+		case OpGTE:
+			return hv >= wv
+		case OpLT:
+			return hv < wv
+		case OpLTE:
+			return hv <= wv
+		}
 	}
 	return false
+}
+
+// fold returns the pre-lowercased want at idx when foldValues is
+// populated, otherwise lowercases on the spot. The fast path (compiled
+// predicates) always has foldValues; the fallback keeps hand-built
+// predicates in tests correct.
+func (p *FieldPredicate) fold(want string, idx int) string {
+	if idx >= 0 && idx < len(p.foldValues) {
+		return p.foldValues[idx]
+	}
+	return strings.ToLower(want)
 }
 
 // Expr is the boolean tree produced by the condition parser.

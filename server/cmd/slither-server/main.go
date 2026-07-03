@@ -30,11 +30,7 @@ func run() error {
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
 
-	dirty := ""
-	if version.Modified() {
-		dirty = "+dirty"
-	}
-	banner := fmt.Sprintf("slither-server %s (%s%s)", version.Version, version.Revision(), dirty)
+	banner := "slither-server " + version.String()
 
 	if *showVersion {
 		fmt.Println(banner)

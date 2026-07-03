@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 )
 
 // Init points slog's default logger at os.Stderr through a TextHandler
@@ -31,14 +32,17 @@ func New(w io.Writer, level string) *slog.Logger {
 }
 
 // ParseLevel maps the agent.log_level / server.log_level vocabulary
-// (debug/info/warn/error) to slog.Level. Unrecognised strings fall back
-// to info — config validation rejects unknown values up front, so this
-// branch is defensive only.
+// (debug/info/warn/error) to slog.Level. The input is trimmed and
+// lowercased and the common "warning" alias is accepted so a slightly-off
+// config value degrades to the intended level instead of silently
+// dropping to info. Unrecognised strings still fall back to info — config
+// validation rejects unknown values up front, so that branch is
+// defensive only.
 func ParseLevel(level string) slog.Level {
-	switch level {
+	switch strings.ToLower(strings.TrimSpace(level)) {
 	case "debug":
 		return slog.LevelDebug
-	case "warn":
+	case "warn", "warning":
 		return slog.LevelWarn
 	case "error":
 		return slog.LevelError

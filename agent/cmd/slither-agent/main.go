@@ -162,9 +162,5 @@ func verifyLogsCmd(args []string) error {
 }
 
 func buildBanner() string {
-	dirty := ""
-	if version.Modified() {
-		dirty = "+dirty"
-	}
-	return fmt.Sprintf("slither-agent %s (%s%s)", version.Version, version.Revision(), dirty)
+	return "slither-agent " + version.String()
 }

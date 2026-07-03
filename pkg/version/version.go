@@ -1,7 +1,10 @@
 // Package version exposes build-time identification shared by agent and server binaries.
 package version
 
-import "runtime/debug"
+import (
+	"fmt"
+	"runtime/debug"
+)
 
 // Version is the semver string, overridden at link time via -ldflags="-X ...Version=v0.1.0".
 var Version = "dev"
@@ -21,6 +24,17 @@ func Revision() string {
 		}
 	}
 	return "unknown"
+}
+
+// String returns the canonical build-identity suffix
+// "<version> (<revision>[+dirty])" shared by both binaries' banners.
+// Callers prefix their program name, e.g. "slither-agent " + String().
+func String() string {
+	dirty := ""
+	if Modified() {
+		dirty = "+dirty"
+	}
+	return fmt.Sprintf("%s (%s%s)", Version, Revision(), dirty)
 }
 
 // Modified reports whether the working tree was dirty at build time.

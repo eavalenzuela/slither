@@ -1,0 +1,24 @@
+title: Fileless execution from an anonymous memfd
+id: 8b7c4d00-0001-4000-8000-00000000004b
+status: experimental
+description: |
+  A process is executing from an anonymous in-memory file (memfd). The
+  kernel resolves such a process's backing path to `/memfd:<name>
+  (deleted)`, which never appears for a normally on-disk binary. Loading
+  a payload into a memfd with memfd_create(2) and exec'ing it leaves no
+  file on disk, so this is a hallmark of fileless malware and packers
+  that stage a second-stage ELF entirely in memory. T1620 (Reflective
+  Code Loading). Legitimate use is rare — a handful of language runtimes
+  and sandboxes do it — so pair with process-lineage triage.
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.execution
+  - attack.t1620
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    Image|contains: 'memfd:'
+  condition: selection

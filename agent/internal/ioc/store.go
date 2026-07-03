@@ -50,13 +50,14 @@ func New() *Store {
 }
 
 // Apply replaces the entire feed set with the given pb.IocFeed slice.
-// Entries that fail per-kind parsing are dropped silently — the
-// server's compile-time gate already rejected malformed entries via
+// Entries that fail per-kind parsing are dropped — the server's
+// compile-time gate already rejected malformed entries via
 // pg.normaliseEntries; any survivors here are belt-and-braces.
 //
-// Returns the number of feeds loaded; reports a structured warning
-// when any individual feed had parse drops so the caller can log
-// observability without rejecting the whole set.
+// Returns (loaded, dropped): the count of feeds installed and the count
+// of individual entries that failed per-kind parsing, so the caller can
+// log feed-parse loss without rejecting the whole set. Use Stats() for a
+// per-feed breakdown of the snapshot in effect.
 func (s *Store) Apply(feeds []*pb.IocFeed) (loaded, dropped int) {
 	next := &snapshot{feeds: make(map[string]*feed, len(feeds))}
 	for _, raw := range feeds {
@@ -105,14 +106,42 @@ func (s *Store) Lookup(feedID string) (entryCount int, kind string, ok bool) {
 	return f.count, kindString(f.kind), true
 }
 
+// Stats returns per-feed entry counts for the snapshot currently in
+// effect, keyed by feed_id, plus the total across all feeds. Intended
+// for observability (e.g. logging the feed state after Apply); the map
+// is freshly allocated so callers may retain it.
+func (s *Store) Stats() (perFeed map[string]int, total int) {
+	perFeed = map[string]int{}
+	snap := s.snapshot.Load()
+	if snap == nil {
+		return perFeed, 0
+	}
+	for id, f := range snap.feeds {
+		perFeed[id] = f.count
+		total += f.count
+	}
+	return perFeed, total
+}
+
 // Compile-time guards.
 var (
 	_ ruleast.IOCEnv      = (*Store)(nil)
 	_ ruleast.IOCRegistry = (*Store)(nil)
 )
 
-func (f *feed) add(raw string) bool {
+// normaliseValue lowercases + trims a raw indicator/candidate and, for
+// domain feeds, strips a single trailing FQDN dot so "evil.com." matches
+// an "evil.com" indicator. Applied symmetrically in add() and match().
+func normaliseValue(kind pb.FeedKind, raw string) string {
 	v := strings.ToLower(strings.TrimSpace(raw))
+	if kind == pb.FeedKind_FEED_KIND_DOMAIN {
+		v = strings.TrimSuffix(v, ".")
+	}
+	return v
+}
+
+func (f *feed) add(raw string) bool {
+	v := normaliseValue(f.kind, raw)
 	if v == "" {
 		return false
 	}
@@ -131,7 +160,11 @@ func (f *feed) add(raw string) bool {
 		f.sha256[arr] = struct{}{}
 	case pb.FeedKind_FEED_KIND_IPV4:
 		addr, err := netip.ParseAddr(v)
-		if err != nil || !addr.Is4() {
+		if err != nil {
+			return false
+		}
+		addr = addr.Unmap()
+		if !addr.Is4() {
 			return false
 		}
 		ip := addr.As4()
@@ -162,7 +195,7 @@ func (f *feed) add(raw string) bool {
 }
 
 func (f *feed) match(raw string) bool {
-	v := strings.ToLower(strings.TrimSpace(raw))
+	v := normaliseValue(f.kind, raw)
 	if v == "" {
 		return false
 	}
@@ -179,7 +212,13 @@ func (f *feed) match(raw string) bool {
 		return ok
 	case pb.FeedKind_FEED_KIND_IPV4:
 		addr, err := netip.ParseAddr(v)
-		if err != nil || !addr.Is4() {
+		if err != nil {
+			return false
+		}
+		// A dual-stack socket surfaces the peer as ::ffff:a.b.c.d; unmap
+		// so it still matches an IPv4 indicator.
+		addr = addr.Unmap()
+		if !addr.Is4() {
 			return false
 		}
 		ip := addr.As4()

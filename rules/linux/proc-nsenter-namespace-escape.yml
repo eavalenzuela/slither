@@ -1,0 +1,29 @@
+title: nsenter into the host (PID 1) namespaces
+id: 8b7c4d00-0001-4000-8000-00000000004c
+status: experimental
+description: |
+  nsenter invoked to join the namespaces of PID 1. From inside a
+  container this is the canonical host-escape primitive: entering init's
+  mount / pid / net namespaces (often with a shell) yields host-level
+  execution when the container is privileged or holds CAP_SYS_ADMIN.
+  T1611 (Escape to Host). nsenter targeting PID 1 is virtually never
+  part of normal application behaviour; orchestration agents that use it
+  legitimately are few and can be allowlisted by ParentImage.
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.t1611
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection_bin:
+    Image|endswith: /nsenter
+  selection_target:
+    CommandLine|contains:
+      - ' -t 1 '
+      - ' -t 1'
+      - '--target 1'
+      - '--target=1'
+      - '/proc/1/ns'
+  condition: selection_bin and selection_target

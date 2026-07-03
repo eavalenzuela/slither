@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/t3rmit3/slither/agent/internal/ioc"
 	"github.com/t3rmit3/slither/agent/internal/ruleengine"
@@ -53,7 +54,15 @@ func compileRuleSet(rs *pb.RuleSet, telem *telemetry.Counters, iocStore *ioc.Sto
 	// Load feeds first so the registry resolves on this same call.
 	// Apply is safe even when iocStore is nil — we just skip it.
 	if iocStore != nil {
-		iocStore.Apply(rs.GetIocFeeds())
+		loaded, dropped := iocStore.Apply(rs.GetIocFeeds())
+		if dropped > 0 {
+			// Malformed entries should have been rejected server-side;
+			// surface drops so a broken feed pipeline is visible rather
+			// than silently thinning the indicators an agent enforces.
+			_, total := iocStore.Stats()
+			slog.Warn("ioc feed apply dropped entries",
+				"feeds", loaded, "dropped", dropped, "entries", total)
+		}
 	}
 
 	var compileOpts []ruleast.CompileOption

@@ -1,0 +1,29 @@
+title: New drop-in file under /etc/sudoers.d
+id: 8b7c4d00-0001-4000-8000-00000000004d
+status: experimental
+description: |
+  A process wrote a file under /etc/sudoers.d/. Files there are parsed
+  by sudo with the same authority as /etc/sudoers, so a single line like
+  `attacker ALL=(ALL) NOPASSWD: ALL` grants durable passwordless root.
+  T1548.003 (Abuse Elevation Control Mechanism: Sudo and Sudo Caching).
+  The directory is normally written only by the package manager and by
+  sudo's own visudo/tooling, so an ad-hoc writer is the signal; a small
+  allowlist covers the routine package-manager case.
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.persistence
+  - attack.t1548.003
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection:
+    TargetFilename|startswith: /etc/sudoers.d/
+  benign_writer:
+    Image|endswith:
+      - /dpkg
+      - /rpm
+      - /visudo
+      - /sudo
+  condition: selection and not benign_writer
