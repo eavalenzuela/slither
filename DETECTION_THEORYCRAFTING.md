@@ -52,7 +52,7 @@ OCSF classes the agent currently emits (Phase 1 complete):
 
 ## Coverage map (current pack vs ATT&CK)
 
-Tactic-by-tactic snapshot of what's in `rules/linux/` right now (61 rules).
+Tactic-by-tactic snapshot of what's in `rules/linux/` right now (66 rules).
 
 ### Initial Access
 - **None directly.** Initial access is mostly network-edge, which is out of
@@ -90,11 +90,13 @@ Tactic-by-tactic snapshot of what's in `rules/linux/` right now (61 rules).
 - ✅ `proc-find-suid-discovery` (T1083 + recon for SUID escalation)
 - ✅ `proc-sudo-rights-probe` (T1548.003, parallel) — verify
 - ✅ `proc-setcap-privileged-grant` (T1548 capability escalation)
-- **Gaps:** `pkexec` abuse
-  (CVE-2021-4034 family), `unshare`/`nsenter` unusual invocation, `dirtypipe`
-  artefact patterns. Most of T1068 is exploit-specific and best caught by
-  collector-level signals (e.g. `bpf_probe_read_kernel` from non-root) which
-  we don't have.
+- ✅ `file-sudoers-d-drop` (T1548.003 sudoers drop-in persistence/escalation)
+- ✅ `proc-nsenter-namespace-escape` (T1611 escape to host PID-1 namespaces)
+- **Gaps:** `pkexec` abuse (CVE-2021-4034 family) — see backlog #4, still
+  partially blocked on env-var capture; `unshare` unusual invocation (the
+  `nsenter` half is now covered); `dirtypipe` artefact patterns. Most of
+  T1068 is exploit-specific and best caught by collector-level signals
+  (e.g. `bpf_probe_read_kernel` from non-root) which we don't have.
 
 ### Defence Evasion (T1027, T1070, T1140, T1562)
 - ✅ `proc-base64-decode-to-sandbox` (T1140 + T1027)
@@ -105,6 +107,7 @@ Tactic-by-tactic snapshot of what's in `rules/linux/` right now (61 rules).
 - ✅ `proc-auditd-ruleset-disable` (T1562.001 in-place audit ruleset kill)
 - ✅ `proc-shred-wipe-logs` (T1070.002 secure-delete of system logs)
 - ✅ `proc-chattr-immutable-set` (T1222.002 immutable attr on sensitive path)
+- ✅ `proc-memfd-fileless-exec` (T1620 reflective load / fileless exec)
 - **Gaps:** none currently tracked.
 
 ### Credential Access (T1003, T1552, T1555)

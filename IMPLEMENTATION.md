@@ -2138,6 +2138,73 @@ Secure Boot implementations).
 
 ## 9. Phase 7 — Platform Expansion (bullet, demand-driven)
 
+- ✅ **Detection-core hardening pass (landed 2026-07-03, `2ac5c53`).**
+  A standalone correctness/perf/robustness sweep over the modules both
+  the agent edge engine and the server detection engine share
+  (`pkg/ruleast`, `pkg/ruleeval`, `pkg/ocsf`, `pkg/log`, `pkg/version`,
+  `agent/internal/ioc`). Tracked in a scratch `PLANNED_IMPROVEMENTS.md`
+  while in flight; folded here and the scratch doc deleted on close.
+
+  *Correctness / perf:*
+  1. **UTF-16 emits real surrogate pairs.** `encodeUTF16LE/BE` /
+     `encodeUTF16WithBOM` used `byte(r), byte(r>>8)`, silently dropping
+     the high surrogate for any rune ≥ U+10000, so a
+     `Field|utf16le|base64` over emoji or astral-plane CJK compiled to
+     the wrong bytes and never matched. Now `unicode/utf16.Encode`.
+     ASCII/BMP output is byte-identical — no shipped rule changes
+     behaviour.
+  2. **Case-folded predicate values are precomputed.**
+     `FieldPredicate.matchOne` re-lowercased the constant Sigma *want*
+     on every event for `contains`/`startswith`/`endswith`. Folded once
+     at compile time into `foldValues`. Semantics unchanged; this is
+     pure hot-path work removed from the per-event path.
+  3. **CIDR matching `Unmap()`s IPv4-mapped IPv6.** A dual-stack socket
+     surfaces `::ffff:a.b.c.d`, and `netip.Prefix.Contains` returns
+     false against a v4 prefix because the families differ. No-op for
+     genuine v6.
+  4. **`timeframe:` parse rejects decimal overflow.** `parseUintStrict`
+     accumulated `n*10 + d` unguarded, so a pathological timeframe could
+     wrap to a tiny window and ship an effectively-unbounded stateful
+     rule. Wrap is now detected and errors loud.
+  5. **`version.String()`** — both binaries hand-built the same
+     `"%s (%s%s)"` banner with duplicated dirty-flag logic; both now
+     route through one helper. First unit test for the package.
+  6. **`log.ParseLevel` tolerance** — trims + lowercases and accepts the
+     `warning` alias, so a slightly-off config value degrades to the
+     intended level instead of silently falling back to info. First unit
+     test for the package.
+  7. **`ocsf.NewUID` fallback keeps full width.** The crypto/rand failure
+     path filled only the low 8 of 16 bytes, leaving the high half a
+     constant zero. All 16 now come from the nanosecond clock.
+  8. **IOC domain feeds normalise a trailing FQDN dot** — `evil.com.`
+     matches an `evil.com` indicator for `FEED_KIND_DOMAIN`. Other feed
+     kinds untouched.
+  9. **IOC `Apply` load/drop observability** — new `Store.Stats()`, a
+     corrected `Apply` doc comment (it claimed a structured warning it
+     never emitted), and dropped-entry logging in `compileRuleSet` so
+     operators can see feed-parse loss.
+  10. **IOC IPv4 feeds match IPv4-mapped IPv6** — symmetry with (3).
+
+  *New Sigma surface (all four match pySigma semantics):*
+  `|lt |lte |gt |gte` numeric predicates (validated as numbers at compile
+  time, compared numerically at runtime); `|exists` as the presence/
+  absence complement to `|null`; `|cased` for case-sensitive
+  `equals`/`contains`/`startswith`/`endswith` (previously rejected
+  outright); and the `|re|i` / `|re|m` / `|re|s` regex flag
+  sub-modifiers.
+
+  *Rules:* three edge-eligible detections shipped into `rules/linux/`
+  (pack 63 → 66) — `proc-memfd-fileless-exec` (T1620),
+  `proc-nsenter-namespace-escape` (T1611), `file-sudoers-d-drop`
+  (T1548.003).
+
+  *Correction on close:* the in-flight doc recorded a deferred "CI
+  govulncheck gate" as the pass's next CI improvement. That gate already
+  exists and predates the pass — `make lint` has run
+  `govulncheck ./...` across every module since Phase 0 (`22d1896`), and
+  CI's `build-test-lint` job invokes it as its "Lint + vulncheck" step.
+  Nothing to do; the note was wrong, not outstanding.
+
 - **macOS agent (scoped 2026-05-26, ADR-0041).** Endpoint Security (ES)
   framework as the telemetry source; Apple Developer Program + restricted
   `com.apple.developer.endpoint-security.client` entitlement + notarization
