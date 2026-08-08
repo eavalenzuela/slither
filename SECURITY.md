@@ -86,12 +86,37 @@ time someone pushes.
   by design. Its absence from the govulncheck numbers is a tooling
   limitation, not a clean bill of health.
 
-The residual risk that remains is real but different in kind: a
-compromised build-time tool is a supply-chain risk to the *build*, not a
-runtime vulnerability in a deployed slither. It is dispositioned as
-accepted-and-monitored via `.github/dependabot.yml`, which groups
-`tools/` updates separately from the shipped modules so the two are
-never triaged as one pile.
+The residual risk is real but different in kind: a compromised
+build-time tool is a supply-chain risk to the *build*, not a runtime
+vulnerability in a deployed slither. It is not dismissed on that basis.
+
+**Measured and reduced 2026-08-08.** `govulncheck -mode=binary` works on
+the installed tool binaries even though it cannot scan `tools/` as a
+module, so the tools were audited that way and the pins moved:
+
+| tool | before | after |
+|---|---|---|
+| `buf` v1.47.2 → v1.72.0 | 44 findings (17 non-stdlib: containerd, docker, quic-go, x/net) | 0 |
+| `golangci-lint` v2.11.4 (rebuilt) | 28 (all stdlib) | 0 |
+| `templ` v0.3.1001 → v0.3.1020 | 30 (8 non-stdlib: x/net) | 5 (x/net; awaiting upstream) |
+| `gotestsum` v1.13.0 (latest) | 2 (1 non-stdlib: x/text) | 1 non-stdlib (awaiting upstream) |
+
+104 findings → 8, the remainder being upstream dependency lag in `templ`
+and `gotestsum` with no newer release to move to. Most of the stdlib
+findings were simply stale build toolchains in the installed binaries,
+which reinstalling fixed.
+
+The root cause was **pin drift**: `scripts/install-tools.sh` pinned buf
+v1.47.2 while `tools/go.mod` declared v1.68.4, and since the script is
+what installs, the buf that actually ran was 21 minor versions behind
+the version the repo appeared to declare — still carrying a
+docker/containerd stack upstream had dropped. Nothing compared the two,
+so nothing noticed. `install-tools.sh` now cross-checks them on every
+run and warns on disagreement.
+
+Ongoing triage is via `.github/dependabot.yml`, which groups `tools/`
+updates separately from the shipped modules so the two are never
+triaged as one pile.
 
 ## Pre-release status
 
