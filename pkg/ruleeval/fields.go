@@ -54,6 +54,15 @@ var processAccessor = Accessor{
 	"ParentCommandLine": func(e ocsf.Event) []string { return nonEmpty(parentCmd(e)) },
 	"ParentProcessId":   func(e ocsf.Event) []string { return u32Str(parentPID(e)) },
 	"PPID":              func(e ocsf.Event) []string { return u32Str(parentPID(e)) },
+	// EnvVars is a multi-valued field: one "NAME=value" string per
+	// allowlisted variable the agent captured. Sigma's list semantics
+	// then give presence and prefix matching for free —
+	// `EnvVars|contains: 'GCONV_PATH='` and
+	// `EnvVars|startswith: 'LD_PRELOAD=/tmp/'` both work with no new
+	// operator. Empty (and so never a match) unless the agent runs with
+	// collectors.process.capture_env.
+	"EnvVars": func(e ocsf.Event) []string { return procOf(e).EnvVars },
+	"Env":     func(e ocsf.Event) []string { return procOf(e).EnvVars },
 }
 
 // fileAccessor maps Sigma file_event fields onto ocsf.FileSystemActivity.

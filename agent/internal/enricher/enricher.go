@@ -72,6 +72,11 @@ type Options struct {
 	// FileFilter supplies the include/exclude glob lists applied to file
 	// events. Empty includes allow all; exclude always wins.
 	FileFilter config.FileCollector
+	// CaptureEnv mirrors config.ProcessCollector.CaptureEnv. When set,
+	// exec events read /proc/<pid>/environ and keep the allowlisted
+	// variables. Off by default — see the config field for why this
+	// costs more than it looks like it should.
+	CaptureEnv bool
 }
 
 func (o *Options) applyDefaults() {
@@ -359,7 +364,12 @@ func (e *enricher) handleProcess(ctx context.Context, raw pipeline.RawProcessEve
 		needPpid := entry.ppid == 0
 		needExe := raw.Exe == ""
 		needCmdline := raw.Cmdline == ""
-		if !needPpid && !needExe && !needCmdline {
+		// The environment has no BPF-side equivalent, so when capture is
+		// on it is always a /proc read and always defeats the zero-read
+		// fast path below. That is the whole cost of the feature and the
+		// reason it is opt-in.
+		needEnv := e.opts.CaptureEnv
+		if !needPpid && !needExe && !needCmdline && !needEnv {
 			entry.exe = raw.Exe
 			entry.cmdline = raw.Cmdline
 			break
@@ -367,6 +377,7 @@ func (e *enricher) handleProcess(ctx context.Context, raw pipeline.RawProcessEve
 		var rg sync.WaitGroup
 		var ppid uint32
 		var exe, cmdline string
+		var env []string
 		if needPpid {
 			rg.Add(1)
 			go func() { defer rg.Done(); ppid = e.proc.ppid(raw.PID) }()
@@ -379,7 +390,14 @@ func (e *enricher) handleProcess(ctx context.Context, raw pipeline.RawProcessEve
 			rg.Add(1)
 			go func() { defer rg.Done(); cmdline = e.proc.cmdline(raw.PID) }()
 		}
+		if needEnv {
+			rg.Add(1)
+			go func() { defer rg.Done(); env = e.proc.environ(raw.PID) }()
+		}
 		rg.Wait()
+		if needEnv {
+			entry.env = env
+		}
 		if needPpid {
 			entry.ppid = ppid
 		}

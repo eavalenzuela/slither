@@ -97,6 +97,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string) error {
 		HashInlineTimeoutMs: 100,
 		Device:              deviceIdentity(cfg),
 		FileFilter:          cfg.Collectors.File,
+		CaptureEnv:          cfg.Collectors.Process.CaptureEnv,
 	})
 
 	iocStore := ioc.New()

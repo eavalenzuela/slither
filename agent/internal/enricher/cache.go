@@ -10,13 +10,18 @@ import (
 // events (hash completion, out-of-order exit/exec pairs) can still resolve
 // parent chains and identity fields.
 type procEntry struct {
-	pid       uint32
-	ppid      uint32
-	uid       uint32
-	gid       uint32
-	comm      string
-	exe       string
-	cmdline   string
+	pid     uint32
+	ppid    uint32
+	uid     uint32
+	gid     uint32
+	comm    string
+	exe     string
+	cmdline string
+	// env holds allowlisted "NAME=value" strings captured at exec when
+	// ProcessCollector.CaptureEnv is on; nil otherwise (and nil for the
+	// overwhelming majority of processes even when it is on, since
+	// almost nothing sets a loader variable).
+	env       []string
 	createdAt time.Time
 	exited    bool
 	exitAt    time.Time
@@ -85,6 +90,13 @@ func (c *procCache) upsert(in procEntry) {
 	}
 	if in.cmdline != "" {
 		existing.cmdline = in.cmdline
+	}
+	// Exec replaces the image, so it replaces the environment too. A
+	// later fork/exit event carries no env and must not clear what exec
+	// learnt, hence the non-nil guard rather than an unconditional
+	// assignment.
+	if in.env != nil {
+		existing.env = in.env
 	}
 	if !in.createdAt.IsZero() && existing.createdAt.IsZero() {
 		existing.createdAt = in.createdAt

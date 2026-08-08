@@ -312,6 +312,51 @@ file writes (`authorized_keys`, cron persistence, rc-file persistence,
 `/etc/shadow` access), and IMDS/cloud-metadata egress. An empty rules set
 is also valid — the agent runs without detections.
 
+### Environment-variable capture (`collectors.process.capture_env`)
+
+Off by default. When enabled, the agent reads `/proc/<pid>/environ` on
+every exec and keeps a fixed allowlist of loader and interpreter control
+variables, exposing them to rules as the `EnvVars` Sigma field:
+
+```yaml
+collectors:
+  process:
+    enabled: true
+    capture_env: true
+```
+
+**What is captured.** Only these names, and nothing else:
+`LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT`, `LD_CONFIG_FILE`,
+`LD_ORIGIN_PATH`, `LD_PROFILE`, `LD_DEBUG_OUTPUT`, `GCONV_PATH`,
+`GLIBC_TUNABLES`, `BASH_ENV`, `ENV`, `PYTHONPATH`, `PYTHONSTARTUP`,
+`PERL5LIB`, `PERL5OPT`, `RUBYOPT`, `RUBYLIB`, `NODE_OPTIONS`. Values are
+truncated at 512 bytes.
+
+This is an allowlist by design and should stay one. A process
+environment is one of the densest concentrations of secrets on a host —
+cloud keys, database URLs with passwords, session tokens — and slither
+ships events to a central store that many people can query. Capturing
+the whole block would turn the event store into a credential database.
+The names above all carry a path or a flag, never a secret. If you add
+to the list (`agent/internal/enricher/proc.go`), weigh it against that.
+
+**What it costs.** Throughput, not privacy. With capture off, the exec
+path touches `/proc` zero times on a modern kernel — the eBPF program
+supplies the executable path and command line, and the process cache
+supplies the parent pid. The environment has no eBPF equivalent, so
+enabling this reinstates one small read per exec. On a host already
+running near its event ceiling, measure before and after; see
+`docs/load-test.md`.
+
+**What it buys.** `rules/linux/proc-pkexec-suspicious-env.yml` — the
+detection for CVE-2021-4034 (PwnKit, via `GCONV_PATH`) and
+CVE-2023-4911 (Looney Tunables, via `GLIBC_TUNABLES`) against setuid
+`pkexec`, plus generic dynamic-linker hijack (T1574.006). That rule is
+inert without this setting: `EnvVars` is empty, so it simply never
+matches. It does not error, and no other shipped rule depends on it.
+
+Requires a restart — this is not in the SIGHUP hot-reload scope.
+
 ### Environment variable overrides
 
 The config loader honours a small set of `SLITHER_*` env vars as

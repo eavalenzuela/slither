@@ -105,6 +105,7 @@ func processFromEntry(ent procEntry, username string) *ocsf.Process {
 		UID:     strconv.FormatUint(uint64(ent.uid), 10),
 		Name:    ent.comm,
 		Cmdline: ent.cmdline,
+		EnvVars: ent.env,
 	}
 	if !ent.createdAt.IsZero() {
 		p.CreatedT = ocsf.TimeOCSF(ent.createdAt.UnixMilli())

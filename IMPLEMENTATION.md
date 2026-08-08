@@ -2138,6 +2138,63 @@ Secure Boot implementations).
 
 ## 9. Phase 7 — Platform Expansion (bullet, demand-driven)
 
+- ✅ **Process environment capture + `proc-pkexec-suspicious-env`
+  (2026-08-07).** Drains the last actionable entry in
+  DETECTION_THEORYCRAFTING.md's backlog — batch 1 #4 had been BLOCKED
+  since it was written on "needs an `EnvVars` field".
+
+  The enricher now reads `/proc/<pid>/environ` on exec and keeps an
+  **allowlist** of loader and interpreter control variables (`LD_*`,
+  `GCONV_PATH`, `GLIBC_TUNABLES`, `BASH_ENV`, `PYTHONPATH`,
+  `NODE_OPTIONS`, ...), surfaced as `ocsf.Process.EnvVars`
+  (`x_env_vars`, a slither extension — OCSF has no process-environment
+  field) and bound as the `EnvVars` / `Env` Sigma field. Values are
+  `NAME=value` strings, which makes Sigma's list semantics do the work:
+  `EnvVars|startswith: 'GCONV_PATH='` is a presence test and
+  `EnvVars|startswith: 'LD_PRELOAD=/tmp/'` is a value-prefix test, with
+  no new operator and no new field shape.
+
+  Two decisions are load-bearing:
+
+  - **Allowlist, never capture-all.** A process environment is one of
+    the densest concentrations of secrets on a host — cloud keys,
+    database URLs with passwords, session tokens — and these events land
+    in a store many operators query. Capturing the block wholesale would
+    turn the event store into a credential database, a far larger
+    liability than the detections are worth. Every allowlisted name
+    carries a path or a flag. A test asserts that planted
+    `AWS_SECRET_ACCESS_KEY` / `DATABASE_URL` / `GITHUB_TOKEN` values do
+    not survive the reader.
+  - **Opt-in via `collectors.process.capture_env`, default off — for
+    throughput, not privacy.** The exec path today reads `/proc` *zero*
+    times when the BPF program supplies exe + cmdline and the cache
+    supplies ppid; that zero-read fast path is what the Phase 1 §3.11
+    #30 load-test work bought. The environment has no BPF equivalent, so
+    capture necessarily reinstates one small read per exec. Documented
+    in `docs/install.md` with the cost stated plainly.
+
+  No wire, ClickHouse, or server change was needed. The OCSF payload
+  travels as canonical JSON inside `Envelope`, so the field is additive;
+  the server's detection engine evaluates rules through the same
+  `pkg/ruleeval` accessors as the agent's edge engine, so binding the
+  field once covers both. It is queryable via the CH `raw` column but
+  has no dedicated column — a hunting-ergonomics follow-up, not a
+  detection gap.
+
+  Rule shipped: `proc-pkexec-suspicious-env` (pack 66 → 67) — pkexec
+  exec'ing with `GCONV_PATH` (CVE-2021-4034, PwnKit),
+  `GLIBC_TUNABLES` (CVE-2023-4911, Looney Tunables) or an `LD_*`
+  override. pkexec is setuid-root and sanitises these itself, so their
+  presence at exec time is an attempt to steer what the setuid binary
+  loads. With `capture_env` off the rule is inert — it never matches and
+  never errors. 11 new tests: 7 on the reader (allowlist, secret
+  exclusion, first-`=` split so `GLIBC_TUNABLES`' own `k=v` list
+  survives, truncation-not-drop, malformed entries, vanished pid), 3 on
+  the enricher seam (on / off / no-clobber-by-a-later-event), and one
+  table-driven rule test with 11 cases covering both halves of the
+  conjunction plus the anchoring that stops a name appearing inside
+  another variable's *value* from firing.
+
 - ✅ **Detection-core hardening pass (landed 2026-07-03, `2ac5c53`).**
   A standalone correctness/perf/robustness sweep over the modules both
   the agent edge engine and the server detection engine share

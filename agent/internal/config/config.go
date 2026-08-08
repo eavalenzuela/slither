@@ -101,6 +101,22 @@ type Collectors struct {
 // ProcessCollector configures the process lifecycle collector.
 type ProcessCollector struct {
 	Enabled bool `yaml:"enabled"`
+	// CaptureEnv turns on allowlisted environment-variable capture for
+	// exec events, exposing the `EnvVars` Sigma field (loader and
+	// interpreter injection vectors: LD_PRELOAD, GCONV_PATH,
+	// GLIBC_TUNABLES, PYTHONPATH, ...). See enricher.envAllowlist for
+	// the exact set — it is an allowlist precisely because a process
+	// environment is full of credentials and this data leaves the host.
+	//
+	// Off by default, and not for privacy reasons: the exec fast path
+	// currently touches /proc zero times when the BPF program supplies
+	// exe and cmdline and the cache supplies ppid, which is what the
+	// Phase 1 §3.11 #30 load-test work bought. /proc/<pid>/environ has
+	// no BPF equivalent, so enabling this reinstates one small read per
+	// exec on every host. Worth it where privilege-escalation coverage
+	// matters more than headroom; measure before enabling on a host
+	// that already runs near its event ceiling.
+	CaptureEnv bool `yaml:"capture_env"`
 }
 
 // FileCollector configures the file-event collector, including path filters.

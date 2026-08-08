@@ -37,6 +37,13 @@ OCSF classes the agent currently emits (Phase 1 complete):
   (`TargetFilename|startswith: /etc/cron.d/` etc.). Backlog #5/#9/#10 were
   marked BLOCKED on a field that already existed — they shipped with no
   engine work.
+- ~~No environment-variable visibility.~~ **Closed 2026-08-07.** The
+  `EnvVars` field exposes an allowlist of loader / interpreter control
+  variables (`LD_*`, `GCONV_PATH`, `GLIBC_TUNABLES`, `PYTHONPATH`, ...) as
+  `NAME=value` strings, so Sigma list semantics give presence and
+  value-prefix matching with no new operator. Gated behind
+  `collectors.process.capture_env` (default off, throughput not privacy).
+  Deliberately never the full environment. Unblocked backlog #4.
 - No `User` resolution beyond UID/name as captured at enrich time. No group
   membership, no `setuid`/`setgid` flagging on the exec event itself. T1548
   (Abuse Elevation) detection is hampered.
@@ -52,7 +59,7 @@ OCSF classes the agent currently emits (Phase 1 complete):
 
 ## Coverage map (current pack vs ATT&CK)
 
-Tactic-by-tactic snapshot of what's in `rules/linux/` right now (66 rules).
+Tactic-by-tactic snapshot of what's in `rules/linux/` right now (67 rules).
 
 ### Initial Access
 - **None directly.** Initial access is mostly network-edge, which is out of
@@ -92,11 +99,12 @@ Tactic-by-tactic snapshot of what's in `rules/linux/` right now (66 rules).
 - ✅ `proc-setcap-privileged-grant` (T1548 capability escalation)
 - ✅ `file-sudoers-d-drop` (T1548.003 sudoers drop-in persistence/escalation)
 - ✅ `proc-nsenter-namespace-escape` (T1611 escape to host PID-1 namespaces)
-- **Gaps:** `pkexec` abuse (CVE-2021-4034 family) — see backlog #4, still
-  partially blocked on env-var capture; `unshare` unusual invocation (the
-  `nsenter` half is now covered); `dirtypipe` artefact patterns. Most of
-  T1068 is exploit-specific and best caught by collector-level signals
-  (e.g. `bpf_probe_read_kernel` from non-root) which we don't have.
+- ✅ `proc-pkexec-suspicious-env` (T1068 / T1548.003 — CVE-2021-4034 PwnKit
+  + CVE-2023-4911 Looney Tunables, needs `capture_env`)
+- **Gaps:** `unshare` unusual invocation (the `nsenter` half is covered);
+  `dirtypipe` artefact patterns. The `pkexec` gap closed with backlog #4.
+  Most of T1068 is exploit-specific and best caught by collector-level
+  signals (e.g. `bpf_probe_read_kernel` from non-root) which we don't have.
 
 ### Defence Evasion (T1027, T1070, T1140, T1562)
 - ✅ `proc-base64-decode-to-sandbox` (T1140 + T1027)
@@ -219,14 +227,32 @@ rule. See batch 2 below for the next round.
   `firewalld`/`nftables`/`ufw` unit. No provisioning-parent exclusion
   shipped yet — add in production if cloud-init noise shows.
 
-### 4. `proc-pkexec-suspicious-env` — high — partially blocked
-- **Fires when:** `Image|endswith /pkexec` AND `CommandLine|contains` indicators
-  of CVE-2021-4034-style abuse (suspicious env or null-argv patterns).
-- **Why not noisy:** pkexec invocations are rare and almost always interactive.
-- **Data:** **BLOCKED** on env-vector capture in process_activity. Today we
-  only get `Cmdline`. Need `EnvVars` (or at least `LD_*` env vars) bound to
-  the rule field. Cost: medium — process.bpf.c would need to read `/proc/[pid]/environ`
-  on exec or capture from `bprm->envp`.
+### 4. `proc-pkexec-suspicious-env` — high — ✅ SHIPPED (id …04e, 2026-08-07)
+- **Fires when:** `Image|endswith /pkexec` AND `EnvVars|startswith` one of
+  `GCONV_PATH=` / `GLIBC_TUNABLES=` / `LD_PRELOAD=` / `LD_LIBRARY_PATH=` /
+  `LD_AUDIT=`.
+- **Why not noisy:** pkexec is setuid-root and sanitises these variables
+  itself, so a legitimate caller has no reason to set them. Their presence
+  at exec time is an attempt to influence what the setuid binary loads.
+  The conjunction matters — pkexec alone is an ordinary interactive
+  command, and a loader variable alone is set by plenty of real software.
+- **Data:** unblocked by the `EnvVars` field (2026-08-07). The enricher
+  reads `/proc/<pid>/environ` on exec and keeps an **allowlist** of loader
+  and interpreter control variables; values are truncated at 512 bytes.
+  Not `bprm->envp` in BPF, and not the full environment — see the note
+  below.
+- **Two decisions worth not re-litigating:**
+  - *Allowlist, not capture-all.* A process environment is one of the
+    densest concentrations of secrets on a host, and these events land in
+    a store many people query. Capturing everything would make the event
+    store a credential database. Every allowlisted name carries a path or
+    a flag, never a secret.
+  - *Opt-in (`collectors.process.capture_env`, default off).* Not for
+    privacy — for throughput. The exec path currently reads `/proc` zero
+    times when BPF supplies exe+cmdline and the cache supplies ppid, which
+    is what the §3.11 #30 load-test work bought. The environment has no
+    BPF equivalent, so capture reinstates one read per exec. The rule is
+    inert (never matches, never errors) when the setting is off.
 
 ### 5. `file-systemd-system-unit-write` — high — ✅ SHIPPED (id …03b)
 - **Fires when:** a process writes a `.service`/`.timer`/`.socket` file under
@@ -424,7 +450,8 @@ evaluator (cross-host correlation).
   trace the agent doesn't collect.
 - The dotfile `LD_PRELOAD=` content match (batch 1 #9) — file events
   carry path + writer, never written bytes.
-- `proc-pkexec-suspicious-env` (batch 1 #4) — needs an `EnvVars` field.
+- ~~`proc-pkexec-suspicious-env` (batch 1 #4) — needs an `EnvVars` field.~~
+  Shipped 2026-08-07; `EnvVars` landed with it.
 
 ## Stateful / correlation candidates
 

@@ -1,0 +1,49 @@
+title: pkexec invoked with a loader or gconv environment override
+id: 8b7c4d00-0001-4000-8000-00000000004e
+status: experimental
+description: |
+  pkexec executing with GCONV_PATH, LD_PRELOAD, LD_LIBRARY_PATH,
+  LD_AUDIT or GLIBC_TUNABLES set in its environment.
+
+  pkexec is setuid-root and sanitises these variables itself, so a
+  legitimate caller has no reason to set them — their presence at exec
+  time is an attempt to influence what code the setuid binary loads,
+  not a supported configuration.
+
+  GCONV_PATH is the specific payload vector in CVE-2021-4034 (PwnKit):
+  pkexec called with an empty argv reads past the end of argv into
+  envp, letting the caller reintroduce an environment variable the
+  sanitiser has already processed, and GCONV_PATH then makes glibc
+  load an attacker-controlled iconv module as root. GLIBC_TUNABLES is
+  the equivalent hook for CVE-2023-4911 (Looney Tunables). The LD_*
+  family is the generic dynamic-linker hijack (T1574.006).
+
+  T1548.003 (Sudo and Sudo Caching) / T1068 (Exploitation for
+  Privilege Escalation).
+
+  Requires the agent to run with collectors.process.capture_env — the
+  EnvVars field is empty otherwise and this rule cannot fire. That
+  setting is off by default; see docs/install.md.
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.defense_evasion
+  - attack.t1068
+  - attack.t1548.003
+  - attack.t1574.006
+  - cve.2021-4034
+  - cve.2023-4911
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection_bin:
+    Image|endswith: /pkexec
+  selection_env:
+    EnvVars|startswith:
+      - 'GCONV_PATH='
+      - 'GLIBC_TUNABLES='
+      - 'LD_PRELOAD='
+      - 'LD_LIBRARY_PATH='
+      - 'LD_AUDIT='
+  condition: selection_bin and selection_env

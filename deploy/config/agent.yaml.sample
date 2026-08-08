@@ -23,6 +23,18 @@ agent:
 collectors:
   process:
     enabled: true
+    # Capture an allowlist of loader / interpreter environment variables
+    # (LD_PRELOAD, GCONV_PATH, GLIBC_TUNABLES, PYTHONPATH, ...) on exec
+    # and expose them to rules as the `EnvVars` Sigma field. Never the
+    # full environment — that is where credentials live.
+    #
+    # Off by default because it costs throughput, not privacy: with it
+    # off the exec path reads /proc zero times on a modern kernel, and
+    # the environment has no BPF equivalent, so turning it on reinstates
+    # one small read per exec. Required by
+    # rules/linux/proc-pkexec-suspicious-env.yml (PwnKit / Looney
+    # Tunables coverage), which is inert without it.
+    capture_env: false
   file:
     enabled: true
     include_paths:

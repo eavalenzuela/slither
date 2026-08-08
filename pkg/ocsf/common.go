@@ -141,4 +141,11 @@ type Process struct {
 	User        *User    `json:"user,omitempty"` // running user
 	Parent      *Process `json:"parent_process,omitempty"`
 	ContainerID string   `json:"x_container_id,omitempty"` // slither extension; Phase 2+
+	// EnvVars holds allowlisted environment variables captured at exec
+	// as "NAME=value" strings. slither extension (OCSF has no process
+	// environment field); populated only when the agent's
+	// collectors.process.capture_env is on, and only for the loader /
+	// interpreter injection variables in enricher.envAllowlist — never
+	// the full environment, which is full of credentials.
+	EnvVars []string `json:"x_env_vars,omitempty"`
 }
