@@ -14,6 +14,85 @@ permissions:
   contents: read
 
 jobs:
+  # Phase 7 follow-up — decide which cost-sensitive jobs need to run.
+  #
+  # GitHub bills macOS runner minutes at 10x Linux, and the darwin job
+  # was enough on its own to stall the whole workflow against the
+  # account's Actions spending cap. `on: push` path filters apply to the
+  # entire workflow, not to one job, so the gate has to be a job the
+  # expensive one depends on.
+  #
+  # No third-party action here on purpose: a paths-filter action would
+  # put an unpinned third party inside the CI of a security tool for
+  # what is nine lines of git.
+  changes:
+    name: changed-path gate
+    runs-on: ubuntu-24.04
+    outputs:
+      darwin: ${{ steps.filter.outputs.darwin }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The gate diffs against a base commit, so the default
+          # single-commit fetch is not enough.
+          fetch-depth: 0
+
+      - name: Decide whether darwin needs to run
+        id: filter
+        env:
+          # Interpolate through the environment rather than into the
+          # script body — ${{ }} expansion inside `run:` is a script
+          # injection sink, and "these values are only ever SHAs" is a
+          # property of today's triggers, not a guarantee.
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request) base="$PR_BASE_SHA" ;;
+            push)         base="$PUSH_BEFORE_SHA" ;;
+            *)            base="" ;;
+          esac
+
+          # Fail OPEN. A first push to a branch reports an all-zero
+          # `before`, a force-push can leave a base we no longer have,
+          # and workflow_dispatch has neither. In every one of those we
+          # cannot tell what changed, and a gate that guesses "nothing"
+          # silently stops testing the thing it guards.
+          if [ -z "$base" ] \
+            || [ "$base" = "0000000000000000000000000000000000000000" ] \
+            || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "base commit unavailable ($EVENT_NAME) — running darwin"
+            echo "darwin=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed="$(git diff --name-only "$base" "$HEAD_SHA")"
+          echo "changed files:"
+          echo "$changed"
+
+          # Anything that can change what the darwin build compiles or
+          # what its portable tests exercise. Deliberately wider than
+          # `agent/`: pkg/ and proto/ are compiled into the agent, and a
+          # Makefile or go.work change can alter how it is built.
+          #
+          # `grep -E ... >/dev/null` rather than `grep -qE`: -q exits on
+          # the first match, which SIGPIPEs the producer, and under
+          # `pipefail` that turns the whole pipeline's status into 141 —
+          # a match would read as "no match" and silently skip the job.
+          # Letting grep drain its input costs nothing on a diff list.
+          if echo "$changed" | grep -E \
+            '^(agent/|pkg/|proto/|go\.work|go\.work\.sum|Makefile|\.github/workflows/ci\.yml)' \
+            >/dev/null; then
+            echo "darwin=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no agent-affecting paths changed — skipping darwin"
+            echo "darwin=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build-test-lint:
     name: build / test / lint (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -71,6 +150,8 @@ jobs:
   darwin:
     name: darwin build + portable tests
     runs-on: macos-14
+    needs: changes
+    if: needs.changes.outputs.darwin == 'true'
     # Phase 7 #M-A2 — prove the agent compiles and its platform-portable
     # packages pass on a real macOS host. The Linux collectors / eBPF
     # generation are build-tagged out here; what runs on darwin is the
@@ -80,6 +161,11 @@ jobs:
     # amd64 darwin path needs native coverage. Endpoint Security collectors
     # (#M-B*) will flip build-agent-darwin to CGO_ENABLED=1 — still on this
     # runner, no cross-compile.
+    #
+    # Gated on the `changes` job because macOS minutes bill at 10x and
+    # this job alone was enough to stall the workflow against the
+    # account's Actions spending cap. A docs-only push now skips it; the
+    # gate fails open whenever it cannot determine the diff base.
     steps:
       - name: Checkout
         uses: actions/checkout@v4
