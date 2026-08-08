@@ -75,7 +75,20 @@ gen-proto: ## Regenerate protobuf + gRPC bindings
 
 .PHONY: gen-templ
 gen-templ: ## Regenerate templ components (Phase 2+)
-	@if [ -d server/internal/console/templates ]; then templ generate -path server/internal/console/templates; fi
+	@# Run from the server module root rather than with -path: templ
+	@# stamps the working-directory-relative path of each source into
+	@# every generated templ.Error, so generating from anywhere else
+	@# silently rewrites all 13 _templ.go files to carry a bare basename
+	@# and makes a runtime render error harder to place.
+	@#
+	@# The previous recipe guarded on server/internal/console/templates,
+	@# a directory that has never existed — the sources live under
+	@# .../console/views. It therefore no-op'd on every run, which also
+	@# blinded verify-gen: a stale _templ.go could not fail CI because
+	@# the generator never ran. Fail loudly on a missing tree instead; a
+	@# silent skip in a codegen guard is worse than an error.
+	@test -d server/internal/console/views || { echo "error: server/internal/console/views not found"; exit 1; }
+	@cd server && templ generate
 
 .PHONY: gen-bpf
 gen-bpf: ## Regenerate eBPF Go wrappers + bytecode via bpf2go
