@@ -117,6 +117,22 @@ Server-rendered templ views; no SPA, no client-side state.
   middleware is a small Phase 6 task if multi-tenant deploys land.
 - No login rate-limit. Operators behind a reverse proxy
   (nginx/Caddy) get rate-limiting for free; bare deploys don't.
+- **Client IP is not trusted, and nothing may start trusting it
+  casually.** The console deliberately does not run chi's
+  `middleware.RealIP` (removed 2026-08-08; chi deprecated it in v5.3.0
+  over GHSA-3fxj-6jh8-hvhx / GHSA-rjr7-jggh-pgcp / GHSA-9g5q-2w5x-hmxf).
+  It rewrote `r.RemoteAddr` from `True-Client-IP` / `X-Real-IP` /
+  `X-Forwarded-For` unconditionally, so any client could choose the
+  address the server saw. Nothing read `RemoteAddr`, so the exposure was
+  latent rather than live — but the two features most likely to want a
+  client IP on a security console are IP-stamped audit rows and the
+  per-IP login rate-limit noted above, and both are worthless keyed on
+  an attacker-chosen value. A regression test
+  (`console/realip_test.go`) fails if an IP-trusting middleware returns.
+  If real client IPs become necessary, `ClientIPFromXFFTrustedProxies`
+  + `GetClientIP` with the deployment's actual proxy CIDRs is the
+  supported path; it leaves `RemoteAddr` alone so the spoofable and
+  trusted values stay distinguishable.
 
 ## Surface 4 — Agent runtime (the binary on the host)
 

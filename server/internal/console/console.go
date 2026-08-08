@@ -207,9 +207,37 @@ func (s *Server) Handler() http.Handler {
 // pages on the same router under the same auth + session middleware.
 func (s *Server) Mux() *chi.Mux { return s.mux }
 
+// baseMiddleware is the console's global middleware stack. Split out of
+// routes() so a test can assert what is — and specifically what is not —
+// in it without standing up a full Server.
+//
+// Notably absent: chi's middleware.RealIP. It overwrites r.RemoteAddr
+// with the contents of True-Client-IP / X-Real-IP / the leftmost
+// X-Forwarded-For, unconditionally, whether or not anything in front of
+// us actually sets those. Any client can therefore choose what the
+// console believes its address is.
+//
+// chi deprecated it in v5.3.0 over exactly this (GHSA-3fxj-6jh8-hvhx,
+// GHSA-rjr7-jggh-pgcp, GHSA-9g5q-2w5x-hmxf). The upstream fix is the
+// deprecation, not a behaviour change, so bumping chi alone does not
+// remove the exposure — and govulncheck going quiet after the bump does
+// not mean it did.
+//
+// Nothing in the server reads RemoteAddr today, so dropping it changed
+// no behaviour. It removes the landmine for whoever first adds
+// IP-stamped audit rows or per-IP rate limiting to a security console.
+// If real client IPs are wanted later, use ClientIPFromXFFTrustedProxies
+// (configured with the deployment's actual proxy CIDRs) and read it with
+// GetClientIP; those never mutate RemoteAddr, so the spoofable value and
+// the trusted one stay distinguishable.
+func baseMiddleware() []func(http.Handler) http.Handler {
+	return []func(http.Handler) http.Handler{
+		middleware.Recoverer,
+	}
+}
+
 func (s *Server) routes() {
-	s.mux.Use(middleware.Recoverer)
-	s.mux.Use(middleware.RealIP)
+	s.mux.Use(baseMiddleware()...)
 
 	// Static + healthcheck are unauthenticated.
 	s.mux.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS()))))

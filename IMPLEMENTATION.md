@@ -2138,6 +2138,45 @@ Secure Boot implementations).
 
 ## 9. Phase 7 — Platform Expansion (bullet, demand-driven)
 
+- ✅ **Reachable dependency advisories cleared + console stopped
+  trusting client IP headers (2026-08-08).** A push surfaced a
+  Dependabot banner; `govulncheck` separated the six *reachable*
+  non-stdlib advisories from the usual stdlib patch-drift noise (local
+  Go is 1.25.0; CI's `1.25` resolves to the current patch, so stdlib
+  findings here are not real — see the standing note in
+  `docs/load-test.md`-adjacent practice and prior art in `0d622c6`).
+
+  Bumped: `google.golang.org/grpc` v1.80.0 → v1.82.1 across every module
+  (GO-2026-6061, xDS RBAC + HTTP/2 transport server);
+  `golang.org/x/text` v0.37.0 → v0.39.0 (GO-2026-5970, infinite loop on
+  invalid input); `github.com/yuin/goldmark` v1.7.4 → v1.7.17
+  (GO-2026-5320, XSS); `github.com/go-chi/chi/v5` v5.2.5 → v5.3.0
+  (GO-2026-5774/5775/5777). All four modules now report zero non-stdlib
+  advisories.
+
+  **The chi finding needed more than a bump.** v5.3.0 *deprecates*
+  `middleware.RealIP` rather than fixing it — the function still
+  rewrites `r.RemoteAddr` from `True-Client-IP` / `X-Real-IP` / the
+  leftmost `X-Forwarded-For`, unconditionally, whether or not anything
+  trustworthy sets them. So the bump made the scanner green while
+  leaving the behaviour identical, which is the failure mode worth
+  naming: a quiet scanner is not evidence.
+
+  The console had it installed at `console.go`. Nothing in the server
+  reads `RemoteAddr`, so the exposure was latent, not live — removing
+  the call changed no behaviour. It was removed anyway, because the two
+  features most likely to want a client IP on a security console are
+  IP-stamped audit rows and the per-IP login rate-limit already noted as
+  a residual risk in the threat model, and both are worthless keyed on
+  an attacker-chosen value. The middleware stack moved into
+  `baseMiddleware()` so it is assertable, and a regression test
+  (`console/realip_test.go`) sends all three headers through the real
+  stack and fails if any of them reaches `RemoteAddr` — verified to
+  fail when `RealIP` is reintroduced, so it is a guard and not a
+  tautology. Threat-model Surface 3 records the posture and the
+  supported path (`ClientIPFromXFFTrustedProxies` + `GetClientIP`) if
+  real client IPs are ever needed.
+
 - ✅ **Process environment capture + `proc-pkexec-suspicious-env`
   (2026-08-07).** Drains the last actionable entry in
   DETECTION_THEORYCRAFTING.md's backlog — batch 1 #4 had been BLOCKED
