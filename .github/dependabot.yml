@@ -1,0 +1,84 @@
+# Dependabot configuration.
+#
+# Alerts are on for this repo regardless of this file; what it adds is
+# automated update PRs, so the alert backlog actually drains instead of
+# sitting as a permanent banner on every push.
+#
+# The important thing this encodes is the split documented in
+# SECURITY.md "Dependabot alert count vs. shipped risk": the five
+# workspace modules are what ships and what govulncheck covers, while
+# `tools/` is a module that exists only so IDEs can resolve the import
+# paths in tools/tools.go. `tools/go.mod` carries the full transitive
+# closure of buf + golangci-lint (285 indirect requires, 367 modules
+# that never appear in a shipped binary) and is not even authoritative
+# for the build — scripts/install-tools.sh pins the versions that
+# actually get installed.
+#
+# So tools/ gets its own grouped, low-frequency PR stream. Mixing it
+# with the shipped modules would bury a real transport or console
+# advisory under linter-dependency churn, which is the failure mode
+# worth designing against.
+
+version: 2
+
+updates:
+  # ---- Shipped modules: what ends up in slither-agent / slither-server.
+  # These are the ones a real advisory can reach a deployment through, so
+  # they update weekly and security updates are never grouped away.
+  - package-ecosystem: gomod
+    directories:
+      - /agent
+      - /server
+      - /pkg
+      - /proto
+      - /extensions/osquery
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for routine minor/patch churn across the shipped modules;
+      # the workspace builds them together, so splitting per-module just
+      # produces PRs that have to land in lockstep anyway.
+      shipped-minor-patch:
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+      - shipped
+    commit-message:
+      prefix: deps
+
+  # ---- Build-time tooling: never linked into a shipped binary.
+  # Monthly and fully grouped — this is the graph behind most of the
+  # alert count, and it is a supply-chain risk to the build rather than
+  # a runtime vulnerability in a deployment.
+  - package-ecosystem: gomod
+    directory: /tools
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      build-tooling:
+        patterns:
+          - "*"
+    labels:
+      - dependencies
+      - build-tooling
+    commit-message:
+      prefix: "deps(tools)"
+
+  # ---- Pinned action SHAs / versions in the CI workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns:
+          - "*"
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: ci

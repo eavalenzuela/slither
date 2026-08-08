@@ -1,5 +1,7 @@
 # Slither — build entry points.
-# Tool versions are pinned in tools/tools.go; run `make tools` to install them.
+# Tool versions are pinned in scripts/install-tools.sh (single source of truth);
+# run `make tools` to install them. tools/tools.go only lists the module paths
+# so IDEs and `go mod` can resolve them — it does not select versions.
 
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
