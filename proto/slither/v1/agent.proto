@@ -74,12 +74,18 @@ message ClientMessage {
 }
 
 // ChainSummary is one periodic snapshot of the agent's tamper-evident
-// chain (Phase 5 #95). Phase 6 #112 — count-based cross-check only.
-// last_hash is stored verbatim by the server for forensic compare; the
-// server does NOT recompute it because the agent's per-record hash
-// includes a local wall-clock TS the server can't reconstruct from
-// CH/pg rows. Phase 7 may revisit (carry-over noted in
-// IMPLEMENTATION.md §9).
+// chain (Phase 5 #95). Phase 6 #112 added the count-based cross-check;
+// Phase 7 / ADR-0042 added `links`, which upgrades the check from
+// count-level to record-level.
+//
+// The server still does NOT recompute `record_hash` — the canonical
+// hash input includes a local wall-clock TS the server cannot
+// reconstruct, and ADR-0042 deliberately keeps it hashed so on-agent
+// back-dating stays detectable. Instead the server persists the links
+// and becomes an independent append-only *witness* of the chain: it
+// replays linkage, refuses a contradicted record_hash for a seq it has
+// already seen, and anchors continuity on prev_hash across summary
+// boundaries and agent restarts alike.
 //
 // `count` is the number of records appended since `since`, not the
 // total chain length — keeps a long-running agent's summary cheap.
@@ -110,6 +116,48 @@ message ChainSummary {
   // observed_at is the agent wall-clock at summary build time —
   // the [since, observed_at) window the server compares against.
   google.protobuf.Timestamp observed_at = 5;
+
+  // links carries one entry per chain record the agent holds for this
+  // window, ascending by seq. Additive within slither.v1 (ADR-0011):
+  // a pre-ADR-0042 agent never emits it, and the server treats an
+  // empty list as "count-only agent" rather than as a mismatch.
+  //
+  // Unlike `count`, links INCLUDE the synthetic `chain.init` anchor —
+  // it is a real chain record at seq=0 and the server needs it to
+  // verify the very first link's prev_hash against the zero sentinel.
+  // The window is also re-seeded from disk on agent restart, so a
+  // restart re-reports links the server has already witnessed; those
+  // are verified for equality and then ignored, not double-counted.
+  repeated ChainLink links = 6;
+
+  // links_truncated is set when the window produced more links than
+  // the agent's bounded buffer holds. The buffer keeps the most recent
+  // links, so the TAIL is always accurate (which is what the server
+  // anchors on) and the gap is at the head. The server records the
+  // truncation instead of reporting the head gap as an unexplained
+  // sequence hole.
+  bool links_truncated = 7;
+}
+
+// ChainLink is one hash-chain record's identity with its content
+// stripped — enough to replay linkage, not enough to leak what the
+// record was about. Phase 7 / ADR-0042.
+message ChainLink {
+  // seq is the record's position in the chain. Contiguous from 0.
+  uint64 seq = 1;
+
+  // kind is the record kind (`chain.init`, `response_action`,
+  // `detection_finding`). Carried for operator forensics — the server
+  // does not key any verification on it.
+  string kind = 2;
+
+  // prev_hash is the preceding record's record_hash, or 64 zeros for
+  // seq=0.
+  string prev_hash = 3;
+
+  // record_hash is the hex sha256 of this record's canonical input.
+  // Opaque to the server: it is compared, never recomputed.
+  string record_hash = 4;
 }
 
 // ServerMessage is the union of everything a server may send during Session.

@@ -559,6 +559,12 @@ func (a extMgrSnapshotAdapter) DispatchSnapshot(ctx context.Context, req *pb.Sna
 // (capacity 4) rather than blocking — losing one summary is preferable
 // to stalling the agent.
 //
+// A dropped summary hands its window back to the writer (ADR-0042
+// ReturnWindow) so the next tick re-ships the links. The count is
+// preserved too, so the server's [since, observed_at) comparison still
+// balances over the merged window instead of under-reporting by
+// whatever the dropped tick held.
+//
 // On ctx cancellation the ticker exits without emitting a final
 // summary; the server's verifier handles a missing summary as the
 // "agent disconnected mid-window" case (no audit fired).
@@ -575,18 +581,42 @@ func runChainSummaryTicker(ctx context.Context, chain *selfprotect.ChainWriter, 
 		case <-t.C:
 			snap := chain.SnapshotAndReset()
 			msg := &pb.ChainSummary{
-				LastSeq:    snap.LastSeq,
-				LastHash:   snap.LastHash,
-				Count:      snap.Count,
-				Since:      timestamppb.New(snap.Since),
-				ObservedAt: timestamppb.New(snap.ObservedAt),
+				LastSeq:        snap.LastSeq,
+				LastHash:       snap.LastHash,
+				Count:          snap.Count,
+				Since:          timestamppb.New(snap.Since),
+				ObservedAt:     timestamppb.New(snap.ObservedAt),
+				Links:          chainLinksToProto(snap.Links),
+				LinksTruncated: snap.LinksTruncated,
 			}
 			select {
 			case out <- msg:
 			default:
 				slog.Warn("selfprotect: chain summary dropped (sink full)",
-					"last_seq", snap.LastSeq, "count", snap.Count)
+					"last_seq", snap.LastSeq, "count", snap.Count,
+					"links", len(snap.Links))
+				chain.ReturnWindow(snap)
 			}
 		}
 	}
+}
+
+// chainLinksToProto maps the writer's witness buffer onto the wire.
+// Phase 7 / ADR-0042. Returns nil for an empty window so the marshalled
+// summary stays byte-identical to a pre-ADR-0042 agent's when there is
+// nothing to witness.
+func chainLinksToProto(links []selfprotect.ChainLink) []*pb.ChainLink {
+	if len(links) == 0 {
+		return nil
+	}
+	out := make([]*pb.ChainLink, 0, len(links))
+	for _, l := range links {
+		out = append(out, &pb.ChainLink{
+			Seq:        l.Seq,
+			Kind:       l.Kind,
+			PrevHash:   l.PrevHash,
+			RecordHash: l.RecordHash,
+		})
+	}
+	return out
 }

@@ -262,6 +262,9 @@ button.danger:hover { background: #ff9c9c; }
 .alert-status-failed           { background: #4a2c2c; color: #f08080; }
 .alert-status-denied_by_policy { background: #4a3f1f; color: #f0c674; }
 .alert-status-reverted         { background: #3a3a4a; color: #aaa9d9; }
+/* ADR-0042 chain-status link column. `none` is a pre-ADR-0042 agent,
+   not a problem, so it reads dimmer than every other state. */
+.alert-status-muted            { background: #24262c; color: #6b7280; }
 
 /* Phase 6 #113 — SSO button on the login page. Sits below the
    primary username/password form, separated by a thin divider. */

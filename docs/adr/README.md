@@ -25,6 +25,8 @@ Day-to-day code decisions do not need ADRs. If it only affects one file, a code 
 
 ADRs 0001–0029 mirror the decisions locked in [PROJECT.md §9.1](../../PROJECT.md#9-decisions--remaining-open-items). They exist so the rationale survives if PROJECT.md is later restructured or replaced.
 
+ADRs 0030 and up were written as the phases they belong to were planned or closed, and are indexed here from the same source of truth as the files on disk — the table had drifted 13 entries behind by the time ADR-0042 landed.
+
 | # | Title |
 |---|---|
 | [0001](./0001-platform-linux-only-v1.md) | Platform: Linux-only for v1 |
@@ -56,6 +58,19 @@ ADRs 0001–0029 mirror the decisions locked in [PROJECT.md §9.1](../../PROJECT
 | [0027](./0027-agent-extensions-minimal.md) | Agent extensions: minimal interface, first-party only |
 | [0028](./0028-osquery-optional-not-bundled.md) | osquery: optional, bridge extension, operator-installed |
 | [0029](./0029-extension-execution-model.md) | Extension execution: out-of-process, supervised |
+| [0030](./0030-postgres-schema-v1-and-migrations.md) | Postgres schema v1 and migration tooling |
+| [0031](./0031-clickhouse-schema.md) | ClickHouse schema v1 + migration tool |
+| [0032](./0032-two-artefact-rules.md) | Two-artefact rule shape: edge AST + server plan |
+| [0033](./0033-clickhouse-retention-v1.md) | ClickHouse retention + cardinality tuning v1 |
+| [0034](./0034-response-model.md) | Response model + auth boundary |
+| [0035](./0035-phase5-scope.md) | Phase 5 scope + sequencing |
+| [0036](./0036-stateful-cold-start-decision.md) | Stateful cold-start hybrid — declined |
+| [0037](./0037-phase6-scope.md) | Phase 6 scope + sequencing |
+| [0038](./0038-keystore-strategy.md) | Keystore strategy — `@u` user keyring + file fallback |
+| [0039](./0039-extension-and-rule-signing.md) | Extension + rule-bundle signing model |
+| [0040](./0040-external-readonly-json-api.md) | External read-only JSON API for BAS integrations |
+| [0041](./0041-macos-agent-scope.md) | macOS agent scope + sequencing |
+| [0042](./0042-chain-link-replication.md) | Tamper-chain record-level verification via link replication |
 
 ## Adding a new ADR
 

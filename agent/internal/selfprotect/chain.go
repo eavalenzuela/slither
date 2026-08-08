@@ -20,6 +20,14 @@
 //   - Replay-then-extend by the attacker writes valid records but
 //     under their own hash chain — server-side cross-check still
 //     catches missing records (#102).
+//   - Edit-then-relink (rewrite record n, recompute its record_hash,
+//     re-link n+1..N so the file self-verifies) is caught by the
+//     server, not by us. Phase 7 / ADR-0042 ships every record's
+//     (seq, kind, prev_hash, record_hash) tuple to the server, which
+//     keeps them as an append-only witness. Relinking necessarily
+//     changes the tail's record_hash, and the tail is exactly what
+//     the next summary's continuity check anchors on — so the edit
+//     surfaces within one summary interval.
 //
 // What we don't try to do:
 //   - Encrypt the chain. The point is auditability — operators need
@@ -75,7 +83,38 @@ type ChainWriter struct {
 	// windows.
 	windowCount uint64
 	windowSince time.Time
+
+	// Phase 7 / ADR-0042 link witness buffer. Holds one ChainLink per
+	// record appended in the window, ascending by seq, so the summary
+	// can ship them to the server. Unlike windowCount this INCLUDES
+	// chain.init — it is a real chain record and the server needs it
+	// to anchor seq=0's prev_hash against the zero sentinel.
+	//
+	// Bounded at maxWindowLinks. On overflow the OLDEST links are
+	// dropped and windowTruncated is set: the tail is what the server
+	// anchors its next continuity check on, so the tail is the part
+	// that must never be lost.
+	windowLinks     []ChainLink
+	windowTruncated bool
 }
+
+// ChainLink is one record's chain identity with its content stripped.
+// Phase 7 / ADR-0042 — this is what the agent ships to the server so
+// the server can replay linkage without ever seeing (or being able to
+// recompute) the hashed record body.
+type ChainLink struct {
+	Seq        uint64
+	Kind       string
+	PrevHash   string
+	RecordHash string
+}
+
+// maxWindowLinks bounds the in-memory link buffer. 512 links is ~75 KiB
+// and covers well past the 5-minute summary interval on any sane host —
+// a burst that overruns it (mass-rename ransomware firing hundreds of
+// findings) ships the most recent 512 with links_truncated set rather
+// than growing without bound.
+const maxWindowLinks = 512
 
 // zeroHash is the sentinel prev_hash for the first record in a chain.
 const zeroHash = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -184,7 +223,35 @@ func (w *ChainWriter) append(kind string, summary json.RawMessage) error {
 	if kind != "chain.init" {
 		w.windowCount++
 	}
+	// ADR-0042: every record contributes a link, chain.init included.
+	w.pushLink(ChainLink{
+		Seq:        rec.Seq,
+		Kind:       rec.Kind,
+		PrevHash:   rec.PrevHash,
+		RecordHash: rec.RecordHash,
+	})
 	return nil
+}
+
+// pushLink appends one link to the window buffer, dropping from the
+// front (and flagging truncation) once the buffer is full. Caller must
+// hold w.mu.
+func (w *ChainWriter) pushLink(l ChainLink) {
+	w.windowLinks = append(w.windowLinks, l)
+	w.capWindowLinks()
+}
+
+// capWindowLinks trims the buffer to its most recent maxWindowLinks
+// entries, setting windowTruncated if anything was dropped. Caller must
+// hold w.mu.
+func (w *ChainWriter) capWindowLinks() {
+	if len(w.windowLinks) <= maxWindowLinks {
+		return
+	}
+	drop := len(w.windowLinks) - maxWindowLinks
+	n := copy(w.windowLinks, w.windowLinks[drop:])
+	w.windowLinks = w.windowLinks[:n]
+	w.windowTruncated = true
 }
 
 // ChainSummarySnapshot is the Phase 6 #112 view of the chain writer's
@@ -198,6 +265,11 @@ type ChainSummarySnapshot struct {
 	Count      uint64
 	Since      time.Time
 	ObservedAt time.Time
+
+	// Links + LinksTruncated are the Phase 7 / ADR-0042 witness
+	// payload. Links is ascending by seq and includes chain.init.
+	Links          []ChainLink
+	LinksTruncated bool
 }
 
 // SnapshotAndReset returns the current chain summary and rolls the
@@ -221,15 +293,55 @@ func (w *ChainWriter) SnapshotAndReset() ChainSummarySnapshot {
 		lastSeq = w.seq - 1
 	}
 	snap := ChainSummarySnapshot{
-		LastSeq:    lastSeq,
-		LastHash:   w.prevHash,
-		Count:      w.windowCount,
-		Since:      w.windowSince,
-		ObservedAt: now,
+		LastSeq:        lastSeq,
+		LastHash:       w.prevHash,
+		Count:          w.windowCount,
+		Since:          w.windowSince,
+		ObservedAt:     now,
+		Links:          w.windowLinks,
+		LinksTruncated: w.windowTruncated,
 	}
 	w.windowCount = 0
 	w.windowSince = now
+	// Hand the backing array to the snapshot rather than reusing it —
+	// the caller marshals it onto the wire after we've released the
+	// mutex, so a shared array would race with the next Append.
+	w.windowLinks = nil
+	w.windowTruncated = false
 	return snap
+}
+
+// ReturnWindow folds an unshipped snapshot back into the live window.
+// The summary sink is a capacity-4 channel that drops rather than
+// blocks (a wedged sink must not stall the agent), and without this a
+// dropped summary would silently discard that window's links — leaving
+// the server's witness with a permanent hole that every later segment
+// would report as a sequence gap.
+//
+// Merging is order-preserving: the returned links precede whatever has
+// been appended since, and the combined buffer is re-capped, so a
+// return that overflows degrades to the same truncated-at-the-head
+// state a burst would have produced anyway.
+func (w *ChainWriter) ReturnWindow(snap ChainSummarySnapshot) {
+	if w == nil || (len(snap.Links) == 0 && snap.Count == 0) {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.windowCount += snap.Count
+	if !snap.Since.IsZero() && snap.Since.Before(w.windowSince) {
+		w.windowSince = snap.Since
+	}
+	if snap.LinksTruncated {
+		w.windowTruncated = true
+	}
+	if len(snap.Links) > 0 {
+		merged := make([]ChainLink, 0, len(snap.Links)+len(w.windowLinks))
+		merged = append(merged, snap.Links...)
+		merged = append(merged, w.windowLinks...)
+		w.windowLinks = merged
+		w.capWindowLinks()
+	}
 }
 
 // Close flushes + releases the chain file. Called by the agent on
@@ -271,7 +383,26 @@ func (w *ChainWriter) recover() error {
 		}
 		w.seq = rec.Seq + 1
 		w.prevHash = rec.RecordHash
+		// ADR-0042: re-seed the link window from disk so the first
+		// summary after a restart overlaps the last one shipped before
+		// it. Without this, every restart would punch a gap into the
+		// server's witness — the links appended between the last tick
+		// and the shutdown live only in memory. The overlap is not
+		// wasted work: re-reported links are checked for equality
+		// against what the server already stored, which is a second
+		// independent way to catch an edit-then-relink.
+		w.pushLink(ChainLink{
+			Seq:        rec.Seq,
+			Kind:       rec.Kind,
+			PrevHash:   rec.PrevHash,
+			RecordHash: rec.RecordHash,
+		})
 	}
+	// A backfill that hit the cap is not a truncated *window* — the
+	// window simply starts further back than the whole chain. Reporting
+	// it as truncation would make every restart of a long-lived agent
+	// look like a dropped burst.
+	w.windowTruncated = false
 	return sc.Err()
 }
 

@@ -2282,19 +2282,64 @@ Secure Boot implementations).
     enrollment + entitlement grant + notarization (distribution only —
     M1/M2 run dev-signed on the test Mac).
 - Windows agent (ETW-first; minifilter driver only if kernel-level file-write telemetry is needed; driver signing via EV cert).
-- **Tamper-chain hash recompute (carry-over from #112).** Phase 6 #112 ships
-  count-based cross-check only — the agent's per-record hash includes
-  `ts` (RFC3339Nano local wall-clock) which the server cannot reconstruct
-  from CH/pg rows, so a literal `record_hash` recompute is physically
-  impossible without changing the canonical hash inputs. Phase 7 picks
-  one of: (a) drop `ts` from the hash inputs and key on a server-derivable
-  field per record kind (OCSF `time` for findings, pg `created_at` for
-  response actions), or (b) carry the agent's per-record hash on each
-  CH/pg row so the server can replay the chain link-by-link without
-  re-deriving the fields. Either approach is an ADR + on-disk format
-  bump for `log.chain` + a migration. Until then, count-based detection
-  catches truncation + replay-then-extend; record-level edits remain
-  detectable only via on-agent `slither-agent verify-chain`.
+- ✅ **Tamper-chain record-level verification (carry-over from #112,
+  closed 2026-08-07, ADR-0042).** Phase 6 #112 shipped count-based
+  cross-check only, because the agent's per-record hash includes `ts`
+  (RFC3339Nano local wall-clock) which the server cannot reconstruct
+  from CH/pg rows. That left **edit-then-relink** invisible: rewrite one
+  record, recompute its `record_hash`, re-link every record after it, and
+  the file self-verifies at an unchanged length, so both
+  `slither-agent verify-chain` and the count check pass.
+
+  Taken option **(b)**, realised as **link replication**. The agent ships
+  each record's `(seq, kind, prev_hash, record_hash)` tuple with its
+  5-minute summary; the server persists them append-only in
+  `chain_links` (migration 00024) and becomes an independent **witness**
+  rather than a recomputer. Three properties are checked per segment:
+  continuity onto the witnessed tail, internal linkage within the
+  segment, and immutability of any `seq` already witnessed. A violation
+  writes `link_status = broken`, flags the summary, and fires a
+  `chain.link_mismatch` audit row at severity 5 — nothing from a broken
+  segment is persisted, so a compromised agent cannot revise history it
+  has already reported.
+
+  Why (b) and not (a): dropping `ts` from the hash inputs would have
+  *weakened* on-agent evidence (an unhashed `ts` is freely editable, so
+  back-dating a record to slip past a `--since` window stops being
+  detectable) while still not delivering a real recompute, since the hash
+  input also contains agent-shaped `summary` JSON that is not byte-equal
+  to anything the server stores. And unlike (b)-as-literally-worded —
+  stamping the hash onto each CH/pg row — link replication needs no
+  ClickHouse migration on the ADR-0031-frozen OCSF table and no coupling
+  between the chain writer and the event sink's batch flush, for
+  identical verification power.
+
+  §9 anticipated an on-disk `log.chain` format bump. **Not needed** —
+  everything the server requires is already in each record; the writer
+  only had to remember what it wrote. So there is no agent-side
+  migration and no agent-version/chain-file compatibility matrix.
+
+  Scope landed: `ChainSummary.links` + `links_truncated` as additive
+  `slither.v1` fields (a pre-ADR-0042 agent ships none and degrades to
+  exactly the #112 behaviour, recorded as `link_status = none`, not as a
+  mismatch); a bounded 512-link agent buffer that drops from the head on
+  overflow so the tail the witness anchors on always survives;
+  restart backfill in `recover()` and `ChainWriter.ReturnWindow` on a
+  dropped summary, which together close the two ways the window could
+  silently evaporate and leave a permanent hole in the witness; the
+  `chain_links` store + `chain_summaries.{links_reported, links_new,
+  link_status, link_detail}`; link replay in
+  `server/internal/detect/chain_links.go`; the console's chain-status
+  page split into separate count and link columns; and 22 new unit tests
+  across the agent buffer and the server replay.
+
+  Residual, unchanged: this proves linkage, not content — the server
+  never sees a record body. An edit *without* a relink is caught by
+  on-agent `verify-chain` instead; the two are complementary by
+  construction. Neither defends against an attacker who owns the host
+  before a record is first shipped, which stays the explicit Phase 5 #95
+  non-goal. What did change is the attacker's window: from "any time
+  before the audit" to "under one summary interval".
 - **Phase 6 #121 follow-ups (filed 2026-05-05).** Six bugs the
   operator-driven cloud-VM exit validation surfaced. None block
   Phase 6 close; all are picked up here on demand:

@@ -541,7 +541,7 @@ func HostChainStatus(d HostChainStatusData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "</h2><p class=\"muted\">Phase 6 #112 — every 5 minutes the agent emits a ChainSummary covering the records it appended in the preceding window. The server cross-checks the count against equivalent <code>response_actions</code> + detection-finding rows and records the result here. A mismatch fires a <code>chain.mismatch</code> audit event.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "</h2><p class=\"muted\">Every 5 minutes the agent emits a ChainSummary covering the records it appended in the preceding window. The server runs two independent checks on it.</p><p class=\"muted\"><strong>Count</strong> (Phase 6 #112) cross-checks the reported count against the equivalent <code>response_actions</code> + detection-finding rows in that same window. A divergence fires a <code>chain.mismatch</code> audit event.</p><p class=\"muted\"><strong>Link</strong> (ADR-0042) replays the per-record hash links the agent ships and keeps them as an append-only witness. It catches what the count check cannot: a record edited in place with the rest of the chain re-linked around it, which leaves the count untouched. <code>broken</code> means a link contradicted the witness or failed to chain — it fires a <code>chain.link_mismatch</code> audit event at severity 5. <code>gap</code> and <code>truncated</code> are informational; <code>none</code> means the agent predates link reporting.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -608,7 +608,7 @@ func chainSummaryTable(rows []pg.ChainSummaryRow, highlight bool) templ.Componen
 			templ_7745c5c3_Var29 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<table class=\"events-table\"><thead><tr><th>received</th><th>window</th><th>last_seq</th><th>observed</th><th>expected</th><th>delta</th><th>state</th></tr></thead> <tbody>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<table class=\"events-table\"><thead><tr><th>received</th><th>window</th><th>last_seq</th><th>observed</th><th>expected</th><th>delta</th><th>links</th><th>link</th><th>count</th></tr></thead> <tbody>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -638,7 +638,7 @@ func chainSummaryTable(rows []pg.ChainSummaryRow, highlight bool) templ.Componen
 			var templ_7745c5c3_Var32 string
 			templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(r.ReceivedAt.UTC().Format("2006-01-02 15:04:05 MST"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 187, Col: 77}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 205, Col: 77}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 			if templ_7745c5c3_Err != nil {
@@ -651,7 +651,7 @@ func chainSummaryTable(rows []pg.ChainSummaryRow, highlight bool) templ.Componen
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(r.SinceAt.UTC().Format("15:04:05"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 189, Col: 42}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 207, Col: 42}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 			if templ_7745c5c3_Err != nil {
@@ -664,7 +664,7 @@ func chainSummaryTable(rows []pg.ChainSummaryRow, highlight bool) templ.Componen
 			var templ_7745c5c3_Var34 string
 			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(r.ObservedAt.UTC().Format("15:04:05"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 191, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 209, Col: 45}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 			if templ_7745c5c3_Err != nil {
@@ -677,7 +677,7 @@ func chainSummaryTable(rows []pg.ChainSummaryRow, highlight bool) templ.Componen
 			var templ_7745c5c3_Var35 string
 			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.FormatUint(r.LastSeq, 10))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 193, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 211, Col: 58}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 			if templ_7745c5c3_Err != nil {
@@ -690,7 +690,7 @@ func chainSummaryTable(rows []pg.ChainSummaryRow, highlight bool) templ.Componen
 			var templ_7745c5c3_Var36 string
 			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.FormatUint(r.CountObserved, 10))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 194, Col: 50}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 212, Col: 50}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 			if templ_7745c5c3_Err != nil {
@@ -703,7 +703,7 @@ func chainSummaryTable(rows []pg.ChainSummaryRow, highlight bool) templ.Componen
 			var templ_7745c5c3_Var37 string
 			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.FormatUint(r.CountExpected, 10))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 195, Col: 50}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 213, Col: 50}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 			if templ_7745c5c3_Err != nil {
@@ -716,33 +716,94 @@ func chainSummaryTable(rows []pg.ChainSummaryRow, highlight bool) templ.Componen
 			var templ_7745c5c3_Var38 string
 			templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(chainDeltaLabel(r.CountObserved, r.CountExpected))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 196, Col: 60}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 214, Col: 60}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "</td><td>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "</td><td class=\"muted\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if r.Mismatch {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "<span class=\"alert-status alert-status-failed\">mismatch</span>")
+			var templ_7745c5c3_Var39 string
+			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(chainLinksLabel(r))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 215, Col: 43}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "</td><td title=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var40 string
+			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(r.LinkDetail)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 216, Col: 29}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var41 = []any{"alert-status", chainLinkStatusClass(r.LinkStatus)}
+			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var41...)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "<span class=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var42 string
+			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var41).String())
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 1, Col: 0}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var43 string
+			templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(chainLinkStatusLabel(r.LinkStatus))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/console/views/hosts.templ`, Line: 218, Col: 43}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</span></td><td>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if r.CountObserved != r.CountExpected {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "<span class=\"alert-status alert-status-failed\">mismatch</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "<span class=\"alert-status alert-status-ok\">ok</span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "<span class=\"alert-status alert-status-ok\">ok</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "</td></tr>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "</td></tr>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</tbody></table>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "</tbody></table>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -768,6 +829,44 @@ func chainDeltaLabel(observed, expected uint64) string {
 		return "+" + strconv.FormatUint(observed-expected, 10)
 	}
 	return "-" + strconv.FormatUint(expected-observed, 10)
+}
+
+// chainLinksLabel renders "new/reported" for the link column so an
+// operator can tell a fresh segment from a restart's re-report at a
+// glance — a restart re-ships links the server already holds, so a
+// low new / high reported ratio is expected right after a bounce.
+func chainLinksLabel(r pg.ChainSummaryRow) string {
+	if r.LinksReported == 0 {
+		return "—"
+	}
+	return strconv.FormatUint(r.LinksNew, 10) + "/" + strconv.FormatUint(r.LinksReported, 10)
+}
+
+// chainLinkStatusLabel defaults an empty status to "none" so rows
+// written before migration 00024 render as the pre-ADR-0042 case they
+// are, rather than as a blank cell.
+func chainLinkStatusLabel(status string) string {
+	if status == "" {
+		return "none"
+	}
+	return status
+}
+
+// chainLinkStatusClass maps a link status onto the shared alert-status
+// palette. Only `broken` is an alarm — `gap` and `truncated` are
+// explained states that must not read as tampering, and `none` is a
+// pre-ADR-0042 agent.
+func chainLinkStatusClass(status string) string {
+	switch status {
+	case "broken":
+		return "alert-status-failed"
+	case "ok":
+		return "alert-status-ok"
+	case "gap", "truncated":
+		return "alert-status-pending"
+	default:
+		return "alert-status-muted"
+	}
 }
 
 var _ = templruntime.GeneratedTemplate

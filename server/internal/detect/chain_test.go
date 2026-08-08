@@ -26,6 +26,60 @@ type stubChainStore struct {
 	recordErr  error
 
 	auditEntries []pg.AuditEntry
+
+	// ADR-0042 in-memory link witness. Present on the same stub so
+	// NewChainVerifier's capability upgrade picks it up and every
+	// existing count-path test also exercises the link path (they
+	// ship no links, so it resolves to link_status=none).
+	witness    map[uint64]pg.ChainLinkRow
+	witnessErr error
+	appendErr  error
+}
+
+func (s *stubChainStore) LatestChainLink(_ context.Context, _ string) (pg.ChainLinkRow, bool, error) {
+	if s.witnessErr != nil {
+		return pg.ChainLinkRow{}, false, s.witnessErr
+	}
+	var (
+		best  pg.ChainLinkRow
+		found bool
+	)
+	for _, l := range s.witness {
+		if !found || l.Seq > best.Seq {
+			best, found = l, true
+		}
+	}
+	return best, found, nil
+}
+
+func (s *stubChainStore) ChainLinkHashesInRange(_ context.Context, _ string, lo, hi uint64) (map[uint64]string, error) {
+	out := map[uint64]string{}
+	for seq, l := range s.witness {
+		if seq >= lo && seq <= hi {
+			out[seq] = l.RecordHash
+		}
+	}
+	return out, nil
+}
+
+func (s *stubChainStore) AppendChainLinks(_ context.Context, _ string, links []pg.ChainLinkRow) (int, error) {
+	if s.appendErr != nil {
+		return 0, s.appendErr
+	}
+	if s.witness == nil {
+		s.witness = map[uint64]pg.ChainLinkRow{}
+	}
+	n := 0
+	for _, l := range links {
+		// ON CONFLICT DO NOTHING: an already-witnessed seq is neither
+		// overwritten nor counted.
+		if _, ok := s.witness[l.Seq]; ok {
+			continue
+		}
+		s.witness[l.Seq] = l
+		n++
+	}
+	return n, nil
 }
 
 func (s *stubChainStore) CountResponseActionsForChain(_ context.Context, _ string, _, _ time.Time) (uint64, error) {

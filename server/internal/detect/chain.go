@@ -13,12 +13,17 @@
 //     received summary, with a `mismatch` boolean),
 //  4. fires a `chain.mismatch` audit row on divergence.
 //
-// last_hash is stored verbatim. The server does NOT recompute it —
-// the agent's per-record hash includes a wall-clock TS the server
-// can't reconstruct. Phase 7 carry-over (IMPLEMENTATION.md §9) picks
-// between dropping `ts` from hash inputs and stamping per-record
-// hashes onto each CH/pg row so the chain can be replayed link-by-
-// link.
+// last_hash is stored verbatim. The server still does NOT recompute
+// it — the agent's per-record hash includes a wall-clock TS the server
+// can't reconstruct, and ADR-0042 deliberately keeps it hashed so
+// on-agent back-dating stays detectable.
+//
+// Phase 7 / ADR-0042 closed the §9 carry-over by making the server a
+// link WITNESS instead: chain_links.go replays each summary's shipped
+// (seq, kind, prev_hash, record_hash) tuples against what the server
+// already holds, which catches the record-level edit this count check
+// cannot. Both checks run on every summary and are recorded on the
+// same row — they fail independently and mean different things.
 //
 // Skew tolerance: the agent's clock can drift relative to the server
 // + the [since, observed_at) bounds describe agent-local time. The
@@ -68,16 +73,33 @@ type ChainVerifierOptions struct {
 
 // ChainVerifier is the concrete grpcserv.ChainVerifier impl.
 type ChainVerifier struct {
-	pg   ChainStore
-	ch   ChainCHStore
-	opts ChainVerifierOptions
+	pg    ChainStore
+	ch    ChainCHStore
+	links ChainLinkStore
+	opts  ChainVerifierOptions
 }
 
 // NewChainVerifier wires the verifier. ch may be nil — the verifier
 // then compares only pg counts.
+//
+// The ADR-0042 link witness is picked up by capability upgrade: the
+// real *pg.Store implements ChainLinkStore, and the assertion below
+// makes that a compile-time guarantee rather than a runtime hope. A
+// store that doesn't (a narrow test stub) leaves links nil, and
+// verifyLinks records `link_status = none` with a reason instead of
+// silently claiming the segment verified.
 func NewChainVerifier(pgStore ChainStore, chStore ChainCHStore, opts ChainVerifierOptions) *ChainVerifier {
-	return &ChainVerifier{pg: pgStore, ch: chStore, opts: opts}
+	v := &ChainVerifier{pg: pgStore, ch: chStore, opts: opts}
+	if ls, ok := pgStore.(ChainLinkStore); ok {
+		v.links = ls
+	}
+	return v
 }
+
+// The production store must always satisfy the link witness contract;
+// dropping a method here is a build failure, not a silent downgrade to
+// count-only verification.
+var _ ChainLinkStore = (*pg.Store)(nil)
 
 // Verify is the grpcserv.ChainVerifier entry. Returns an error only
 // when a hard infrastructure failure prevents the cross-check (pg
@@ -98,17 +120,36 @@ func (v *ChainVerifier) Verify(ctx context.Context, hostID string, summary *pb.C
 		// real interval. Record the summary verbatim with both counts
 		// zeroed so the host page still surfaces "agent reported in"
 		// but skip the count-divergence check.
-		_, recErr := v.pg.RecordChainSummary(ctx, pg.ChainSummaryInsert{
+		//
+		// Link verification still runs. The count check needs a sane
+		// window because it compares against time-bounded rows; the
+		// link check is keyed on seq, not time, so an inverted window
+		// is no reason to skip the half that detects tampering.
+		linkRes, linkErr := v.verifyLinks(ctx, hostID, summary)
+		if linkErr != nil {
+			return linkErr
+		}
+		rowID, recErr := v.pg.RecordChainSummary(ctx, pg.ChainSummaryInsert{
 			HostID:        hostID,
 			LastSeq:       summary.GetLastSeq(),
 			LastHash:      summary.GetLastHash(),
 			CountObserved: summary.GetCount(),
 			CountExpected: 0,
-			Mismatch:      false,
+			Mismatch:      linkRes.Status == LinkStatusBroken,
 			SinceAt:       since,
 			ObservedAt:    until,
+			LinksReported: linkRes.Reported,
+			LinksNew:      linkRes.New,
+			LinkStatus:    linkRes.Status,
+			LinkDetail:    linkRes.Detail,
 		})
-		return recErr
+		if recErr != nil {
+			return recErr
+		}
+		if linkRes.Status == LinkStatusBroken {
+			v.auditLinkBreak(ctx, hostID, rowID, summary, linkRes)
+		}
+		return nil
 	}
 
 	respCount, err := v.pg.CountResponseActionsForChain(ctx, hostID, since, until)
@@ -134,7 +175,22 @@ func (v *ChainVerifier) Verify(ctx context.Context, hostID string, summary *pb.C
 	expected := respCount + findingCount
 	observed := summary.GetCount()
 
-	mismatch := absDelta(expected, observed) > v.opts.skewSlack()
+	countMismatch := absDelta(expected, observed) > v.opts.skewSlack()
+
+	// ADR-0042 record-level pass. Runs regardless of the count result
+	// — the two detect different attacks and a clean count is exactly
+	// what edit-then-relink produces.
+	linkRes, linkErr := v.verifyLinks(ctx, hostID, summary)
+	if linkErr != nil {
+		return linkErr
+	}
+	linkBroken := linkRes.Status == LinkStatusBroken
+
+	// One `mismatch` flag covers both checks so existing consumers
+	// (ListChainMismatches, the host page's red badge) light up for a
+	// link break without needing to know about link_status. The
+	// specific reason lives in link_status / link_detail.
+	mismatch := countMismatch || linkBroken
 
 	rowID, recErr := v.pg.RecordChainSummary(ctx, pg.ChainSummaryInsert{
 		HostID:        hostID,
@@ -145,12 +201,20 @@ func (v *ChainVerifier) Verify(ctx context.Context, hostID string, summary *pb.C
 		Mismatch:      mismatch,
 		SinceAt:       since,
 		ObservedAt:    until,
+		LinksReported: linkRes.Reported,
+		LinksNew:      linkRes.New,
+		LinkStatus:    linkRes.Status,
+		LinkDetail:    linkRes.Detail,
 	})
 	if recErr != nil {
 		return fmt.Errorf("chain.Verify: record: %w", recErr)
 	}
 
-	if mismatch {
+	if linkBroken {
+		v.auditLinkBreak(ctx, hostID, rowID, summary, linkRes)
+	}
+
+	if countMismatch {
 		// `chain.mismatch` audit row at severity 4 (high). Surfaced
 		// in the audit log + the host's chain-status page. No new
 		// alert class — this is operator-attention-only.
@@ -169,6 +233,7 @@ func (v *ChainVerifier) Verify(ctx context.Context, hostID string, summary *pb.C
 				"observed_at":      until.Format(time.RFC3339Nano),
 				"severity":         4,
 				"ch_count_present": chPresent,
+				"link_status":      linkRes.Status,
 			},
 		})
 	}
@@ -198,8 +263,8 @@ var _ interface {
 	Verify(ctx context.Context, hostID string, summary *pb.ChainSummary) error
 } = (*ChainVerifier)(nil)
 
-// pg + ch type aliases keep the import surface localised; ChainStore
-// names them above so other server packages reading this file see the
-// dependency contract.
-type _ = pg.ChainSummaryInsert
+// ch type alias keeps the import surface localised; ChainCHStore names
+// it above so other server packages reading this file see the
+// dependency contract. The pg side is pinned by the ChainLinkStore
+// assertion further up.
 type _ = chstore.Store

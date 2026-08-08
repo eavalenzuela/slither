@@ -141,13 +141,29 @@ templ HostChainStatus(d HostChainStatusData) {
 		<div class="card">
 			<h2>Chain status — { hostLabel(d.Host) }</h2>
 			<p class="muted">
-				Phase 6 #112 — every 5 minutes the agent emits a
-				ChainSummary covering the records it appended in the
-				preceding window. The server cross-checks the count
-				against equivalent <code>response_actions</code> +
-				detection-finding rows and records the result here.
-				A mismatch fires a <code>chain.mismatch</code> audit
-				event.
+				Every 5 minutes the agent emits a ChainSummary covering
+				the records it appended in the preceding window. The
+				server runs two independent checks on it.
+			</p>
+			<p class="muted">
+				<strong>Count</strong> (Phase 6 #112) cross-checks the
+				reported count against the equivalent
+				<code>response_actions</code> + detection-finding rows
+				in that same window. A divergence fires a
+				<code>chain.mismatch</code> audit event.
+			</p>
+			<p class="muted">
+				<strong>Link</strong> (ADR-0042) replays the per-record
+				hash links the agent ships and keeps them as an
+				append-only witness. It catches what the count check
+				cannot: a record edited in place with the rest of the
+				chain re-linked around it, which leaves the count
+				untouched. <code>broken</code> means a link contradicted
+				the witness or failed to chain — it fires a
+				<code>chain.link_mismatch</code> audit event at severity
+				5. <code>gap</code> and <code>truncated</code> are
+				informational; <code>none</code> means the agent predates
+				link reporting.
 			</p>
 
 			if len(d.Mismatches) > 0 {
@@ -178,7 +194,9 @@ templ chainSummaryTable(rows []pg.ChainSummaryRow, highlight bool) {
 				<th>observed</th>
 				<th>expected</th>
 				<th>delta</th>
-				<th>state</th>
+				<th>links</th>
+				<th>link</th>
+				<th>count</th>
 			</tr>
 		</thead>
 		<tbody>
@@ -194,8 +212,14 @@ templ chainSummaryTable(rows []pg.ChainSummaryRow, highlight bool) {
 					<td>{ strconv.FormatUint(r.CountObserved, 10) }</td>
 					<td>{ strconv.FormatUint(r.CountExpected, 10) }</td>
 					<td>{ chainDeltaLabel(r.CountObserved, r.CountExpected) }</td>
+					<td class="muted">{ chainLinksLabel(r) }</td>
+					<td title={ r.LinkDetail }>
+						<span class={ "alert-status", chainLinkStatusClass(r.LinkStatus) }>
+							{ chainLinkStatusLabel(r.LinkStatus) }
+						</span>
+					</td>
 					<td>
-						if r.Mismatch {
+						if r.CountObserved != r.CountExpected {
 							<span class="alert-status alert-status-failed">mismatch</span>
 						} else {
 							<span class="alert-status alert-status-ok">ok</span>
@@ -225,4 +249,42 @@ func chainDeltaLabel(observed, expected uint64) string {
 		return "+" + strconv.FormatUint(observed-expected, 10)
 	}
 	return "-" + strconv.FormatUint(expected-observed, 10)
+}
+
+// chainLinksLabel renders "new/reported" for the link column so an
+// operator can tell a fresh segment from a restart's re-report at a
+// glance — a restart re-ships links the server already holds, so a
+// low new / high reported ratio is expected right after a bounce.
+func chainLinksLabel(r pg.ChainSummaryRow) string {
+	if r.LinksReported == 0 {
+		return "—"
+	}
+	return strconv.FormatUint(r.LinksNew, 10) + "/" + strconv.FormatUint(r.LinksReported, 10)
+}
+
+// chainLinkStatusLabel defaults an empty status to "none" so rows
+// written before migration 00024 render as the pre-ADR-0042 case they
+// are, rather than as a blank cell.
+func chainLinkStatusLabel(status string) string {
+	if status == "" {
+		return "none"
+	}
+	return status
+}
+
+// chainLinkStatusClass maps a link status onto the shared alert-status
+// palette. Only `broken` is an alarm — `gap` and `truncated` are
+// explained states that must not read as tampering, and `none` is a
+// pre-ADR-0042 agent.
+func chainLinkStatusClass(status string) string {
+	switch status {
+	case "broken":
+		return "alert-status-failed"
+	case "ok":
+		return "alert-status-ok"
+	case "gap", "truncated":
+		return "alert-status-pending"
+	default:
+		return "alert-status-muted"
+	}
 }

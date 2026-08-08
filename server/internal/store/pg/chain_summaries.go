@@ -23,6 +23,14 @@ type ChainSummaryRow struct {
 	SinceAt       time.Time
 	ObservedAt    time.Time
 	ReceivedAt    time.Time
+
+	// Phase 7 / ADR-0042 link-witness outcome. LinkStatus is one of
+	// none / ok / truncated / gap / broken; LinkDetail carries the
+	// human-readable reason for anything other than ok.
+	LinksReported uint64
+	LinksNew      uint64
+	LinkStatus    string
+	LinkDetail    string
 }
 
 // ChainSummaryInsert carries the verifier's terminal computation.
@@ -37,6 +45,14 @@ type ChainSummaryInsert struct {
 	Mismatch      bool
 	SinceAt       time.Time
 	ObservedAt    time.Time
+
+	// Phase 7 / ADR-0042. LinkStatus defaults to "none" when empty so
+	// a caller that predates link verification still writes a legal
+	// row against the 00024 CHECK constraint.
+	LinksReported uint64
+	LinksNew      uint64
+	LinkStatus    string
+	LinkDetail    string
 }
 
 // RecordChainSummary writes one row. Phase 6 #112. Returns the
@@ -46,20 +62,26 @@ func (s *Store) RecordChainSummary(ctx context.Context, in ChainSummaryInsert) (
 	if err != nil {
 		return "", fmt.Errorf("pg.RecordChainSummary: parse host_id: %w", err)
 	}
+	linkStatus := in.LinkStatus
+	if linkStatus == "" {
+		linkStatus = "none"
+	}
 	var id string
 	err = s.pool.QueryRow(ctx, `
 		INSERT INTO chain_summaries (
 			host_id, last_seq, last_hash,
 			count_observed, count_expected, mismatch,
-			since_at, observed_at
+			since_at, observed_at,
+			links_reported, links_new, link_status, link_detail
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id
 	`,
 		hostUUID,
 		int64(in.LastSeq), in.LastHash,
 		int64(in.CountObserved), int64(in.CountExpected), in.Mismatch,
 		in.SinceAt, in.ObservedAt,
+		int64(in.LinksReported), int64(in.LinksNew), linkStatus, in.LinkDetail,
 	).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("pg.RecordChainSummary: %w", err)
@@ -84,7 +106,8 @@ func (s *Store) ListChainSummaries(ctx context.Context, hostID string, limit int
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, host_id, last_seq, last_hash,
 		       count_observed, count_expected, mismatch,
-		       since_at, observed_at, received_at
+		       since_at, observed_at, received_at,
+		       links_reported, links_new, link_status, link_detail
 		FROM chain_summaries
 		WHERE host_id = $1
 		ORDER BY received_at DESC
@@ -97,17 +120,20 @@ func (s *Store) ListChainSummaries(ctx context.Context, hostID string, limit int
 	var out []ChainSummaryRow
 	for rows.Next() {
 		var r ChainSummaryRow
-		var lastSeq, countObs, countExp int64
+		var lastSeq, countObs, countExp, linksRep, linksNew int64
 		if err := rows.Scan(
 			&r.ID, &r.HostID, &lastSeq, &r.LastHash,
 			&countObs, &countExp, &r.Mismatch,
 			&r.SinceAt, &r.ObservedAt, &r.ReceivedAt,
+			&linksRep, &linksNew, &r.LinkStatus, &r.LinkDetail,
 		); err != nil {
 			return nil, fmt.Errorf("pg.ListChainSummaries: scan: %w", err)
 		}
 		r.LastSeq = uint64(lastSeq)
 		r.CountObserved = uint64(countObs)
 		r.CountExpected = uint64(countExp)
+		r.LinksReported = uint64(linksRep)
+		r.LinksNew = uint64(linksNew)
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -129,7 +155,8 @@ func (s *Store) ListChainMismatches(ctx context.Context, hostID string, limit in
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, host_id, last_seq, last_hash,
 		       count_observed, count_expected, mismatch,
-		       since_at, observed_at, received_at
+		       since_at, observed_at, received_at,
+		       links_reported, links_new, link_status, link_detail
 		FROM chain_summaries
 		WHERE host_id = $1 AND mismatch = true
 		ORDER BY received_at DESC
@@ -142,17 +169,20 @@ func (s *Store) ListChainMismatches(ctx context.Context, hostID string, limit in
 	var out []ChainSummaryRow
 	for rows.Next() {
 		var r ChainSummaryRow
-		var lastSeq, countObs, countExp int64
+		var lastSeq, countObs, countExp, linksRep, linksNew int64
 		if err := rows.Scan(
 			&r.ID, &r.HostID, &lastSeq, &r.LastHash,
 			&countObs, &countExp, &r.Mismatch,
 			&r.SinceAt, &r.ObservedAt, &r.ReceivedAt,
+			&linksRep, &linksNew, &r.LinkStatus, &r.LinkDetail,
 		); err != nil {
 			return nil, fmt.Errorf("pg.ListChainMismatches: scan: %w", err)
 		}
 		r.LastSeq = uint64(lastSeq)
 		r.CountObserved = uint64(countObs)
 		r.CountExpected = uint64(countExp)
+		r.LinksReported = uint64(linksRep)
+		r.LinksNew = uint64(linksNew)
 		out = append(out, r)
 	}
 	return out, rows.Err()
