@@ -32,7 +32,7 @@ jobs:
       darwin: ${{ steps.filter.outputs.darwin }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # The gate diffs against a base commit, so the default
           # single-commit fetch is not enough.
@@ -105,10 +105,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: "1.25"
           cache: true
@@ -168,10 +168,10 @@ jobs:
     # gate fails open whenever it cannot determine the diff base.
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: "1.25"
           cache: true
@@ -201,10 +201,10 @@ jobs:
     # -trimpath / -buildvcs / -mod=readonly.
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.work
           cache: true
@@ -229,10 +229,10 @@ jobs:
     needs: build-test-lint
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: "1.25"
           cache: true
