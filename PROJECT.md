@@ -52,7 +52,7 @@ Designed for **50–500 hosts per server**. Architecture should not preclude lat
 ### 3.2 Detection
 - **Hybrid detection.** Rule engine runs on both agent (fast-path, low-latency for response primitives) and server (full cross-host correlation).
 - **Sigma rule compatibility** as the primary rule format — we translate Sigma → internal rule AST. The compiler classifies each rule as edge-eligible or server-only per the policy in §3.6.
-- YARA scanning for on-disk and in-memory artifacts (triggered by rule actions, not continuous).
+- YARA scanning for on-disk and in-memory artifacts (triggered by rule actions, not continuous). *Scoped as a first-party extension invoked through the response path — ADR-0043; not started as of 2026-09-19.*
 - IOC matching: hash, IP, domain, filename feeds.
 - MITRE ATT&CK tagging on every rule.
 
@@ -77,7 +77,7 @@ Designed for **50–500 hosts per server**. Architecture should not preclude lat
 ### 3.5 Operational
 - Agent self-protection: resist unprivileged kill, tamper-evident logs.
 - Offline buffering: agent stores events locally when server unreachable, replays on reconnect.
-- Agent updates: signed, server-pushed, with rollback.
+- Agent updates: signed packages through the operator's package manager, with rollback via downgrade. *Server-pushed self-update deliberately not built — ADR-0044.*
 - Backpressure: agent drops low-priority telemetry before high-priority when overloaded, and reports drops.
 
 ### 3.6 Edge vs. server rule partitioning

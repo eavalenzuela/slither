@@ -2173,6 +2173,33 @@ Secure Boot implementations).
 
 ## 9. Phase 7 — Platform Expansion (bullet, demand-driven)
 
+- **§3 scope reconciliation (2026-09-19).** The completeness review
+  found six PROJECT.md §3 line items with no code and no descope
+  record: auth events, kernel-module events, container events, DNS
+  (all four now ✅ above), YARA scanning and server-pushed agent
+  updates. The last two are decisions, not collectors:
+  - **YARA — ADR-0043.** Scoped as a first-party extension
+    (`slither-ext-yara`, ADR-0027 / ADR-0029) invoked through a new
+    `SCAN_YARA` response action (ADR-0034 gating), with YARA rules
+    riding the signed bundle path (ADR-0039). Never linked into the
+    static agent. **Not started.** Milestones when picked up: (1)
+    `SCAN_YARA` in `control.proto` + dispatcher + host-policy bit;
+    (2) the extension on libyara with `Execute` returning matches;
+    (3) match → `DetectionFinding`; (4) `.yar` in rule bundles; (5)
+    console action button + audit; (6) doc-backed validation run.
+  - **Agent updates — ADR-0044.** Delivered as signed deb / rpm through
+    the operator's package manager, rollback via downgrade;
+    server-pushed self-update deliberately not built (the channel is
+    the attack surface). Follow-ups, release-infra not agent: a signed
+    apt / yum repository; a console "agents behind release X" banner;
+    an audit row when a host's reported version decreases.
+
+  Also noted: `agent/internal/respond` `TestBuildProcessTree_IncludesAncestorAndComm`
+  is load-sensitive — it walks the test process's own children while
+  sibling tests spawn subprocesses, and failed once in a full-suite run
+  on 2026-09-19 while passing 3/3 in isolation. Pre-existing (Phase 4
+  #81); worth pinning with a dedicated child rather than the live tree.
+
 - ✅ **DNS query / response telemetry (2026-09-19).** Closes the Phase 1
   §3.2 deferral ("DNS not included — requires parsing DNS payload or
   hooking getaddrinfo") and the PROJECT.md §3.1 "DNS queries" clause of
