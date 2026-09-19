@@ -10,12 +10,19 @@ import (
 )
 
 // seedUserForQueries creates a viewer user the saved_queries +
-// dashboards FKs can point at.
-func seedUserForQueries(ctx context.Context, t *testing.T, s *Store) string {
+// dashboards FKs can point at. It goes through InsertUser rather than
+// BootstrapAdmin because BootstrapAdmin is idempotent on "an admin
+// already exists" and returns an empty id on every call after the
+// first, which is not a usable FK.
+func seedUserForQueries(ctx context.Context, t *testing.T, s *Store, username string) string {
 	t.Helper()
-	id, _, err := s.BootstrapAdmin(ctx, "queries-tester", "p4ssw0rd-with-some-len")
+	hash, err := HashArgon2id("p4ssw0rd-with-some-len")
 	if err != nil {
-		t.Fatalf("BootstrapAdmin: %v", err)
+		t.Fatalf("HashArgon2id: %v", err)
+	}
+	id, err := s.InsertUser(ctx, username, hash, RoleViewer)
+	if err != nil {
+		t.Fatalf("InsertUser(%s): %v", username, err)
 	}
 	return id
 }
@@ -37,7 +44,7 @@ func TestSavedQuery_LifecycleAndCollisions(t *testing.T) {
 	}
 	defer s.Close()
 
-	userID := seedUserForQueries(ctx, t, s)
+	userID := seedUserForQueries(ctx, t, s, "queries-tester")
 
 	// Insert.
 	id1, err := s.InsertSavedQuery(ctx, SavedQueryInsert{
@@ -82,10 +89,7 @@ func TestSavedQuery_LifecycleAndCollisions(t *testing.T) {
 	}
 
 	// Other-user lookup → not found.
-	otherID, _, err := s.BootstrapAdmin(ctx, "another-user", "anotherp4ss-also-long-enough")
-	if err != nil {
-		t.Fatalf("seed other user: %v", err)
-	}
+	otherID := seedUserForQueries(ctx, t, s, "another-user")
 	if _, err := s.GetSavedQuery(ctx, otherID, id1); !errors.Is(err, ErrSavedQueryNotFound) {
 		t.Errorf("cross-user Get should fail with NotFound, got %v", err)
 	}
@@ -116,7 +120,7 @@ func TestDashboard_LayoutLifecycle(t *testing.T) {
 	}
 	defer s.Close()
 
-	userID := seedUserForQueries(ctx, t, s)
+	userID := seedUserForQueries(ctx, t, s, "queries-tester")
 	qID, err := s.InsertSavedQuery(ctx, SavedQueryInsert{
 		UserID: userID, Name: "q1", Surface: SavedQuerySurfaceEvents,
 	})

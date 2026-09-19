@@ -22,17 +22,26 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-// expectedTables is the full set of tables the v1 migrations must create,
-// independent of migration-file names. Order-insensitive comparison.
+// expectedTables is the full set of tables the migrations under
+// server/migrations must create, independent of migration-file names.
+// Order-insensitive comparison. Every new migration that adds a table
+// must add it here, so an accidental extra table is caught.
 var expectedTables = []string{
 	"alerts",
+	"api_keys",
 	"audit_log",
+	"chain_links",
+	"chain_summaries",
+	"dashboards",
 	"enrollment_tokens",
 	"host_response_policies",
 	"hosts",
+	"hunts",
 	"iocs",
+	"query_history",
 	"response_actions",
 	"rules",
+	"saved_queries",
 	"sessions",
 	"users",
 }

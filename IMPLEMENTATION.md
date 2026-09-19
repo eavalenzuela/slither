@@ -2138,6 +2138,32 @@ Secure Boot implementations).
 
 ## 9. Phase 7 — Platform Expansion (bullet, demand-driven)
 
+- ✅ **CI: main green again — stale pg integration tests (2026-09-19).**
+  Every CI run on `main` had failed since 2026-04-26. The lint-job
+  failures were cleared by `5bd0f43`; what remained was the privileged
+  `integration` job, which the runner logs no longer expose. Reproduced
+  locally with `go test -tags=integration` against Docker: four
+  failures in `server/internal/store/pg`, all test bugs, no product
+  change.
+
+  1. `migrate_integration_test.go` pinned an `expectedTables` list that
+     stopped at migration 16. Migrations 17–24 (`hunts`,
+     `chain_summaries`, `saved_queries`, `dashboards`, `query_history`,
+     `api_keys`, `chain_links`) were added without updating it, so the
+     three migrate/idempotent/reset tests failed on every commit since
+     Phase 6 #110. The list is now complete and the comment states the
+     rule: a migration that adds a table must add it here.
+  2. `saved_queries_integration_test.go` seeded its "other user" through
+     `BootstrapAdmin`, which is idempotent on "an admin already exists"
+     and returns an empty id on the second call — so the cross-user
+     isolation check was asserting against an unparseable UUID, not a
+     different user. Both seeds now go through `InsertUser` as a viewer.
+
+  The agent-side privileged tests (collector + app scenario) could not
+  be run on the dev box (no passwordless root); they are unchanged since
+  the last green run except for #M-A2, and the next CI run on `main` is
+  the verification.
+
 - ✅ **Reachable dependency advisories cleared + console stopped
   trusting client IP headers (2026-08-08).** A push surfaced a
   Dependabot banner; `govulncheck` separated the six *reachable*
