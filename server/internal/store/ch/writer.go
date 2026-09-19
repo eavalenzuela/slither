@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -109,6 +110,7 @@ func NewWriter(store *Store, bus *ingest.Bus, telem *telemetry.Counters, opts Wr
 			pb.OcsfClassId_OCSF_CLASS_ID_PROCESS_ACTIVITY:     {tableName: "ocsf_process_activity_1007"},
 			pb.OcsfClassId_OCSF_CLASS_ID_FILE_SYSTEM_ACTIVITY: {tableName: "ocsf_file_system_activity_1001"},
 			pb.OcsfClassId_OCSF_CLASS_ID_NETWORK_ACTIVITY:     {tableName: "ocsf_network_activity_4001"},
+			pb.OcsfClassId_OCSF_CLASS_ID_AUTHENTICATION:       {tableName: "ocsf_authentication_3002"},
 			pb.OcsfClassId_OCSF_CLASS_ID_DETECTION_FINDING:    {tableName: "ocsf_detection_finding_2004"},
 		},
 	}
@@ -249,6 +251,8 @@ func decode(env *pb.Envelope) (chRow, error) {
 		return decodeFile(env)
 	case pb.OcsfClassId_OCSF_CLASS_ID_NETWORK_ACTIVITY:
 		return decodeNet(env)
+	case pb.OcsfClassId_OCSF_CLASS_ID_AUTHENTICATION:
+		return decodeAuth(env)
 	case pb.OcsfClassId_OCSF_CLASS_ID_DETECTION_FINDING:
 		return decodeFinding(env)
 	}
@@ -479,3 +483,58 @@ func (r findingRow) bind(batch driver.Batch) error {
 
 // keep errors imported even if a future refactor strips a path.
 var _ = errors.Is
+
+func decodeAuth(env *pb.Envelope) (chRow, error) {
+	var ev ocsf.Authentication
+	if err := json.Unmarshal(env.GetPayload(), &ev); err != nil {
+		return nil, err
+	}
+	row := authRow{shared: sharedFromEnvelope(env)}
+	row.activityID = uint8(ev.ActivityID)
+	row.eventCode = ev.Metadata.EventCode
+	if ev.Service != nil {
+		row.service = ev.Service.Name
+	}
+	row.userName = ev.User.Name
+	if ev.SrcEndpoint != nil {
+		row.srcIP = ev.SrcEndpoint.IP
+		row.srcHostname = ev.SrcEndpoint.Hostname
+	}
+	row.statusID = ev.StatusID
+	if n, err := strconv.ParseInt(ev.StatusCode, 10, 32); err == nil {
+		row.statusCode = int32(n)
+	}
+	row.statusDetail = ev.StatusDetail
+	row.logonTypeID = ev.LogonTypeID
+	row.actorPID = ev.Actor.Process.PID
+	row.actorName = ev.Actor.Process.Name
+	return row, nil
+}
+
+// authRow mirrors ocsf_authentication_3002 (migration 00007) column for
+// column; bind order must match the DDL exactly.
+type authRow struct {
+	shared       sharedRow
+	activityID   uint8
+	eventCode    string
+	service      string
+	userName     string
+	srcIP        string
+	srcHostname  string
+	statusID     uint8
+	statusCode   int32
+	statusDetail string
+	logonTypeID  uint8
+	actorPID     uint32
+	actorName    string
+}
+
+func (r authRow) bind(batch driver.Batch) error {
+	return batch.Append(
+		r.shared.eventID, r.shared.hostID, r.shared.observedAt, r.shared.collectedAt,
+		r.shared.classUID, r.shared.severityID,
+		r.activityID, r.eventCode, r.service, r.userName, r.srcIP, r.srcHostname,
+		r.statusID, r.statusCode, r.statusDetail, r.logonTypeID, r.actorPID, r.actorName,
+		r.shared.raw,
+	)
+}

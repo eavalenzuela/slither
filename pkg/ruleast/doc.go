@@ -6,7 +6,8 @@
 // Phase 1 supports a strict subset of Sigma (IMPLEMENTATION.md §3.5, ADR-0019):
 //
 //   - logsource.product must be "linux"; category must be one of
-//     "process_creation", "file_event", "network_connection".
+//     "process_creation", "file_event", "network_connection",
+//     "authentication" (or `service: auth` with no category).
 //   - detection is a map of named selections plus a final "condition" string.
 //     No aggregation (count, near, timeframe, pipe operators).
 //   - Field modifiers supported: equals (default), contains, startswith,

@@ -15,6 +15,11 @@ const (
 	CategoryProcessCreation   Category = "process_creation"
 	CategoryFileEvent         Category = "file_event"
 	CategoryNetworkConnection Category = "network_connection"
+	// CategoryAuthentication is slither's name for the PAM/login event
+	// class (OCSF 3002). Sigma has no canonical Linux category for it —
+	// public packs use `service: auth` with no category — so the compiler
+	// also accepts that spelling (see checkLogSource).
+	CategoryAuthentication Category = "authentication"
 )
 
 // Level maps Sigma's severity vocabulary to slither's own enum. We keep

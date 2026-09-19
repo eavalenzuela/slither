@@ -45,6 +45,10 @@ type NetConnectionInfo struct {
 type NetEndpoint struct {
 	IP   string `json:"ip,omitempty"`
 	Port uint16 `json:"port,omitempty"`
+	// Hostname carries a name the source reported instead of an address
+	// (PAM_RHOST is whatever the client set; sshd sets an IP, other
+	// clients may set a name).
+	Hostname string `json:"hostname,omitempty"`
 }
 
 func (n *NetworkActivity) ClassID() ClassID { return ClassNetworkActivity }

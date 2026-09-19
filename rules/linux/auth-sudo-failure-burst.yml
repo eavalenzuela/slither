@@ -1,0 +1,31 @@
+title: Repeated sudo authentication failures
+id: 8b7c4d00-0001-4000-8000-000000000051
+status: experimental
+description: |
+  More than three failed sudo credential checks for one account inside
+  two minutes. A person typing a password wrong twice is ordinary; four
+  failures in a row is either a script guessing at privilege
+  escalation with a stolen low-privilege shell (T1548.003, T1110) or
+  an operator who has lost the plot — both worth a look.
+
+  sudo re-checks credentials only when its timestamp has expired, so a
+  burst here is a burst of genuine prompts, not one session retrying.
+
+  Bounded-stateful and edge-eligible: one counter per account, 120 s
+  window.
+level: medium
+tags:
+  - attack.privilege_escalation
+  - attack.credential_access
+  - attack.t1548.003
+  - attack.t1110
+logsource:
+  product: linux
+  category: authentication
+detection:
+  failed_sudo_auth:
+    Service: sudo
+    EventCode: auth_attempt
+    Status: Failure
+  condition: failed_sudo_auth | count() by User > 3
+timeframe: 120s

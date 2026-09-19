@@ -23,6 +23,8 @@ func CategoryToClass(c ruleast.Category) (ocsf.ClassID, bool) {
 		return ocsf.ClassFileSystemActivity, true
 	case ruleast.CategoryNetworkConnection:
 		return ocsf.ClassNetworkActivity, true
+	case ruleast.CategoryAuthentication:
+		return ocsf.ClassAuthentication, true
 	}
 	return 0, false
 }
@@ -36,6 +38,8 @@ func AccessorFor(c ruleast.Category) Accessor {
 		return fileAccessor
 	case ruleast.CategoryNetworkConnection:
 		return netAccessor
+	case ruleast.CategoryAuthentication:
+		return authAccessor
 	}
 	return nil
 }
@@ -99,6 +103,38 @@ var netAccessor = Accessor{
 	"User":            actorUserName,
 }
 
+// authAccessor maps Sigma authentication fields onto ocsf.Authentication.
+// The vocabulary follows Sigma's Windows logon rules where a Linux
+// equivalent exists (TargetUserName, SubjectUserName, LogonType) and
+// slither's own names for the PAM-specific parts. Note the asymmetry
+// with the other categories: here `User` is the account being
+// authenticated, not the actor — that is what every auth rule wants to
+// key on, and the actor (sshd, sudo) is reachable as SubjectUserName.
+var authAccessor = Accessor{
+	"User":            authUserName,
+	"TargetUserName":  authUserName,
+	"SubjectUserName": actorUserName,
+	"Service":         authService,
+	"PamService":      authService,
+	"EventCode":       authEventCode,
+	"EventType":       authEventCode,
+	"Status":          authStatusStr,
+	"StatusCode":      authStatusCode,
+	"StatusDetail":    authStatusDetail,
+	"SourceIp":        authSrcIP,
+	"SourceHostname":  authSrcHost,
+	// RemoteHost is PAM_RHOST as set, whichever shape it took — the
+	// right field for `count() by RemoteHost` when a rule must not care
+	// whether the client reported a name or an address.
+	"RemoteHost":  authRemoteHost,
+	"LogonType":   authLogonType,
+	"Tty":         authTTY,
+	"Image":       func(e ocsf.Event) []string { return procExePath(actorProcess(e)) },
+	"CommandLine": func(e ocsf.Event) []string { return nonEmpty(actorProcess(e).Cmdline) },
+	"ProcessId":   func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
+	"PID":         func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
+}
+
 // --- helpers (kept tiny and boring; they are the glue, not the logic) -------
 
 func procOf(e ocsf.Event) ocsf.Process {
@@ -152,6 +188,8 @@ func actorProcess(e ocsf.Event) ocsf.Process {
 		return v.Actor.Process
 	case *ocsf.NetworkActivity:
 		return v.Actor.Process
+	case *ocsf.Authentication:
+		return v.Actor.Process
 	case *ocsf.ProcessActivity:
 		return v.Actor.Process
 	}
@@ -164,6 +202,8 @@ func actorUserName(e ocsf.Event) []string {
 	case *ocsf.FileSystemActivity:
 		u = v.Actor.User
 	case *ocsf.NetworkActivity:
+		u = v.Actor.User
+	case *ocsf.Authentication:
 		u = v.Actor.User
 	case *ocsf.ProcessActivity:
 		u = v.Actor.User
@@ -256,4 +296,102 @@ func nonEmpty(s string) []string {
 		return nil
 	}
 	return []string{s}
+}
+
+// --- authentication (3002) accessors ---------------------------------------
+
+func authOf(e ocsf.Event) (*ocsf.Authentication, bool) {
+	a, ok := e.(*ocsf.Authentication)
+	return a, ok
+}
+
+func authUserName(e ocsf.Event) []string {
+	a, ok := authOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(a.User.Name)
+}
+
+func authService(e ocsf.Event) []string {
+	a, ok := authOf(e)
+	if !ok || a.Service == nil {
+		return nil
+	}
+	return nonEmpty(a.Service.Name)
+}
+
+func authEventCode(e ocsf.Event) []string {
+	a, ok := authOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(a.Metadata.EventCode)
+}
+
+func authStatusStr(e ocsf.Event) []string {
+	a, ok := authOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(a.Status)
+}
+
+func authStatusCode(e ocsf.Event) []string {
+	a, ok := authOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(a.StatusCode)
+}
+
+func authStatusDetail(e ocsf.Event) []string {
+	a, ok := authOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(a.StatusDetail)
+}
+
+func authSrcIP(e ocsf.Event) []string {
+	a, ok := authOf(e)
+	if !ok || a.SrcEndpoint == nil {
+		return nil
+	}
+	return nonEmpty(a.SrcEndpoint.IP)
+}
+
+func authSrcHost(e ocsf.Event) []string {
+	a, ok := authOf(e)
+	if !ok || a.SrcEndpoint == nil {
+		return nil
+	}
+	return nonEmpty(a.SrcEndpoint.Hostname)
+}
+
+func authRemoteHost(e ocsf.Event) []string {
+	a, ok := authOf(e)
+	if !ok || a.SrcEndpoint == nil {
+		return nil
+	}
+	if a.SrcEndpoint.IP != "" {
+		return []string{a.SrcEndpoint.IP}
+	}
+	return nonEmpty(a.SrcEndpoint.Hostname)
+}
+
+func authLogonType(e ocsf.Event) []string {
+	a, ok := authOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(a.LogonType)
+}
+
+func authTTY(e ocsf.Event) []string {
+	a, ok := authOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(a.TTY)
 }

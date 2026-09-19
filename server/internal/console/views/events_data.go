@@ -76,6 +76,8 @@ func classLabel(uid uint32) string {
 		return "process"
 	case 2004:
 		return "detection"
+	case 3002:
+		return "auth"
 	case 4001:
 		return "network"
 	}

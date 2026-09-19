@@ -329,7 +329,7 @@ Data flow: `collector → enricher → ruleengine → output` as an in-process c
 
 ### 3.2 eBPF programs
 
-Three C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs are CO-RE (BPF type format) compatible via `vmlinux.h` embedded in the build. Sources live in a `src/` subdirectory (not the package root) so the Go toolchain doesn't reject `.c` files in a non-cgo package — `gen.go` references them as `src/*.bpf.c -I./src/headers`, and bpf2go writes the generated Go + `.o` back into the package root.
+Four C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs are CO-RE (BPF type format) compatible via `vmlinux.h` embedded in the build. Sources live in a `src/` subdirectory (not the package root) so the Go toolchain doesn't reject `.c` files in a non-cgo package — `gen.go` references them as `src/*.bpf.c -I./src/headers`, and bpf2go writes the generated Go + `.o` back into the package root.
 
 **`process.bpf.c`** — process lifecycle.
 - Hooks: `tracepoint/sched/sched_process_exec`, `tracepoint/sched/sched_process_exit`, `tracepoint/sched/sched_process_fork`.
@@ -347,6 +347,13 @@ Three C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs 
 - Emits: pid, saddr, sport, daddr, dport, proto, direction.
 - DNS not included in Phase 1 — deferred to Phase 3 (requires parsing DNS payload or hooking `getaddrinfo`).
 
+**`auth.bpf.c`** — authentication events (added 2026-09-19, Phase 7 §9; PROJECT.md §3.1 "authentication events" line item).
+- Hooks: uprobes on the host's `libpam.so.0` public API — `pam_start` / `pam_start_confdir` (entry), `pam_set_item` (entry, PAM_USER / PAM_TTY / PAM_RHOST only), `pam_end` (entry); uretprobes on `pam_authenticate`, `pam_open_session`, `pam_close_session`. Never libpam internals: `pam_handle_t` is opaque and its layout changes between releases.
+- Emits: kind (auth_attempt / session_open / session_close), tgid, real uid, raw PAM result, service, user, rhost, tty, comm. Per-transaction context lives in a tgid-keyed hash map between `pam_start` and `pam_end`; a uretprobe cannot read the call's arguments, and no mainstream PAM client runs concurrent transactions in one process.
+- One probe set covers sshd, sudo, su, login, getty and display managers, with no per-daemon log parsing and no auth.log-vs-journald dependence. `PAM_AUTHTOK` is never read, so the password cannot reach the event stream by construction.
+- Not seen, by design: rejected SSH public keys (sshd enters libpam only after a key or password is accepted), a libpam inside a container image (a uprobe binds to one inode), statically linked authenticators.
+- 1 MB ringbuf — auth events are rare. Classified high-priority by the backpressure shedder (never dropped ahead of process events).
+
 **Portability.**
 - Target kernel floor: **5.15** (Ubuntu 22.04 LTS / RHEL 10). Raised from 5.10 on 2026-04-22 after RHEL 9's 5.14 verifier rejected our per-syscall tracepoint programs with `max_ctx_offset`/`PTR_TO_CTX` checks that 5.15+ handles cleanly. RHEL 9 support is deferred; users should deploy on RHEL 10 (6.12) instead.
 - Tracepoints preferred over kprobes where available (ABI-stable). Kprobes are used for net hooks because the tracepoints there don't carry the data we need.
@@ -358,7 +365,7 @@ Three C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs 
 - Uses `cilium/ebpf` to load compiled programs from embedded bytecode.
 - On load failure, emits a diagnostic log with kernel version, kernel features probed, and exits with nonzero. No fallback to audit or other primitives in Phase 1.
 - Opens ringbuffers with `ringbuf.NewReader()`; each program has its own reader goroutine.
-- Decodes raw binary events into typed Go structs (`RawProcessEvent`, `RawFileEvent`, `RawNetEvent`). These are internal types, not OCSF — OCSF conversion happens in the enricher.
+- Decodes raw binary events into typed Go structs (`RawProcessEvent`, `RawFileEvent`, `RawNetEvent`, `RawAuthEvent`). These are internal types, not OCSF — OCSF conversion happens in the enricher.
 
 ### 3.4 Enricher
 
@@ -373,7 +380,7 @@ Ingests raw events, produces OCSF events.
 ### 3.5 Edge rule engine (stateless)
 
 - Rules are YAML files; Phase 1 supports a **strict subset of Sigma**:
-  - `logsource` restricted to `product: linux` + a `category` we recognize (`process_creation`, `file_event`, `network_connection`).
+  - `logsource` restricted to `product: linux` + a `category` we recognize (`process_creation`, `file_event`, `network_connection`, `authentication` — the last also accepted as `service: auth` with no category, the spelling public Sigma packs use).
   - `detection` restricted to named selections and a final `condition` that is a boolean combination of selections. No `count()`, no `timeframe`, no `near`, no aggregation.
   - Supported field operators: `equals`, `contains`, `startswith`, `endswith`, `regex`, and list forms.
 - Compiler lives in `pkg/ruleast/` with a `CompileSigma([]byte) (Rule, error)` entrypoint. Compilation is ahead-of-time at agent startup; hot reload deferred.
@@ -412,6 +419,9 @@ collectors:
       - /sys/**
   net:
     enabled: true
+  auth:
+    enabled: true
+    # libpam_path: /usr/lib/x86_64-linux-gnu/libpam.so.0   # only for unusual layouts
 rules:
   paths:
     - /etc/slither/rules/*.yml
@@ -2137,6 +2147,68 @@ measure UX across distros — PCR 7 semantics differ subtly between
 Secure Boot implementations).
 
 ## 9. Phase 7 — Platform Expansion (bullet, demand-driven)
+
+- ✅ **Authentication telemetry via libpam uprobes (2026-09-19).**
+  Closes the first of the PROJECT.md §3.1 line items that Phase 1
+  deferred "to Phase 3 or 5" and nobody picked up: successful/failed
+  logins, sudo, su, ssh session open/close.
+
+  **Source choice.** Every interactive authentication path on a stock
+  Linux host goes through libpam's public API, and libpam is one shared
+  object with a stable exported symbol set (`LIBPAM_1.0`). Hooking that
+  API with uprobes gives one collector for sshd, sudo, su, login, getty
+  and display managers, with no per-daemon log parsing and no
+  dependence on which of auth.log / secure / journald a distro uses.
+  Only public entry points are probed (`pam_start`, `pam_start_confdir`,
+  `pam_set_item`, `pam_end` on entry; `pam_authenticate`,
+  `pam_open_session`, `pam_close_session` on return) — `pam_handle_t` is
+  opaque and its layout moves between releases. Context is keyed by
+  tgid because a uretprobe cannot read its call's arguments; no
+  mainstream PAM client runs concurrent transactions in one process.
+  `PAM_AUTHTOK` is never read, so the password cannot reach the event
+  stream by construction (recorded in the threat model, Surface 4).
+
+  **Known blind spots, by design and documented in `docs/install.md`:**
+  a rejected SSH public key never enters libpam (sshd only calls PAM
+  after a key or password is accepted), so key-guessing is a
+  network-layer signal; a libpam inside a container image is not
+  covered (a uprobe binds to one inode); statically linked
+  authenticators are out of scope.
+
+  **Landed:** `auth.bpf.c` (+ hash-map helper declarations in
+  `bpf_helpers.h`); `RawAuthEvent`; the Linux `authCollector` with
+  libpam discovery across multiarch / lib64 layouts and a
+  `collectors.auth.libpam_path` override; `collectors.auth` config +
+  `SLITHER_COLLECTORS_AUTH_ENABLED`; the enricher's
+  `Authentication` (3002) builder with OCSF `status_code` /
+  `status_detail` carrying the raw PAM code and its symbolic name, a
+  `service` object, `logon_type_id`, and `x_tty`; the
+  `authentication` Sigma category (also accepted as `service: auth`
+  with no category, the spelling public packs use) with a field table
+  where `User`/`TargetUserName` is the authenticated account and
+  `SubjectUserName` the daemon's user; ClickHouse migration 00007
+  (`ocsf_authentication_3002`, flat hunt columns, 30-day TTL); writer,
+  search summary, lookup projection, flow-graph node and console class
+  label; three edge-eligible rules (pack 67 → 70): `auth-ssh-root-login`,
+  `auth-ssh-password-bruteforce` (>5 sshd failures per RemoteHost / 60 s)
+  and `auth-sudo-failure-burst` (>3 sudo failures per User / 120 s).
+  Auth events are high-priority in the backpressure shedder — never
+  dropped ahead of process events.
+
+  **Tests:** 31 new unit tests across collector decode, libpam
+  resolution, enricher mapping (status / logon type / endpoint /
+  cache-miss identity), Sigma logsource + field bindings, and all three
+  shipped rules against the fake clock; a ClickHouse round-trip
+  integration test that pins `authRow.bind` column order against the
+  migration (verified locally against Docker); and a privileged
+  integration test that drives a real `su` PAM transaction under the
+  probes — not runnable on the dev box (no passwordless root), CI's
+  privileged job is its first run.
+
+  **Build note:** the dev box has clang-17/20/21 as versioned binaries
+  only; `make gen-bpf` was run through a PATH shim (`clang` →
+  `/usr/lib/llvm-17/bin/clang`). All four `.o` files regenerated under
+  one compiler; `verify-gen` ignores `.o` bytes by design.
 
 - ✅ **CI: main green again — stale pg integration tests (2026-09-19).**
   Every CI run on `main` had failed since 2026-04-26. The lint-job

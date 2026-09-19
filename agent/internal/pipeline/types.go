@@ -91,3 +91,45 @@ const (
 	NetTCPAccept
 	NetUDPSend
 )
+
+// RawAuthEvent is the decoded form of an auth.bpf.c ringbuffer record: one
+// libpam API result (pam_authenticate / pam_open_session /
+// pam_close_session) plus the transaction context accumulated between
+// pam_start and pam_end.
+type RawAuthEvent struct {
+	Kind RawAuthKind
+	// PID is the tgid of the PAM client — sshd's per-connection monitor,
+	// sudo, su, login — which is also the enricher's process-cache key.
+	PID uint32
+	// UID is the real uid of that client. For a setuid client such as
+	// sudo that is the invoking user, not root.
+	UID uint32
+	// Result is the raw PAM return code; 0 is PAM_SUCCESS.
+	Result int32
+	// Service is the PAM service name passed to pam_start ("sshd",
+	// "sudo", "su", "login", ...).
+	Service string
+	// User is the account being authenticated (PAM_USER).
+	User string
+	// RemoteHost is PAM_RHOST as the client set it — an IP for sshd,
+	// sometimes a hostname, empty for local clients.
+	RemoteHost string
+	// TTY is PAM_TTY; empty when the client never set it.
+	TTY       string
+	Comm      string
+	Timestamp time.Time
+}
+
+// RawAuthKind distinguishes which libpam call produced the event.
+type RawAuthKind uint8
+
+const (
+	AuthUnknown RawAuthKind = iota
+	// AuthAttempt is a pam_authenticate return: a credential check.
+	AuthAttempt
+	// AuthSessionOpen is a pam_open_session return: a login or a
+	// privilege use (sudo/su) after the credential and account checks.
+	AuthSessionOpen
+	// AuthSessionClose is a pam_close_session return.
+	AuthSessionClose
+)

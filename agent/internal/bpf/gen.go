@@ -13,3 +13,4 @@ package bpf
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -target bpfel -type process_event -go-package bpf -output-dir . -output-stem process Process src/process.bpf.c -- -I./src/headers -Wall -O2 -g
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -target bpfel -type file_event -go-package bpf -output-dir . -output-stem file File src/file.bpf.c -- -I./src/headers -Wall -O2 -g
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -target bpfel -type net_event -go-package bpf -output-dir . -output-stem net Net src/net.bpf.c -- -I./src/headers -Wall -O2 -g
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -target bpfel -type auth_event -go-package bpf -output-dir . -output-stem auth Auth src/auth.bpf.c -- -I./src/headers -Wall -O2 -g

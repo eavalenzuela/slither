@@ -275,6 +275,7 @@ func (e *enricher) Run(ctx context.Context) error {
 	// procIn is handled by the dedicated goroutine above.
 	var fileIn <-chan pipeline.RawFileEvent = e.cg.File
 	var netIn <-chan pipeline.RawNetEvent = e.cg.Net
+	var authIn <-chan pipeline.RawAuthEvent = e.cg.Auth
 
 	for {
 		select {
@@ -298,6 +299,12 @@ func (e *enricher) Run(ctx context.Context) error {
 				continue
 			}
 			e.handleNet(ctx, raw)
+		case raw, ok := <-authIn:
+			if !ok {
+				authIn = nil
+				continue
+			}
+			e.handleAuth(ctx, raw)
 		}
 	}
 }

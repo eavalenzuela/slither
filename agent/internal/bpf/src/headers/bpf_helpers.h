@@ -69,6 +69,10 @@ static __u64 (*bpf_get_current_task)(void)                                      
 static long  (*bpf_probe_read_user_str)(void *dst, __u32 size, const void *src)  = (void *)114;
 static long  (*bpf_probe_read_kernel_str)(void *dst, __u32 size, const void *src)= (void *)115;
 static long  (*bpf_probe_read_kernel)(void *dst, __u32 size, const void *src)    = (void *)113;
+static void *(*bpf_map_lookup_elem)(void *map, const void *key)                  = (void *)1;
+static long  (*bpf_map_update_elem)(void *map, const void *key, const void *value,
+                                    __u64 flags)                                 = (void *)2;
+static long  (*bpf_map_delete_elem)(void *map, const void *key)                  = (void *)3;
 
 /* -----------------------------------------------------------------------
  * CO-RE — compile-once run-everywhere helpers.

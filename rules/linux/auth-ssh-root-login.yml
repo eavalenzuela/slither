@@ -1,0 +1,31 @@
+title: Interactive SSH session opened as root
+id: 8b7c4d00-0001-4000-8000-00000000004f
+status: experimental
+description: |
+  sshd opened a PAM session for the root account. Direct root logins
+  over SSH bypass the per-person accountability that sudo provides and
+  are the first thing a credential-stuffing or key-theft attacker tries
+  (T1078.003, T1021.004). Most hardening baselines set
+  `PermitRootLogin no`; on a host where that is intentional, this rule
+  is the audit trail for the exception.
+
+  Keyed on the session open rather than the credential check because
+  public-key logins never call pam_authenticate — sshd only enters
+  libpam once the key is accepted — so pam_open_session is the one
+  event every successful SSH login produces.
+level: medium
+tags:
+  - attack.initial_access
+  - attack.lateral_movement
+  - attack.t1078.003
+  - attack.t1021.004
+logsource:
+  product: linux
+  category: authentication
+detection:
+  selection:
+    Service: sshd
+    EventCode: session_open
+    Status: Success
+    User: root
+  condition: selection

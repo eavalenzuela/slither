@@ -140,7 +140,7 @@ func (b *FlowGraphBuilder) actorFor(ctx context.Context, n ch.EventNode, lookbac
 	switch n.ClassUID {
 	case 1007:
 		pid = n.ParentPID
-	case 1001, 4001:
+	case 1001, 4001, 3002:
 		pid = n.ActorPID
 	default:
 		return ch.EventNode{}, false, nil
@@ -275,6 +275,20 @@ func nodeLabelShape(n ch.EventNode) (label, shape string) {
 		label = fmt.Sprintf("net %s\\n%s:%d -> %s:%d",
 			n.Protocol, n.SrcIP, n.SrcPort, n.DstIP, n.DstPort)
 		shape = "cylinder"
+	case 3002:
+		from := n.SrcIP
+		if from == "" {
+			from = n.SrcHost
+		}
+		outcome := "ok"
+		if n.StatusID != 1 {
+			outcome = "FAIL"
+		}
+		label = fmt.Sprintf("auth %s %s\\nuser=%s %s", n.Service, n.EventCode, n.UserName, outcome)
+		if from != "" {
+			label = fmt.Sprintf("auth %s %s\\nuser=%s from=%s %s", n.Service, n.EventCode, n.UserName, from, outcome)
+		}
+		shape = "hexagon"
 	case 2004:
 		label = fmt.Sprintf("alert\\n%s", n.RuleUID)
 		if n.RuleName != "" {

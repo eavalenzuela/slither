@@ -346,8 +346,19 @@ func checkLogSource(ls logSourceYAML) (Category, error) {
 		return CategoryFileEvent, nil
 	case string(CategoryNetworkConnection):
 		return CategoryNetworkConnection, nil
+	case string(CategoryAuthentication):
+		return CategoryAuthentication, nil
+	case "":
+		// Sigma's own Linux auth rules carry no category and select the
+		// source with `service:` instead. Honour the spellings public
+		// packs use so those rules compile unchanged; the rule still
+		// narrows to one daemon with a `Service:` selection.
+		switch strings.ToLower(ls.Service) {
+		case "auth", "pam", "sshd", "sudo", "su", "login":
+			return CategoryAuthentication, nil
+		}
 	}
-	return "", fmt.Errorf("logsource.category = %q; accepted: process_creation, file_event, network_connection", ls.Category)
+	return "", fmt.Errorf("logsource.category = %q; accepted: process_creation, file_event, network_connection, authentication (or service: auth)", ls.Category)
 }
 
 func normaliseLevel(s string) Level {

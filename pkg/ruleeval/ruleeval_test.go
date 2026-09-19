@@ -13,6 +13,7 @@ func TestCategoryToClassCoversPhase1(t *testing.T) {
 		ruleast.CategoryProcessCreation:   ocsf.ClassProcessActivity,
 		ruleast.CategoryFileEvent:         ocsf.ClassFileSystemActivity,
 		ruleast.CategoryNetworkConnection: ocsf.ClassNetworkActivity,
+		ruleast.CategoryAuthentication:    ocsf.ClassAuthentication,
 	}
 	for cat, want := range cases {
 		got, ok := CategoryToClass(cat)
@@ -91,5 +92,77 @@ func TestEnvLookupRenameDestinationOnFileEvent(t *testing.T) {
 	}
 	if _, ok := EnvFor(noRename, AccessorFor(ruleast.CategoryFileEvent)).Lookup("RenameTo"); ok {
 		t.Errorf("RenameTo on a non-rename event should miss")
+	}
+}
+
+func authFixture() *ocsf.Authentication {
+	return &ocsf.Authentication{
+		Metadata:     ocsf.Metadata{EventCode: "auth_attempt"},
+		ClassUID:     ocsf.ClassAuthentication,
+		ActivityID:   ocsf.AuthActivityLogon,
+		Time:         1,
+		User:         ocsf.User{Name: "alice"},
+		Status:       "Failure",
+		StatusID:     2,
+		StatusCode:   "7",
+		StatusDetail: "PAM_AUTH_ERR",
+		LogonType:    "Remote Interactive",
+		Service:      &ocsf.Service{Name: "sshd"},
+		SrcEndpoint:  &ocsf.NetEndpoint{IP: "203.0.113.9"},
+		TTY:          "ssh",
+		Actor: ocsf.Actor{
+			Process: ocsf.Process{PID: 900, Name: "sshd", Cmdline: "sshd: alice [priv]", File: &ocsf.File{Path: "/usr/sbin/sshd"}},
+			User:    ocsf.User{Name: "root"},
+		},
+	}
+}
+
+// TestEnvLookupOnAuthentication pins the asymmetry that matters for auth
+// rules: `User` is the account being authenticated, the actor daemon's
+// user is `SubjectUserName`, and the PAM result is reachable three ways.
+func TestEnvLookupOnAuthentication(t *testing.T) {
+	env := EnvFor(authFixture(), AccessorFor(ruleast.CategoryAuthentication))
+	want := map[string]string{
+		"User":            "alice",
+		"TargetUserName":  "alice",
+		"SubjectUserName": "root",
+		"Service":         "sshd",
+		"EventCode":       "auth_attempt",
+		"Status":          "Failure",
+		"StatusCode":      "7",
+		"StatusDetail":    "PAM_AUTH_ERR",
+		"SourceIp":        "203.0.113.9",
+		"RemoteHost":      "203.0.113.9",
+		"LogonType":       "Remote Interactive",
+		"Tty":             "ssh",
+		"Image":           "/usr/sbin/sshd",
+		"CommandLine":     "sshd: alice [priv]",
+		"ProcessId":       "900",
+	}
+	for field, w := range want {
+		got, ok := env.Lookup(field)
+		if !ok || len(got) != 1 || got[0] != w {
+			t.Errorf("Lookup(%q) = %v, %v; want [%q]", field, got, ok, w)
+		}
+	}
+	if _, ok := env.Lookup("SourceHostname"); ok {
+		t.Error("SourceHostname must be absent when rhost was an IP")
+	}
+}
+
+func TestEnvLookupAuthRemoteHostFallsBackToHostname(t *testing.T) {
+	ev := authFixture()
+	ev.SrcEndpoint = &ocsf.NetEndpoint{Hostname: "bastion"}
+	env := EnvFor(ev, AccessorFor(ruleast.CategoryAuthentication))
+	if got, ok := env.Lookup("RemoteHost"); !ok || got[0] != "bastion" {
+		t.Errorf("RemoteHost = %v, %v", got, ok)
+	}
+	if _, ok := env.Lookup("SourceIp"); ok {
+		t.Error("SourceIp must be absent when rhost was a name")
+	}
+	ev.SrcEndpoint = nil
+	env = EnvFor(ev, AccessorFor(ruleast.CategoryAuthentication))
+	if _, ok := env.Lookup("RemoteHost"); ok {
+		t.Error("RemoteHost must be absent for a local client")
 	}
 }

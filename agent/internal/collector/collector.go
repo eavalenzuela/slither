@@ -1,7 +1,7 @@
 // Package collector turns a platform's kernel telemetry into typed
 // raw-event channels consumed by the enricher.
 //
-// Each collector (process, file, net) owns its reader goroutine and its
+// Each collector (process, file, net, auth) owns its reader goroutine and its
 // output channel. The aggregate is wired by Group. The Group orchestrator
 // and the Collector interface are platform-neutral; the per-collector
 // constructors are platform-specific — eBPF on Linux (ADR-0010), Endpoint
@@ -29,18 +29,20 @@ type Collector interface {
 	Run(ctx context.Context) error
 }
 
-// Group wires the three Phase 1 collectors and exposes one channel per raw
-// event family. Construction does not touch the kernel; Run does.
+// Group wires the collectors and exposes one channel per raw event family.
+// Construction does not touch the kernel; Run does.
 type Group struct {
 	Process chan pipeline.RawProcessEvent
 	File    chan pipeline.RawFileEvent
 	Net     chan pipeline.RawNetEvent
+	Auth    chan pipeline.RawAuthEvent
 
-	cfg       config.Collectors
-	telem     *telemetry.Counters
-	processor Collector
-	filer     Collector
-	networker Collector
+	cfg           config.Collectors
+	telem         *telemetry.Counters
+	processor     Collector
+	filer         Collector
+	networker     Collector
+	authenticator Collector
 }
 
 // NewGroup constructs collectors honouring the enable flags in cfg. The
@@ -50,8 +52,11 @@ func NewGroup(cfg config.Collectors, telem *telemetry.Counters) *Group {
 		Process: make(chan pipeline.RawProcessEvent, 65536),
 		File:    make(chan pipeline.RawFileEvent, 16384),
 		Net:     make(chan pipeline.RawNetEvent, 16384),
-		cfg:     cfg,
-		telem:   telem,
+		// Auth events are rare (tens per minute on a busy bastion); the
+		// buffer only has to absorb a brute-force burst.
+		Auth:  make(chan pipeline.RawAuthEvent, 4096),
+		cfg:   cfg,
+		telem: telem,
 	}
 	if cfg.Process.Enabled {
 		g.processor = newProcessCollector(g.Process, telem)
@@ -62,15 +67,18 @@ func NewGroup(cfg config.Collectors, telem *telemetry.Counters) *Group {
 	if cfg.Net.Enabled {
 		g.networker = newNetCollector(g.Net, telem)
 	}
+	if cfg.Auth.Enabled {
+		g.authenticator = newAuthCollector(g.Auth, cfg.Auth, telem)
+	}
 	return g
 }
 
 // Run starts every enabled collector and returns when ctx is cancelled or
 // any collector returns an error.
 func (g *Group) Run(ctx context.Context) error {
-	errCh := make(chan error, 3)
+	errCh := make(chan error, 4)
 	started := 0
-	for _, c := range []Collector{g.processor, g.filer, g.networker} {
+	for _, c := range []Collector{g.processor, g.filer, g.networker, g.authenticator} {
 		if c == nil {
 			continue
 		}

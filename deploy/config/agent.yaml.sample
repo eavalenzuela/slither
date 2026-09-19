@@ -48,6 +48,20 @@ collectors:
       - /sys/**
   net:
     enabled: true
+  # Authentication: uprobes on the host's libpam.so.0, so every PAM
+  # client — sshd, sudo, su, login, getty, display managers — reports
+  # credential checks and session open/close as OCSF Authentication
+  # (3002) events. No log parsing, no dependence on auth.log vs
+  # journald. Feeds rules/linux/auth-*.yml (SSH root login, SSH
+  # password brute force, sudo failure burst).
+  #
+  # Not seen: rejected SSH public keys (sshd never enters PAM for
+  # those) and a libpam inside a container image (a uprobe binds to
+  # one inode). Leave libpam_path empty to probe the standard
+  # multiarch / lib64 locations; set it only on an unusual layout.
+  auth:
+    enabled: true
+    # libpam_path: /usr/lib/x86_64-linux-gnu/libpam.so.0
 
 rules:
   paths:

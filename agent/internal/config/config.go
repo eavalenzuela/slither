@@ -96,6 +96,7 @@ type Collectors struct {
 	Process ProcessCollector `yaml:"process"`
 	File    FileCollector    `yaml:"file"`
 	Net     NetCollector     `yaml:"net"`
+	Auth    AuthCollector    `yaml:"auth"`
 }
 
 // ProcessCollector configures the process lifecycle collector.
@@ -129,6 +130,19 @@ type FileCollector struct {
 // NetCollector configures the network-event collector.
 type NetCollector struct {
 	Enabled bool `yaml:"enabled"`
+}
+
+// AuthCollector configures the authentication collector. It attaches
+// uprobes to the host's libpam.so.0 so every PAM client — sshd, sudo,
+// su, login, getty, display managers — reports credential checks and
+// session open/close as OCSF Authentication (3002) events.
+type AuthCollector struct {
+	Enabled bool `yaml:"enabled"`
+	// LibpamPath overrides libpam.so.0 discovery. Empty probes the
+	// standard multiarch and lib64 locations in order; set it on a
+	// distro with an unusual library layout. A libpam inside a container
+	// image is never covered — a uprobe binds to one inode.
+	LibpamPath string `yaml:"libpam_path"`
 }
 
 // Rules configures rule loading.
@@ -299,7 +313,7 @@ func (c *Config) Validate() error {
 			g.BufferSize = 4096
 		}
 	}
-	if !c.Collectors.Process.Enabled && !c.Collectors.File.Enabled && !c.Collectors.Net.Enabled {
+	if !c.Collectors.Process.Enabled && !c.Collectors.File.Enabled && !c.Collectors.Net.Enabled && !c.Collectors.Auth.Enabled {
 		return fmt.Errorf("%w: no collectors enabled", ErrInvalidConfig)
 	}
 	for i, p := range c.Rules.Paths {
@@ -390,6 +404,11 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("SLITHER_COLLECTORS_NET_ENABLED"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			c.Collectors.Net.Enabled = b
+		}
+	}
+	if v := os.Getenv("SLITHER_COLLECTORS_AUTH_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			c.Collectors.Auth.Enabled = b
 		}
 	}
 	if v := os.Getenv("SLITHER_RULES_PATHS"); v != "" {

@@ -357,6 +357,61 @@ matches. It does not error, and no other shipped rule depends on it.
 
 Requires a restart — this is not in the SIGHUP hot-reload scope.
 
+### Authentication telemetry (`collectors.auth`)
+
+On by default in the sample config. The agent attaches uprobes to the
+host's `libpam.so.0`, so every PAM client — sshd, sudo, su, login,
+getty, display managers — reports credential checks and session
+open/close as OCSF Authentication (3002) events. There is no log
+parsing: it does not matter whether the distro writes `auth.log`,
+`/var/log/secure`, or journald only.
+
+```yaml
+collectors:
+  auth:
+    enabled: true
+    # libpam_path: /usr/lib/x86_64-linux-gnu/libpam.so.0
+```
+
+**What is captured.** Per libpam call: the PAM service name (`sshd`,
+`sudo`, `su`, `login`, ...), the account being authenticated
+(`PAM_USER`), the remote host as the client set it (`PAM_RHOST` — an IP
+for sshd), the tty, the raw PAM result code with its symbolic name
+(`PAM_AUTH_ERR`, `PAM_USER_UNKNOWN`, `PAM_MAXTRIES`, ...), and the
+client process as the actor. Three event codes: `auth_attempt`
+(`pam_authenticate` returned), `session_open`, `session_close`. The
+password (`PAM_AUTHTOK`) is never read.
+
+**What is not seen.** A rejected SSH public key — sshd only enters
+libpam after a key or password is accepted, so key-guessing is
+invisible here and is a network-layer signal instead. Password and
+keyboard-interactive failures are seen. A libpam inside a container
+image is not covered (a uprobe binds to one inode). Everything in a
+non-PAM or statically linked authenticator is out of scope.
+
+**`libpam_path`.** Leave it empty. Discovery probes the Debian/Ubuntu
+multiarch paths, then `lib64`, then the unqualified fallbacks. Set it
+only if the agent logs `libpam.so.0 not found`, which means the distro
+puts it somewhere unusual; the path must exist or startup fails.
+
+**Sigma fields** (`logsource: {product: linux, category: authentication}`,
+or `service: auth` with no category): `User` / `TargetUserName` is the
+account being authenticated — note this differs from the other
+categories, where `User` is the actor — `SubjectUserName` is the daemon's
+user, `Service`, `EventCode`, `Status` (`Success`/`Failure`),
+`StatusCode` (PAM code), `StatusDetail` (PAM name), `SourceIp`,
+`SourceHostname`, `RemoteHost` (whichever of the two was set),
+`LogonType`, `Tty`, plus `Image` / `CommandLine` / `ProcessId` for the
+client process.
+
+**Shipped rules.** `auth-ssh-root-login` (sshd session opened as root),
+`auth-ssh-password-bruteforce` (>5 sshd failures from one host in 60 s,
+stateful and edge-eligible) and `auth-sudo-failure-burst` (>3 sudo
+failures for one account in 120 s). All three are inert with the
+collector off.
+
+Requires a restart — this is not in the SIGHUP hot-reload scope.
+
 ### Environment variable overrides
 
 The config loader honours a small set of `SLITHER_*` env vars as
@@ -370,6 +425,7 @@ late-binding overrides (see `agent/internal/config/config.go`):
 | `SLITHER_COLLECTORS_PROCESS_ENABLED` | `collectors.process.enabled`       |
 | `SLITHER_COLLECTORS_FILE_ENABLED`    | `collectors.file.enabled`          |
 | `SLITHER_COLLECTORS_NET_ENABLED`     | `collectors.net.enabled`           |
+| `SLITHER_COLLECTORS_AUTH_ENABLED`    | `collectors.auth.enabled`          |
 | `SLITHER_RULES_PATHS`                | `rules.paths` (comma-separated)    |
 
 Set them in a systemd drop-in (`/etc/systemd/system/slither-agent.service.d/override.conf`):
