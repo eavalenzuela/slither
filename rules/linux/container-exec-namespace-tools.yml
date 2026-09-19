@@ -1,0 +1,30 @@
+title: Namespace or mount manipulation tool executed inside a container
+id: 8b7c4d00-0001-4000-8000-000000000058
+status: experimental
+description: |
+  nsenter, unshare, mount, umount, pivot_root or chroot ran inside a
+  container. Inside a properly confined container these fail or do
+  nothing useful; inside a privileged one they are the escape toolkit
+  (T1611): mount the host disk, enter PID 1's namespaces, pivot into the
+  host root. Container entrypoints and init systems occasionally mount
+  tmpfs or proc at start-up — expect a small baseline from those and
+  tune by Image / ParentImage where it recurs.
+level: medium
+tags:
+  - attack.privilege_escalation
+  - attack.t1611
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  in_container:
+    ContainerId|exists: true
+  ns_tool:
+    Image|endswith:
+      - /nsenter
+      - /unshare
+      - /mount
+      - /umount
+      - /pivot_root
+      - /chroot
+  condition: in_container and ns_tool

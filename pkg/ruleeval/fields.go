@@ -27,6 +27,8 @@ func CategoryToClass(c ruleast.Category) (ocsf.ClassID, bool) {
 		return ocsf.ClassAuthentication, true
 	case ruleast.CategoryDriverLoad:
 		return ocsf.ClassKernelActivity, true
+	case ruleast.CategoryContainerLifecycle:
+		return ocsf.ClassContainerLifecycle, true
 	}
 	return 0, false
 }
@@ -44,6 +46,8 @@ func AccessorFor(c ruleast.Category) Accessor {
 		return authAccessor
 	case ruleast.CategoryDriverLoad:
 		return kernelAccessor
+	case ruleast.CategoryContainerLifecycle:
+		return containerAccessor
 	}
 	return nil
 }
@@ -71,6 +75,10 @@ var processAccessor = Accessor{
 	// collectors.process.capture_env.
 	"EnvVars": func(e ocsf.Event) []string { return procOf(e).EnvVars },
 	"Env":     func(e ocsf.Event) []string { return procOf(e).EnvVars },
+	// ContainerId is the container the process runs in (x_container_id),
+	// resolved from its cgroup; absent on the host. `ContainerId|exists:
+	// true` is the "inside any container" predicate.
+	"ContainerId": func(e ocsf.Event) []string { return nonEmpty(procOf(e).ContainerID) },
 }
 
 // fileAccessor maps Sigma file_event fields onto ocsf.FileSystemActivity.
@@ -91,8 +99,9 @@ var fileAccessor = Accessor{
 	// rules can both partition (`count() by ProcessId`) and name a kill
 	// target (`slither.response.target_field: ProcessId`). Mirrors the
 	// process_creation accessor's ProcessId/PID pair.
-	"ProcessId": func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
-	"PID":       func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
+	"ProcessId":   func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
+	"PID":         func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
+	"ContainerId": actorContainerID,
 }
 
 // netAccessor maps Sigma network_connection fields onto ocsf.NetworkActivity.
@@ -105,6 +114,7 @@ var netAccessor = Accessor{
 	"Image":           func(e ocsf.Event) []string { return procExePath(actorProcess(e)) },
 	"CommandLine":     func(e ocsf.Event) []string { return nonEmpty(actorProcess(e).Cmdline) },
 	"User":            actorUserName,
+	"ContainerId":     actorContainerID,
 }
 
 // authAccessor maps Sigma authentication fields onto ocsf.Authentication.
@@ -137,6 +147,7 @@ var authAccessor = Accessor{
 	"CommandLine": func(e ocsf.Event) []string { return nonEmpty(actorProcess(e).Cmdline) },
 	"ProcessId":   func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
 	"PID":         func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
+	"ContainerId": actorContainerID,
 }
 
 // kernelAccessor maps Sigma driver_load fields onto ocsf.KernelActivity.
@@ -160,6 +171,22 @@ var kernelAccessor = Accessor{
 	// so `Taints: unsigned_module` is a membership test.
 	"Taints":      kernelTaints,
 	"ProgType":    kernelProgType,
+	"Image":       func(e ocsf.Event) []string { return procExePath(actorProcess(e)) },
+	"CommandLine": func(e ocsf.Event) []string { return nonEmpty(actorProcess(e).Cmdline) },
+	"User":        actorUserName,
+	"ProcessId":   func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
+	"PID":         func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
+	"ContainerId": actorContainerID,
+}
+
+// containerAccessor maps Sigma container_lifecycle fields onto
+// ocsf.ContainerLifecycle.
+var containerAccessor = Accessor{
+	"ContainerId": containerID,
+	"Runtime":     containerRuntime,
+	"EventCode":   containerEventCode,
+	"EventType":   containerEventCode,
+	"CgroupPath":  containerCgroupPath,
 	"Image":       func(e ocsf.Event) []string { return procExePath(actorProcess(e)) },
 	"CommandLine": func(e ocsf.Event) []string { return nonEmpty(actorProcess(e).Cmdline) },
 	"User":        actorUserName,
@@ -224,6 +251,8 @@ func actorProcess(e ocsf.Event) ocsf.Process {
 		return v.Actor.Process
 	case *ocsf.KernelActivity:
 		return v.Actor.Process
+	case *ocsf.ContainerLifecycle:
+		return v.Actor.Process
 	case *ocsf.ProcessActivity:
 		return v.Actor.Process
 	}
@@ -240,6 +269,8 @@ func actorUserName(e ocsf.Event) []string {
 	case *ocsf.Authentication:
 		u = v.Actor.User
 	case *ocsf.KernelActivity:
+		u = v.Actor.User
+	case *ocsf.ContainerLifecycle:
 		u = v.Actor.User
 	case *ocsf.ProcessActivity:
 		u = v.Actor.User
@@ -520,4 +551,49 @@ func kernelProgType(e ocsf.Event) []string {
 		return nil
 	}
 	return nonEmpty(k.Kernel.ProgType)
+}
+
+// --- container lifecycle (6000) accessors + shared container id -------------
+
+// actorContainerID is the container the acting process runs in, for
+// every class that carries an actor process.
+func actorContainerID(e ocsf.Event) []string {
+	return nonEmpty(actorProcess(e).ContainerID)
+}
+
+func containerOf(e ocsf.Event) (*ocsf.ContainerLifecycle, bool) {
+	c, ok := e.(*ocsf.ContainerLifecycle)
+	return c, ok
+}
+
+func containerID(e ocsf.Event) []string {
+	c, ok := containerOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(c.Container.UID)
+}
+
+func containerRuntime(e ocsf.Event) []string {
+	c, ok := containerOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(c.Container.Runtime)
+}
+
+func containerEventCode(e ocsf.Event) []string {
+	c, ok := containerOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(c.Metadata.EventCode)
+}
+
+func containerCgroupPath(e ocsf.Event) []string {
+	c, ok := containerOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(c.Container.CgroupPath)
 }

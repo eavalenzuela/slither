@@ -101,11 +101,12 @@ func buildHashFollowup(orig *ocsf.ProcessActivity, hash string) *ocsf.ProcessAct
 // depth-bounded walk here.
 func processFromEntry(ent procEntry, username string) *ocsf.Process {
 	p := &ocsf.Process{
-		PID:     ent.pid,
-		UID:     strconv.FormatUint(uint64(ent.uid), 10),
-		Name:    ent.comm,
-		Cmdline: ent.cmdline,
-		EnvVars: ent.env,
+		PID:         ent.pid,
+		UID:         strconv.FormatUint(uint64(ent.uid), 10),
+		Name:        ent.comm,
+		Cmdline:     ent.cmdline,
+		EnvVars:     ent.env,
+		ContainerID: ent.container,
 	}
 	if !ent.createdAt.IsZero() {
 		p.CreatedT = ocsf.TimeOCSF(ent.createdAt.UnixMilli())

@@ -467,6 +467,54 @@ complement.
 
 Requires a restart — this is not in the SIGHUP hot-reload scope.
 
+### Container telemetry (`collectors.container`)
+
+On by default in the sample config. Two cgroup tracepoints report
+container create (cgroup made) and stop (cgroup removed) for every
+runtime that names a container's cgroup after its id — docker,
+containerd / CRI, cri-o, podman, LXC, systemd-nspawn — and the first
+exec inside the cgroup reports start. The same machinery stamps the
+container id on every process event via the cgroup id the process BPF
+program records, so process, file, network, authentication and kernel
+rules all get a `ContainerId` field, with no `/proc` reads. OCSF
+Container Lifecycle (6000).
+
+```yaml
+collectors:
+  container:
+    enabled: true
+```
+
+**What is captured.** Container id (the 64-hex id, or the machine name
+for LXC / nspawn), runtime, cgroup path, cgroup id, and the acting
+process: the runtime that made the cgroup (runc, containerd-shim,
+crun, conmon) for create / stop, the entrypoint (or runc init) for
+start. Containers that predate the agent are found by walking
+`/sys/fs/cgroup` at start-up and count as already started.
+
+**Not seen.** Image pulls, container names and image names. Those are
+the runtime's state, not the kernel's; a runtime-API extension is the
+right home for them. Per-process container context needs cgroup v2
+(the default on every supported distro); on a cgroup v1 host the
+lifecycle events still arrive, de-duplicated across controllers, but
+processes are not stamped.
+
+**Sigma.** `ContainerId` on `process_creation`, `file_event`,
+`network_connection`, `authentication` and `driver_load`
+(`ContainerId|exists: true` is the "inside any container" predicate),
+and a `container_lifecycle` category (alias `container_event`) with
+`ContainerId`, `Runtime`, `EventCode` (`container_create` /
+`container_start` / `container_stop`), `CgroupPath` and the actor
+fields.
+
+**Shipped rules.** `container-exec-kmod-tools` (high: insmod / modprobe
+inside a container), `container-exec-namespace-tools` (medium: nsenter
+/ unshare / mount / chroot inside a container) and
+`container-runtime-exec-shell` (low, audit trail: a shell started
+directly under runc / conmon — the shape of `docker exec -it`).
+
+Requires a restart — this is not in the SIGHUP hot-reload scope.
+
 ### Environment variable overrides
 
 The config loader honours a small set of `SLITHER_*` env vars as
@@ -482,6 +530,7 @@ late-binding overrides (see `agent/internal/config/config.go`):
 | `SLITHER_COLLECTORS_NET_ENABLED`     | `collectors.net.enabled`           |
 | `SLITHER_COLLECTORS_AUTH_ENABLED`    | `collectors.auth.enabled`          |
 | `SLITHER_COLLECTORS_KERNEL_ENABLED`  | `collectors.kernel.enabled`        |
+| `SLITHER_COLLECTORS_CONTAINER_ENABLED` | `collectors.container.enabled`   |
 | `SLITHER_RULES_PATHS`                | `rules.paths` (comma-separated)    |
 
 Set them in a systemd drop-in (`/etc/systemd/system/slither-agent.service.d/override.conf`):

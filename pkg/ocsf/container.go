@@ -35,9 +35,15 @@ type Container struct {
 	UID                string   `json:"uid,omitempty"` // container id
 	Name               string   `json:"name,omitempty"`
 	Image              Image    `json:"image"`
-	Runtime            string   `json:"runtime,omitempty"` // docker, containerd, runc
+	Runtime            string   `json:"runtime,omitempty"` // docker, containerd, cri-o, podman, lxc, nspawn
 	Network            string   `json:"network_driver,omitempty"`
 	OrchestratorLabels []string `json:"orchestrator,omitempty"`
+	// CgroupPath is the container's cgroup, relative to the hierarchy
+	// root, and CgroupID its cgroup v2 id — what the agent actually
+	// observed; the runtime name and container id are derived from the
+	// path. slither extensions.
+	CgroupPath string `json:"x_cgroup_path,omitempty"`
+	CgroupID   uint64 `json:"x_cgroup_id,omitempty"`
 }
 
 type Image struct {

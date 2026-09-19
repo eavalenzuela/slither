@@ -10,11 +10,12 @@ import (
 
 func TestCategoryToClassCoversPhase1(t *testing.T) {
 	cases := map[ruleast.Category]ocsf.ClassID{
-		ruleast.CategoryProcessCreation:   ocsf.ClassProcessActivity,
-		ruleast.CategoryFileEvent:         ocsf.ClassFileSystemActivity,
-		ruleast.CategoryNetworkConnection: ocsf.ClassNetworkActivity,
-		ruleast.CategoryAuthentication:    ocsf.ClassAuthentication,
-		ruleast.CategoryDriverLoad:        ocsf.ClassKernelActivity,
+		ruleast.CategoryProcessCreation:    ocsf.ClassProcessActivity,
+		ruleast.CategoryFileEvent:          ocsf.ClassFileSystemActivity,
+		ruleast.CategoryNetworkConnection:  ocsf.ClassNetworkActivity,
+		ruleast.CategoryAuthentication:     ocsf.ClassAuthentication,
+		ruleast.CategoryDriverLoad:         ocsf.ClassKernelActivity,
+		ruleast.CategoryContainerLifecycle: ocsf.ClassContainerLifecycle,
 	}
 	for cat, want := range cases {
 		got, ok := CategoryToClass(cat)
@@ -202,5 +203,43 @@ func TestEnvLookupOnKernelActivity(t *testing.T) {
 	ev.Kernel.Path = "/usr/lib/libssl.so.3"
 	if got, _ := EnvFor(ev, AccessorFor(ruleast.CategoryDriverLoad)).Lookup("ImageLoaded"); got[0] != "/usr/lib/libssl.so.3" {
 		t.Errorf("ImageLoaded should prefer the path: %v", got)
+	}
+}
+
+func TestEnvLookupContainerIdAcrossClasses(t *testing.T) {
+	const cid = "21473fb59dd89a9b9cff0ad8a1ceb82168feb3fc0ea41055565c26bd634bb4bd"
+	proc := &ocsf.ProcessActivity{Process: ocsf.Process{PID: 1, ContainerID: cid}}
+	if got, ok := EnvFor(proc, AccessorFor(ruleast.CategoryProcessCreation)).Lookup("ContainerId"); !ok || got[0] != cid {
+		t.Errorf("process_creation ContainerId = %v, %v", got, ok)
+	}
+	host := &ocsf.ProcessActivity{Process: ocsf.Process{PID: 1}}
+	if _, ok := EnvFor(host, AccessorFor(ruleast.CategoryProcessCreation)).Lookup("ContainerId"); ok {
+		t.Error("host process must have no ContainerId (so |exists works)")
+	}
+	file := &ocsf.FileSystemActivity{Actor: ocsf.Actor{Process: ocsf.Process{ContainerID: cid}}}
+	if got, ok := EnvFor(file, AccessorFor(ruleast.CategoryFileEvent)).Lookup("ContainerId"); !ok || got[0] != cid {
+		t.Errorf("file_event ContainerId = %v, %v", got, ok)
+	}
+	net := &ocsf.NetworkActivity{Actor: ocsf.Actor{Process: ocsf.Process{ContainerID: cid}}}
+	if got, ok := EnvFor(net, AccessorFor(ruleast.CategoryNetworkConnection)).Lookup("ContainerId"); !ok || got[0] != cid {
+		t.Errorf("network_connection ContainerId = %v, %v", got, ok)
+	}
+
+	lc := &ocsf.ContainerLifecycle{
+		Metadata:   ocsf.Metadata{EventCode: "container_start"},
+		ClassUID:   ocsf.ClassContainerLifecycle,
+		ActivityID: ocsf.ContainerActivityStart,
+		Time:       1,
+		Container:  ocsf.Container{UID: cid, Runtime: "docker", CgroupPath: "/system.slice/docker-" + cid + ".scope"},
+		Actor:      ocsf.Actor{Process: ocsf.Process{PID: 301, File: &ocsf.File{Path: "/bin/sh"}}, User: ocsf.User{Name: "root"}},
+	}
+	env := EnvFor(lc, AccessorFor(ruleast.CategoryContainerLifecycle))
+	for field, w := range map[string]string{
+		"ContainerId": cid, "Runtime": "docker", "EventCode": "container_start",
+		"CgroupPath": "/system.slice/docker-" + cid + ".scope", "Image": "/bin/sh", "User": "root", "ProcessId": "301",
+	} {
+		if got, ok := env.Lookup(field); !ok || got[0] != w {
+			t.Errorf("container_lifecycle %s = %v, %v; want %q", field, got, ok, w)
+		}
 	}
 }

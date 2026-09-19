@@ -33,6 +33,10 @@ type RawProcessEvent struct {
 	Cmdline   string
 	Timestamp time.Time
 	ExitCode  int32
+	// CgroupID is the cgroup v2 id (cgroupfs inode) the task was in. The
+	// enricher maps it to a container id through the cgroup collector.
+	// 0 on a cgroup-v1-only host.
+	CgroupID uint64
 }
 
 // RawProcessKind enumerates the lifecycle hook that produced an event.
@@ -174,4 +178,34 @@ const (
 	KernelModuleLoadRejected
 	KernelBPFProgLoad
 	KernelProbeAttach
+)
+
+// RawCgroupEvent is the decoded form of a cgroup.bpf.c ringbuffer record:
+// a cgroup directory was created or removed. Container runtimes name a
+// container's cgroup after its id, so these are the runtime-agnostic
+// container create / stop signal.
+type RawCgroupEvent struct {
+	Kind RawCgroupKind
+	// PID is the tgid of the process that created or removed the cgroup
+	// (the runtime: runc, containerd-shim, crun, conmon, ...).
+	PID uint32
+	UID uint32
+	// Root is the cgroup hierarchy id; 0 is the cgroup v2 default
+	// hierarchy, whose ids match RawProcessEvent.CgroupID.
+	Root int32
+	// ID is the cgroup id in that hierarchy.
+	ID uint64
+	// Path is the cgroup path relative to the hierarchy root.
+	Path      string
+	Comm      string
+	Timestamp time.Time
+}
+
+// RawCgroupKind distinguishes creation from removal.
+type RawCgroupKind uint8
+
+const (
+	CgroupUnknown RawCgroupKind = iota
+	CgroupMkdir
+	CgroupRmdir
 )

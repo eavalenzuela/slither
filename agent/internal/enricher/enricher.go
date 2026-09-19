@@ -12,6 +12,7 @@ package enricher
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -77,6 +78,13 @@ type Options struct {
 	// variables. Off by default — see the config field for why this
 	// costs more than it looks like it should.
 	CaptureEnv bool
+	// Containers mirrors config.ContainerCollector.Enabled. When set the
+	// enricher seeds its container index from CgroupRoot at start-up so
+	// containers that predate the agent are known, consumes cgroup
+	// events, and stamps x_container_id on process events.
+	Containers bool
+	// CgroupRoot overrides /sys/fs/cgroup (tests).
+	CgroupRoot string
 }
 
 func (o *Options) applyDefaults() {
@@ -107,6 +115,9 @@ func (o *Options) applyDefaults() {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
+	if o.CgroupRoot == "" {
+		o.CgroupRoot = "/sys/fs/cgroup"
+	}
 }
 
 type enricher struct {
@@ -129,6 +140,9 @@ type enricher struct {
 	// (its BPF loads, its probe attaches) are dropped in handleKernel.
 	// Zero disables the filter (tests).
 	selfPID uint32
+	// containers maps cgroup ids to container ids and tracks lifecycle
+	// state; see containers.go.
+	containers *containerIndex
 }
 
 // New constructs an Enricher that reads from the given collector group.
@@ -138,7 +152,7 @@ func New(cg *collector.Group, telem *telemetry.Counters, opts Options) Enricher 
 	for i := range inboxes {
 		inboxes[i] = make(chan pipeline.RawProcessEvent, opts.ProcessInboxSize)
 	}
-	return &enricher{
+	en := &enricher{
 		cg:             cg,
 		telem:          telem,
 		opts:           opts,
@@ -151,7 +165,13 @@ func New(cg *collector.Group, telem *telemetry.Counters, opts Options) Enricher 
 		reloadFilterCh: make(chan config.FileCollector, 1),
 		procInboxes:    inboxes,
 		selfPID:        uint32(os.Getpid()), //nolint:gosec // G115: pids fit in 32 bits on Linux
+		containers:     newContainerIndex(),
 	}
+	if opts.Containers {
+		n := en.containers.seed(opts.CgroupRoot)
+		slog.Info("container index seeded", "cgroup_root", opts.CgroupRoot, "containers", n)
+	}
+	return en
 }
 
 // ReloadFileFilter swaps the file-path include/exclude globs used by the
@@ -282,6 +302,7 @@ func (e *enricher) Run(ctx context.Context) error {
 	var netIn <-chan pipeline.RawNetEvent = e.cg.Net
 	var authIn <-chan pipeline.RawAuthEvent = e.cg.Auth
 	var kernelIn <-chan pipeline.RawKernelEvent = e.cg.Kernel
+	var cgroupIn <-chan pipeline.RawCgroupEvent = e.cg.Cgroup
 
 	for {
 		select {
@@ -317,6 +338,12 @@ func (e *enricher) Run(ctx context.Context) error {
 				continue
 			}
 			e.handleKernel(ctx, raw)
+		case raw, ok := <-cgroupIn:
+			if !ok {
+				cgroupIn = nil
+				continue
+			}
+			e.handleCgroup(ctx, raw)
 		}
 	}
 }
@@ -440,6 +467,16 @@ func (e *enricher) handleProcess(ctx context.Context, raw pipeline.RawProcessEve
 		}
 	}
 
+	// Container context: the cgroup id BPF stamped on the event resolves
+	// through the index the cgroup collector maintains. Exit events carry
+	// it too, so the last event of a container process still says where
+	// it ran.
+	if cid, ok := e.containers.lookup(raw.CgroupID); ok {
+		entry.container = cid
+	} else if prior, ok := e.cache.get(raw.PID); ok && prior.container != "" {
+		entry.container = prior.container
+	}
+
 	e.cache.upsert(entry)
 	if raw.Kind == pipeline.ProcExit {
 		e.cache.markExit(raw.PID, e.opts.Now())
@@ -450,6 +487,14 @@ func (e *enricher) handleProcess(ctx context.Context, raw pipeline.RawProcessEve
 	merged, ok := e.cache.get(raw.PID)
 	if !ok {
 		merged = entry
+	}
+
+	// The first exec inside a container's cgroup is the container's
+	// start: runc has pivoted in and the entrypoint (or runc init) runs.
+	if raw.Kind == pipeline.ProcExec && merged.container != "" {
+		if st, started := e.containers.markStarted(merged.container); started {
+			e.emitContainer(ctx, ocsf.ContainerActivityStart, "container_start", st, merged, raw.Timestamp)
+		}
 	}
 
 	ev := e.buildOCSF(raw, merged)

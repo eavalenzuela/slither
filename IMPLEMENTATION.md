@@ -329,7 +329,7 @@ Data flow: `collector → enricher → ruleengine → output` as an in-process c
 
 ### 3.2 eBPF programs
 
-Five C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs are CO-RE (BPF type format) compatible via `vmlinux.h` embedded in the build. Sources live in a `src/` subdirectory (not the package root) so the Go toolchain doesn't reject `.c` files in a non-cgo package — `gen.go` references them as `src/*.bpf.c -I./src/headers`, and bpf2go writes the generated Go + `.o` back into the package root.
+Six C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs are CO-RE (BPF type format) compatible via `vmlinux.h` embedded in the build. Sources live in a `src/` subdirectory (not the package root) so the Go toolchain doesn't reject `.c` files in a non-cgo package — `gen.go` references them as `src/*.bpf.c -I./src/headers`, and bpf2go writes the generated Go + `.o` back into the package root.
 
 **`process.bpf.c`** — process lifecycle.
 - Hooks: `tracepoint/sched/sched_process_exec`, `tracepoint/sched/sched_process_exit`, `tracepoint/sched/sched_process_fork`.
@@ -361,6 +361,12 @@ Five C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs a
 - The agent's own BPF loads and probe attaches (start-up, collector restart) are dropped in the enricher by pid.
 - 1 MB ringbuf; high-priority in the backpressure shedder.
 
+**`cgroup.bpf.c`** — container lifecycle (added 2026-09-19, Phase 7 §9; PROJECT.md §3.1 "container events" line item).
+- Hooks: `tracepoint/cgroup/cgroup_mkdir`, `tracepoint/cgroup/cgroup_rmdir`. Every runtime — docker, containerd / CRI, cri-o, podman, LXC, nspawn — puts a container in its own cgroup named after its id, so these two tracepoints are the runtime-agnostic create / stop signal; the enricher parses the id and runtime out of the path (`enricher/containers.go`) and emits "start" on the first exec it sees inside the cgroup.
+- Emits: kind, tgid, uid, hierarchy root (0 = cgroup v2 default), cgroup id, path, comm.
+- `process.bpf.c` gained `cgroup_id` (`bpf_get_current_cgroup_id`) on every record; the enricher resolves it through the index the cgroup collector maintains (seeded from `/sys/fs/cgroup` at start-up — the cgroup id is the directory inode) and stamps `x_container_id` on the process, which every other class inherits through `Actor.Process`. Zero /proc reads. cgroup v1 hosts get lifecycle events (de-duplicated across controller hierarchies) but no per-process context.
+- Not covered: image pulls, container names, image names — runtime state, not kernel state; a runtime-API extension under the Phase 6 model is the right home.
+
 **Portability.**
 - Target kernel floor: **5.15** (Ubuntu 22.04 LTS / RHEL 10). Raised from 5.10 on 2026-04-22 after RHEL 9's 5.14 verifier rejected our per-syscall tracepoint programs with `max_ctx_offset`/`PTR_TO_CTX` checks that 5.15+ handles cleanly. RHEL 9 support is deferred; users should deploy on RHEL 10 (6.12) instead.
 - Tracepoints preferred over kprobes where available (ABI-stable). Kprobes are used for net hooks because the tracepoints there don't carry the data we need.
@@ -372,7 +378,7 @@ Five C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs a
 - Uses `cilium/ebpf` to load compiled programs from embedded bytecode.
 - On load failure, emits a diagnostic log with kernel version, kernel features probed, and exits with nonzero. No fallback to audit or other primitives in Phase 1.
 - Opens ringbuffers with `ringbuf.NewReader()`; each program has its own reader goroutine.
-- Decodes raw binary events into typed Go structs (`RawProcessEvent`, `RawFileEvent`, `RawNetEvent`, `RawAuthEvent`, `RawKernelEvent`). These are internal types, not OCSF — OCSF conversion happens in the enricher.
+- Decodes raw binary events into typed Go structs (`RawProcessEvent`, `RawFileEvent`, `RawNetEvent`, `RawAuthEvent`, `RawKernelEvent`, `RawCgroupEvent`). These are internal types, not OCSF — OCSF conversion happens in the enricher.
 
 ### 3.4 Enricher
 
@@ -382,12 +388,12 @@ Ingests raw events, produces OCSF events.
 - **Parent chain resolution.** On every event, walk ppid chain up to depth N (default 8) using the cache, producing `process.parent_process` nested objects in OCSF.
 - **Hashing.** On `exec`, compute SHA-256 of the executable file async (bounded goroutine pool, 4 workers default). Cached by (inode, mtime) to avoid re-hashing. Hash attaches to the event before emission if ready within timeout (100 ms default); otherwise event emits without hash and a followup emits the hash referencing the original event_id.
 - **User resolution.** uid → username via /etc/passwd snapshot, refreshed on SIGHUP.
-- **No container context in Phase 1.** Placeholder field left empty.
+- **Container context** (2026-09-19, Phase 7 §9). `x_container_id` on `Process` is resolved from the cgroup id BPF stamps on every process record, through the index the cgroup collector maintains (`enricher/containers.go`). Was "left empty" through Phase 6.
 
 ### 3.5 Edge rule engine (stateless)
 
 - Rules are YAML files; Phase 1 supports a **strict subset of Sigma**:
-  - `logsource` restricted to `product: linux` + a `category` we recognize (`process_creation`, `file_event`, `network_connection`, `authentication` — also accepted as `service: auth` with no category, the spelling public Sigma packs use — and `driver_load`, Sigma's taxonomy name for module loads, bound to OCSF Kernel Activity 1003 with `kernel_module` as an alias).
+  - `logsource` restricted to `product: linux` + a `category` we recognize (`process_creation`, `file_event`, `network_connection`, `authentication` — also accepted as `service: auth` with no category, the spelling public Sigma packs use — `driver_load`, Sigma's taxonomy name for module loads, bound to OCSF Kernel Activity 1003 with `kernel_module` as an alias, and `container_lifecycle` (alias `container_event`) for OCSF 6000).
   - `detection` restricted to named selections and a final `condition` that is a boolean combination of selections. No `count()`, no `timeframe`, no `near`, no aggregation.
   - Supported field operators: `equals`, `contains`, `startswith`, `endswith`, `regex`, and list forms.
 - Compiler lives in `pkg/ruleast/` with a `CompileSigma([]byte) (Rule, error)` entrypoint. Compilation is ahead-of-time at agent startup; hot reload deferred.
@@ -430,6 +436,8 @@ collectors:
     enabled: true
     # libpam_path: /usr/lib/x86_64-linux-gnu/libpam.so.0   # only for unusual layouts
   kernel:
+    enabled: true
+  container:
     enabled: true
 rules:
   paths:
@@ -2156,6 +2164,60 @@ measure UX across distros — PCR 7 semantics differ subtly between
 Secure Boot implementations).
 
 ## 9. Phase 7 — Platform Expansion (bullet, demand-driven)
+
+- ✅ **Container lifecycle + per-event container context (2026-09-19).**
+  Closes the PROJECT.md §3.1 "container events" line item and fills the
+  `x_container_id` placeholder that has been "left empty" on `Process`
+  since Phase 1 §3.4.
+
+  **Source choice.** Runtime-agnostic and kernel-side: every runtime —
+  docker, containerd / CRI, cri-o, podman, LXC, nspawn — puts a container
+  in its own cgroup named after its id, so `cgroup.bpf.c` on the
+  `cgroup_mkdir` / `cgroup_rmdir` tracepoints is one create / stop
+  source for all of them; the id and runtime are parsed from the path
+  (`enricher/containers.go`, with the nested-cgroup, conmon and
+  bare-id-under-kubepods cases handled), and "start" is the first exec
+  observed inside the cgroup. `process.bpf.c` now carries
+  `bpf_get_current_cgroup_id` on every record; the enricher resolves it
+  through the index the cgroup collector maintains (seeded from
+  `/sys/fs/cgroup` at start-up, where the cgroup id is the directory
+  inode) and stamps `x_container_id` on the process — which every other
+  class inherits through `Actor.Process`, so `ContainerId` is now a
+  Sigma field on process, file, net, auth and kernel rules with zero
+  /proc reads. cgroup v1 hosts get de-duplicated lifecycle events and
+  no per-process context; every supported distro defaults to v2.
+
+  **Explicitly not covered:** image pulls, container names, image
+  names. They are runtime state, not kernel state. The Phase 6
+  extension model (one process, protobuf over a unix socket, signed) is
+  the right home for a runtime-API bridge that fills them in; filed as
+  a follow-up below rather than bolted on here.
+
+  **Landed:** `RawCgroupEvent` + `RawProcessEvent.CgroupID`; the Linux
+  `cgroupCollector`; `collectors.container` +
+  `SLITHER_COLLECTORS_CONTAINER_ENABLED`; the container index, cgroup
+  handler and `ContainerLifecycle` (6000) builder with `x_cgroup_path` /
+  `x_cgroup_id`; the `container_lifecycle` Sigma category (alias
+  `container_event`) and `ContainerId` on every actor-bearing category;
+  ClickHouse migration 00009; writer, search summary, lookup projection,
+  flow-graph node, console label; three rules (pack 75 → 78):
+  `container-exec-kmod-tools` (high), `container-exec-namespace-tools`
+  (medium), `container-runtime-exec-shell` (low, audit).
+
+  **Tests:** 12 unit tests (cgroup-path parser over 15 layouts,
+  seed-from-cgroupfs by inode, a full create → start → stamped exec →
+  stamped exit → stop sequence, v1 hierarchy de-dup, decode, config,
+  Sigma bindings across five classes, all three rules), a ClickHouse
+  round-trip pinning `containerRow.bind` against migration 00009 (run
+  locally against Docker), and a privileged integration test that
+  makes and removes a container-shaped cgroup directly in cgroupfs —
+  what a runtime does — and expects both events back.
+
+- **Follow-up: container runtime bridge extension.** Image pulls and
+  container / image names for the 6000 class need the runtime's API
+  (containerd events, docker events, podman events). Build as a
+  first-party extension under ADR-0027 / ADR-0029, not in the agent.
+  Not started.
 
 - ✅ **Kernel-module and probe-attach telemetry (2026-09-19).** Closes
   the PROJECT.md §3.1 "kernel/module events: module load, kprobe/uprobe

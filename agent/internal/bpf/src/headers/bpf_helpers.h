@@ -73,6 +73,7 @@ static void *(*bpf_map_lookup_elem)(void *map, const void *key)                 
 static long  (*bpf_map_update_elem)(void *map, const void *key, const void *value,
                                     __u64 flags)                                 = (void *)2;
 static long  (*bpf_map_delete_elem)(void *map, const void *key)                  = (void *)3;
+static __u64 (*bpf_get_current_cgroup_id)(void)                                  = (void *)80;
 
 /* -----------------------------------------------------------------------
  * CO-RE — compile-once run-everywhere helpers.

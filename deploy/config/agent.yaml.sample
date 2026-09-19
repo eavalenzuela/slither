@@ -69,6 +69,17 @@ collectors:
   # attaches are filtered out by pid.
   kernel:
     enabled: true
+  # Container lifecycle + context: cgroup create / remove tracepoints
+  # give container create and stop for every runtime that names a
+  # container's cgroup after its id (docker, containerd / CRI, cri-o,
+  # podman, LXC, nspawn), the first exec inside the cgroup gives start,
+  # and the cgroup id on every process event fills x_container_id — the
+  # `ContainerId` Sigma field on process, file, net, auth and kernel
+  # rules. OCSF Container Lifecycle (6000). Needs cgroup v2 for the
+  # per-process context. Image pulls and container / image names are
+  # runtime state, not kernel state, and are not covered.
+  container:
+    enabled: true
 
 rules:
   paths:

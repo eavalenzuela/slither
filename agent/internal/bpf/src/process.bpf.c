@@ -42,6 +42,11 @@ struct process_event {
     __s32 exit_code;   /* populated on exit; 0 elsewhere */
     __u32 cmdline_len; /* valid bytes in cmdline[]; args are null-separated
                         * in place. Userspace converts nulls to spaces. */
+    __u32 _pad0;
+    __u64 cgroup_id;   /* default-hierarchy (cgroup v2) cgroup id of current —
+                        * the inode number of its cgroupfs directory. The
+                        * enricher maps it to a container id via the cgroup
+                        * collector; 0 on a cgroup-v1-only host. */
     char  comm[COMM_LEN];
     char  exe[EXE_LEN]; /* exec path — populated from the sched_process_exec
                          * tracepoint's __data_loc_filename on SL_PROC_EXEC,
@@ -78,6 +83,8 @@ static __always_inline void fill_common(struct process_event *e) {
     e->ppid  = 0;
     e->exit_code = 0;
     e->cmdline_len = 0;
+    e->_pad0 = 0;
+    e->cgroup_id = bpf_get_current_cgroup_id();
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
     /* exe/cmdline are zero-initialised here; handle_exec populates them
      * on SL_PROC_EXEC. fork/exit leave them empty. */

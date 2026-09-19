@@ -240,6 +240,7 @@ func newTestEnricher(t *testing.T) *enricher {
 		out:            make(chan ocsf.Event, 16),
 		cache:          newProcCache(),
 		users:          newUserResolver(opts.PasswdPath),
+		containers:     newContainerIndex(),
 		proc:           newProcReader(opts.ProcRoot),
 		fileFilter:     newPathGlob(nil, nil),
 		hasher:         newHasher(opts.HashWorkers),

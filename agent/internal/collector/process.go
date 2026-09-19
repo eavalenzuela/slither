@@ -140,6 +140,7 @@ func decodeProcessEvent(r bpfpkg.ProcessProcessEvent) pipeline.RawProcessEvent {
 		Cmdline:   decodeCmdline(r.Cmdline[:], r.CmdlineLen),
 		Timestamp: time.Now(),
 		ExitCode:  r.ExitCode,
+		CgroupID:  r.CgroupId,
 	}
 }
 

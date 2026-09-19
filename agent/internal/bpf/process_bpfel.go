@@ -24,6 +24,9 @@ type ProcessProcessEvent struct {
 	Gid        uint32
 	ExitCode   int32
 	CmdlineLen uint32
+	Pad0       uint32
+	_          [4]byte
+	CgroupId   uint64
 	Comm       [16]int8
 	Exe        [128]int8
 	Cmdline    [256]int8

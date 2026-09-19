@@ -510,6 +510,12 @@ func decodeEnvelope(env *pb.Envelope, class ocsf.ClassID) (ocsf.Event, error) {
 			return nil, err
 		}
 		return &v, nil
+	case ocsf.ClassContainerLifecycle:
+		var v ocsf.ContainerLifecycle
+		if err := json.Unmarshal(payload, &v); err != nil {
+			return nil, err
+		}
+		return &v, nil
 	}
 	return nil, fmt.Errorf("unsupported class %d", class)
 }

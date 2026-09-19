@@ -93,11 +93,12 @@ type AgentKeystore struct {
 
 // Collectors toggles individual collectors on or off.
 type Collectors struct {
-	Process ProcessCollector `yaml:"process"`
-	File    FileCollector    `yaml:"file"`
-	Net     NetCollector     `yaml:"net"`
-	Auth    AuthCollector    `yaml:"auth"`
-	Kernel  KernelCollector  `yaml:"kernel"`
+	Process   ProcessCollector   `yaml:"process"`
+	File      FileCollector      `yaml:"file"`
+	Net       NetCollector       `yaml:"net"`
+	Auth      AuthCollector      `yaml:"auth"`
+	Kernel    KernelCollector    `yaml:"kernel"`
+	Container ContainerCollector `yaml:"container"`
 }
 
 // ProcessCollector configures the process lifecycle collector.
@@ -152,6 +153,17 @@ type AuthCollector struct {
 // defence-in-depth. No knobs beyond enabled: the hooks are fixed and
 // the event rate is negligible.
 type KernelCollector struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+// ContainerCollector configures container lifecycle telemetry: cgroup
+// create / remove tracepoints parsed for the container id every runtime
+// (docker, containerd / CRI, cri-o, podman, LXC, nspawn) encodes in
+// its cgroup name, plus x_container_id on every process event via the
+// cgroup id. Emits OCSF Container Lifecycle (6000). Image pulls and
+// container / image names live in the runtime, not the kernel, and are
+// not covered.
+type ContainerCollector struct {
 	Enabled bool `yaml:"enabled"`
 }
 
@@ -323,7 +335,7 @@ func (c *Config) Validate() error {
 			g.BufferSize = 4096
 		}
 	}
-	if !c.Collectors.Process.Enabled && !c.Collectors.File.Enabled && !c.Collectors.Net.Enabled && !c.Collectors.Auth.Enabled && !c.Collectors.Kernel.Enabled {
+	if !c.Collectors.Process.Enabled && !c.Collectors.File.Enabled && !c.Collectors.Net.Enabled && !c.Collectors.Auth.Enabled && !c.Collectors.Kernel.Enabled && !c.Collectors.Container.Enabled {
 		return fmt.Errorf("%w: no collectors enabled", ErrInvalidConfig)
 	}
 	for i, p := range c.Rules.Paths {
@@ -424,6 +436,11 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("SLITHER_COLLECTORS_KERNEL_ENABLED"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			c.Collectors.Kernel.Enabled = b
+		}
+	}
+	if v := os.Getenv("SLITHER_COLLECTORS_CONTAINER_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			c.Collectors.Container.Enabled = b
 		}
 	}
 	if v := os.Getenv("SLITHER_RULES_PATHS"); v != "" {

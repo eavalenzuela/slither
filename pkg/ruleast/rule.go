@@ -26,6 +26,10 @@ const (
 	// load, kprobe / uprobe attach. `kernel_module` is accepted as an
 	// alias.
 	CategoryDriverLoad Category = "driver_load"
+	// CategoryContainerLifecycle is slither's name for OCSF Container
+	// Lifecycle (6000): container create / start / stop as observed from
+	// the container's cgroup. `container_event` is accepted as an alias.
+	CategoryContainerLifecycle Category = "container_lifecycle"
 )
 
 // Level maps Sigma's severity vocabulary to slither's own enum. We keep

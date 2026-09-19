@@ -1,0 +1,29 @@
+title: Kernel module tooling executed inside a container
+id: 8b7c4d00-0001-4000-8000-000000000057
+status: experimental
+description: |
+  insmod, modprobe, rmmod or kmod ran inside a container. A container
+  has no legitimate reason to touch the host kernel's module table;
+  doing so requires CAP_SYS_MODULE, which only a privileged or badly
+  configured container holds, and loading a module from inside is a
+  direct host escape (T1611) and the classic rootkit drop (T1014). The
+  kernel collector's driver_load events show whether the load succeeded;
+  this rule fires on the attempt.
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.t1611
+  - attack.t1014
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  in_container:
+    ContainerId|exists: true
+  kmod_tool:
+    Image|endswith:
+      - /insmod
+      - /modprobe
+      - /rmmod
+      - /kmod
+  condition: in_container and kmod_tool

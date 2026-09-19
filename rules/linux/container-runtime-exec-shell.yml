@@ -1,0 +1,40 @@
+title: Interactive shell started in a container by the runtime
+id: 8b7c4d00-0001-4000-8000-000000000059
+status: experimental
+description: |
+  A shell exec'd inside a container directly under the runtime's init
+  process — the shape of `docker exec -it <c> sh`, `kubectl exec`,
+  `podman exec`, `nsenter`-style entry by a runtime. T1609 (Container
+  Administration Command). Operators do this constantly during
+  troubleshooting, so this is an audit-trail rule, not a page: low
+  severity, searchable, and the thing to correlate against when a
+  container starts behaving oddly. A container whose entrypoint is
+  itself a shell fires once at start; that is by design — that start
+  is the first thing worth knowing about such a container.
+level: low
+tags:
+  - attack.execution
+  - attack.t1609
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  in_container:
+    ContainerId|exists: true
+  shell:
+    Image|endswith:
+      - /sh
+      - /bash
+      - /dash
+      - /ash
+      - /zsh
+      - /busybox
+  runtime_parent:
+    ParentImage|endswith:
+      - /runc
+      - /crun
+      - /containerd-shim-runc-v2
+      - /conmon
+      - /docker-init
+      - /tini
+  condition: in_container and shell and runtime_parent

@@ -21,7 +21,11 @@ type procEntry struct {
 	// ProcessCollector.CaptureEnv is on; nil otherwise (and nil for the
 	// overwhelming majority of processes even when it is on, since
 	// almost nothing sets a loader variable).
-	env       []string
+	env []string
+	// container is the id of the container the process runs in,
+	// resolved from its cgroup id through the container index; empty on
+	// the host or when the cgroup collector is off.
+	container string
 	createdAt time.Time
 	exited    bool
 	exitAt    time.Time

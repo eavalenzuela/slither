@@ -350,6 +350,8 @@ func checkLogSource(ls logSourceYAML) (Category, error) {
 		return CategoryAuthentication, nil
 	case string(CategoryDriverLoad), "kernel_module":
 		return CategoryDriverLoad, nil
+	case string(CategoryContainerLifecycle), "container_event":
+		return CategoryContainerLifecycle, nil
 	case "":
 		// Sigma's own Linux auth rules carry no category and select the
 		// source with `service:` instead. Honour the spellings public
@@ -360,7 +362,7 @@ func checkLogSource(ls logSourceYAML) (Category, error) {
 			return CategoryAuthentication, nil
 		}
 	}
-	return "", fmt.Errorf("logsource.category = %q; accepted: process_creation, file_event, network_connection, authentication (or service: auth), driver_load", ls.Category)
+	return "", fmt.Errorf("logsource.category = %q; accepted: process_creation, file_event, network_connection, authentication (or service: auth), driver_load, container_lifecycle", ls.Category)
 }
 
 func normaliseLevel(s string) Level {

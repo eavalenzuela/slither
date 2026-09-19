@@ -113,6 +113,7 @@ func NewWriter(store *Store, bus *ingest.Bus, telem *telemetry.Counters, opts Wr
 			pb.OcsfClassId_OCSF_CLASS_ID_NETWORK_ACTIVITY:     {tableName: "ocsf_network_activity_4001"},
 			pb.OcsfClassId_OCSF_CLASS_ID_AUTHENTICATION:       {tableName: "ocsf_authentication_3002"},
 			pb.OcsfClassId_OCSF_CLASS_ID_KERNEL_ACTIVITY:      {tableName: "ocsf_kernel_activity_1003"},
+			pb.OcsfClassId_OCSF_CLASS_ID_CONTAINER_LIFECYCLE:  {tableName: "ocsf_container_lifecycle_6000"},
 			pb.OcsfClassId_OCSF_CLASS_ID_DETECTION_FINDING:    {tableName: "ocsf_detection_finding_2004"},
 		},
 	}
@@ -257,6 +258,8 @@ func decode(env *pb.Envelope) (chRow, error) {
 		return decodeAuth(env)
 	case pb.OcsfClassId_OCSF_CLASS_ID_KERNEL_ACTIVITY:
 		return decodeKernel(env)
+	case pb.OcsfClassId_OCSF_CLASS_ID_CONTAINER_LIFECYCLE:
+		return decodeContainer(env)
 	case pb.OcsfClassId_OCSF_CLASS_ID_DETECTION_FINDING:
 		return decodeFinding(env)
 	}
@@ -594,6 +597,47 @@ func (r kernelRow) bind(batch driver.Batch) error {
 		r.shared.classUID, r.shared.severityID,
 		r.activityID, r.eventCode, r.kernelType, r.kernelName, r.kernelPath, r.systemCall,
 		r.statusID, r.statusCode, r.statusDetail, r.taints, r.progType,
+		r.actorPID, r.actorName, r.actorCmdline,
+		r.shared.raw,
+	)
+}
+
+func decodeContainer(env *pb.Envelope) (chRow, error) {
+	var ev ocsf.ContainerLifecycle
+	if err := json.Unmarshal(env.GetPayload(), &ev); err != nil {
+		return nil, err
+	}
+	row := containerRow{shared: sharedFromEnvelope(env)}
+	row.activityID = uint8(ev.ActivityID)
+	row.eventCode = ev.Metadata.EventCode
+	row.containerID = ev.Container.UID
+	row.runtime = ev.Container.Runtime
+	row.cgroupPath = ev.Container.CgroupPath
+	row.actorPID = ev.Actor.Process.PID
+	row.actorName = ev.Actor.Process.Name
+	row.actorCmdline = ev.Actor.Process.Cmdline
+	return row, nil
+}
+
+// containerRow mirrors ocsf_container_lifecycle_6000 (migration 00009)
+// column for column; bind order must match the DDL exactly.
+type containerRow struct {
+	shared       sharedRow
+	activityID   uint8
+	eventCode    string
+	containerID  string
+	runtime      string
+	cgroupPath   string
+	actorPID     uint32
+	actorName    string
+	actorCmdline string
+}
+
+func (r containerRow) bind(batch driver.Batch) error {
+	return batch.Append(
+		r.shared.eventID, r.shared.hostID, r.shared.observedAt, r.shared.collectedAt,
+		r.shared.classUID, r.shared.severityID,
+		r.activityID, r.eventCode, r.containerID, r.runtime, r.cgroupPath,
 		r.actorPID, r.actorName, r.actorCmdline,
 		r.shared.raw,
 	)
