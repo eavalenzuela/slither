@@ -1,5 +1,3 @@
-| [0043](./0043-yara-scanning-as-extension.md) | YARA scanning — out-of-process extension, on-demand only |
-| [0044](./0044-agent-updates-via-packages.md) | Agent updates ride the OS package manager; no server-pushed self-update |
 # Architecture Decision Records
 
 Every significant architectural or product decision is recorded here as an ADR.
@@ -73,6 +71,8 @@ ADRs 0030 and up were written as the phases they belong to were planned or close
 | [0040](./0040-external-readonly-json-api.md) | External read-only JSON API for BAS integrations |
 | [0041](./0041-macos-agent-scope.md) | macOS agent scope + sequencing |
 | [0042](./0042-chain-link-replication.md) | Tamper-chain record-level verification via link replication |
+| [0043](./0043-yara-scanning-as-extension.md) | YARA scanning — out-of-process extension, on-demand only |
+| [0044](./0044-agent-updates-via-packages.md) | Agent updates ride the OS package manager; no server-pushed self-update |
 
 ## Adding a new ADR
 
