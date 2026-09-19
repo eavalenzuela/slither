@@ -329,7 +329,7 @@ Data flow: `collector → enricher → ruleengine → output` as an in-process c
 
 ### 3.2 eBPF programs
 
-Six C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs are CO-RE (BPF type format) compatible via `vmlinux.h` embedded in the build. Sources live in a `src/` subdirectory (not the package root) so the Go toolchain doesn't reject `.c` files in a non-cgo package — `gen.go` references them as `src/*.bpf.c -I./src/headers`, and bpf2go writes the generated Go + `.o` back into the package root.
+Seven C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs are CO-RE (BPF type format) compatible via `vmlinux.h` embedded in the build. Sources live in a `src/` subdirectory (not the package root) so the Go toolchain doesn't reject `.c` files in a non-cgo package — `gen.go` references them as `src/*.bpf.c -I./src/headers`, and bpf2go writes the generated Go + `.o` back into the package root.
 
 **`process.bpf.c`** — process lifecycle.
 - Hooks: `tracepoint/sched/sched_process_exec`, `tracepoint/sched/sched_process_exit`, `tracepoint/sched/sched_process_fork`.
@@ -345,7 +345,7 @@ Six C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs ar
 **`net.bpf.c`** — network events.
 - Hooks: `kprobe/tcp_connect`, `kprobe/inet_csk_accept`, `kprobe/udp_sendmsg`.
 - Emits: pid, saddr, sport, daddr, dport, proto, direction.
-- DNS not included in Phase 1 — deferred to Phase 3 (requires parsing DNS payload or hooking `getaddrinfo`).
+- DNS not included in Phase 1 — deferred to Phase 3; landed 2026-09-19 as `dns.bpf.c` below.
 
 **`auth.bpf.c`** — authentication events (added 2026-09-19, Phase 7 §9; PROJECT.md §3.1 "authentication events" line item).
 - Hooks: uprobes on the host's `libpam.so.0` public API — `pam_start` / `pam_start_confdir` (entry), `pam_set_item` (entry, PAM_USER / PAM_TTY / PAM_RHOST only), `pam_end` (entry); uretprobes on `pam_authenticate`, `pam_open_session`, `pam_close_session`. Never libpam internals: `pam_handle_t` is opaque and its layout changes between releases.
@@ -367,6 +367,12 @@ Six C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs ar
 - `process.bpf.c` gained `cgroup_id` (`bpf_get_current_cgroup_id`) on every record; the enricher resolves it through the index the cgroup collector maintains (seeded from `/sys/fs/cgroup` at start-up — the cgroup id is the directory inode) and stamps `x_container_id` on the process, which every other class inherits through `Actor.Process`. Zero /proc reads. cgroup v1 hosts get lifecycle events (de-duplicated across controller hierarchies) but no per-process context.
 - Not covered: image pulls, container names, image names — runtime state, not kernel state; a runtime-API extension under the Phase 6 model is the right home.
 
+**`dns.bpf.c`** — DNS queries and responses (added 2026-09-19, Phase 7 §9; the Phase 1 §3.2 deferral and PROJECT.md §3.1 "DNS queries").
+- Hooks: `kprobe/ip_send_skb` + `kprobe/ip6_send_skb` (the outbound datagram, in the sending process's context, UDP header at `skb->head + transport_header`; kept when dport == 53) and `kretprobe/__skb_recv_udp` (the inbound datagram as the receiving process dequeues it, `skb->data` at the UDP header; kept when sport == 53). Every resolver path — glibc `sendmmsg`, musl `sendto`, Go `write`, systemd-resolved `sendmsg` — converges on one built `sk_buff`, which is why the hook is there and not on `getaddrinfo` (misses Go / static binaries) or the send syscalls (four of them, none of which can tell a DNS socket from any other).
+- Emits: kind, tgid, uid, family, 5-tuple, and up to 1024 bytes of the UDP payload verbatim. Parsing (question, type, class, answers, rcode) happens in the enricher with `golang.org/x/net/dns/dnsmessage`, where a real DNS parser is a library call and the verifier is not involved.
+- With a local stub resolver each lookup is seen twice — the application's query to the stub and the stub's query upstream — and both are wanted: the first is the attribution, the second is the wire truth. The shipped rules exclude the stub resolvers by image so they key on the application.
+- Not seen: DNS over TCP, DoT, DoH (not UDP/53).
+
 **Portability.**
 - Target kernel floor: **5.15** (Ubuntu 22.04 LTS / RHEL 10). Raised from 5.10 on 2026-04-22 after RHEL 9's 5.14 verifier rejected our per-syscall tracepoint programs with `max_ctx_offset`/`PTR_TO_CTX` checks that 5.15+ handles cleanly. RHEL 9 support is deferred; users should deploy on RHEL 10 (6.12) instead.
 - Tracepoints preferred over kprobes where available (ABI-stable). Kprobes are used for net hooks because the tracepoints there don't carry the data we need.
@@ -378,7 +384,7 @@ Six C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs ar
 - Uses `cilium/ebpf` to load compiled programs from embedded bytecode.
 - On load failure, emits a diagnostic log with kernel version, kernel features probed, and exits with nonzero. No fallback to audit or other primitives in Phase 1.
 - Opens ringbuffers with `ringbuf.NewReader()`; each program has its own reader goroutine.
-- Decodes raw binary events into typed Go structs (`RawProcessEvent`, `RawFileEvent`, `RawNetEvent`, `RawAuthEvent`, `RawKernelEvent`, `RawCgroupEvent`). These are internal types, not OCSF — OCSF conversion happens in the enricher.
+- Decodes raw binary events into typed Go structs (`RawProcessEvent`, `RawFileEvent`, `RawNetEvent`, `RawAuthEvent`, `RawKernelEvent`, `RawCgroupEvent`, `RawDNSEvent`). These are internal types, not OCSF — OCSF conversion happens in the enricher.
 
 ### 3.4 Enricher
 
@@ -393,7 +399,7 @@ Ingests raw events, produces OCSF events.
 ### 3.5 Edge rule engine (stateless)
 
 - Rules are YAML files; Phase 1 supports a **strict subset of Sigma**:
-  - `logsource` restricted to `product: linux` + a `category` we recognize (`process_creation`, `file_event`, `network_connection`, `authentication` — also accepted as `service: auth` with no category, the spelling public Sigma packs use — `driver_load`, Sigma's taxonomy name for module loads, bound to OCSF Kernel Activity 1003 with `kernel_module` as an alias, and `container_lifecycle` (alias `container_event`) for OCSF 6000).
+  - `logsource` restricted to `product: linux` + a `category` we recognize (`process_creation`, `file_event`, `network_connection`, `authentication` — also accepted as `service: auth` with no category, the spelling public Sigma packs use — `driver_load`, Sigma's taxonomy name for module loads, bound to OCSF Kernel Activity 1003 with `kernel_module` as an alias, `container_lifecycle` (alias `container_event`) for OCSF 6000, and `dns_query` (alias `dns`, Sigma's taxonomy name for Sysmon 22) for OCSF 4003).
   - `detection` restricted to named selections and a final `condition` that is a boolean combination of selections. No `count()`, no `timeframe`, no `near`, no aggregation.
   - Supported field operators: `equals`, `contains`, `startswith`, `endswith`, `regex`, and list forms.
 - Compiler lives in `pkg/ruleast/` with a `CompileSigma([]byte) (Rule, error)` entrypoint. Compilation is ahead-of-time at agent startup; hot reload deferred.
@@ -438,6 +444,8 @@ collectors:
   kernel:
     enabled: true
   container:
+    enabled: true
+  dns:
     enabled: true
 rules:
   paths:
@@ -2164,6 +2172,59 @@ measure UX across distros — PCR 7 semantics differ subtly between
 Secure Boot implementations).
 
 ## 9. Phase 7 — Platform Expansion (bullet, demand-driven)
+
+- ✅ **DNS query / response telemetry (2026-09-19).** Closes the Phase 1
+  §3.2 deferral ("DNS not included — requires parsing DNS payload or
+  hooking getaddrinfo") and the PROJECT.md §3.1 "DNS queries" clause of
+  the network line item. The last of the four §3.1 telemetry gaps.
+
+  **Source choice.** Neither of the two options the deferral named.
+  `getaddrinfo` uprobes miss Go, musl-static and hand-rolled resolvers
+  — exactly the binaries an EDR cares about; the send syscalls
+  (`sendto` / `sendmsg` / `sendmmsg` / `write`) each carry the payload
+  differently and none can tell a DNS socket from any other. Every UDP
+  send on every one of those paths converges on one built `sk_buff`,
+  so `dns.bpf.c` reads the datagram there: `kprobe/ip_send_skb` +
+  `ip6_send_skb` for queries (still in the sender's context, UDP
+  header at `head + transport_header`, kept when dport == 53) and
+  `kretprobe/__skb_recv_udp` for responses (`skb->data` at the UDP
+  header as the receiver dequeues it, kept when sport == 53). Up to
+  1024 payload bytes are copied verbatim; parsing is
+  `golang.org/x/net/dns/dnsmessage` in the enricher (already an
+  indirect dependency via grpc; now direct), where it is a library
+  call and the verifier is not involved.
+
+  **Stub resolvers are a feature, not a bug.** With systemd-resolved at
+  127.0.0.53 each lookup is seen twice — the app → stub query (the
+  attribution) and the stub → upstream query (the wire truth). Shipped
+  rules exclude the stubs by image so they key on the application.
+
+  **Not seen, by design:** DNS over TCP, DoT, DoH.
+
+  **Landed:** `RawDNSEvent`; the Linux `dnsCollector` (`ip6_send_skb`
+  optional for IPv6-less kernels); `collectors.dns` +
+  `SLITHER_COLLECTORS_DNS_ENABLED`; the enricher's parser and
+  `DnsActivity` (4003) builder — question, opcode, rcode, up to 32
+  answers with rdata by type, `src_endpoint` / `dst_endpoint`,
+  `x_transaction_id`; the `dns_query` Sigma category (alias `dns`) with
+  Sysmon 22's vocabulary (`QueryName`, `QueryType`, `QueryResults`
+  multi-valued, `QueryStatus`) plus endpoint and actor fields;
+  ClickHouse migration 00010 with `query_name` / `answers` hunt
+  columns; writer, search summary, lookup projection, flow-graph node,
+  console label; four rules (pack 78 → 82): `dns-query-long-label`
+  (medium), `dns-query-txt-burst` (high, MTAs excluded),
+  `dns-response-nxdomain-burst` (medium, DGA) and
+  `dns-query-paste-and-transfer-sites` (low).
+
+  **Tests:** 13 unit tests (parser over built queries / responses /
+  garbage, name tables, query and response builders incl. container
+  context and cache-miss identity, decode incl. payload copy and clamp,
+  config, Sigma bindings, all four rules incl. the two stateful ones on
+  the fake clock), a ClickHouse round-trip pinning `dnsRow.bind` against
+  migration 00010 (run locally against Docker), and a privileged
+  integration test that sends one built query datagram to 127.0.0.1:53
+  with nothing listening and expects it back through the send-path
+  kprobe with the name intact.
 
 - ✅ **Container lifecycle + per-event container context (2026-09-19).**
   Closes the PROJECT.md §3.1 "container events" line item and fills the

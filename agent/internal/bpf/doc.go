@@ -10,6 +10,8 @@
 //     finit_module exit, bpf(BPF_PROG_LOAD), perf_event_open (Phase 7).
 //   - cgroup.bpf.c  — cgroup_mkdir/cgroup_rmdir tracepoints: container
 //     create/stop, and the cgroup-id → container map (Phase 7).
+//   - dns.bpf.c     — ip_send_skb/ip6_send_skb kprobes + __skb_recv_udp
+//     kretprobe: UDP/53 payloads for the enricher's DNS parser (Phase 7).
 //
 // Bindings are produced by bpf2go at `make gen` time and embedded into the
 // slither-agent binary via go:embed. No handwritten Go should live here except

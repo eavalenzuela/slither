@@ -1,7 +1,7 @@
 // Package collector turns a platform's kernel telemetry into typed
 // raw-event channels consumed by the enricher.
 //
-// Each collector (process, file, net, auth, kernel, container) owns its reader goroutine and its
+// Each collector (process, file, net, auth, kernel, container, dns) owns its reader goroutine and its
 // output channel. The aggregate is wired by Group. The Group orchestrator
 // and the Collector interface are platform-neutral; the per-collector
 // constructors are platform-specific — eBPF on Linux (ADR-0010), Endpoint
@@ -38,6 +38,7 @@ type Group struct {
 	Auth    chan pipeline.RawAuthEvent
 	Kernel  chan pipeline.RawKernelEvent
 	Cgroup  chan pipeline.RawCgroupEvent
+	DNS     chan pipeline.RawDNSEvent
 
 	cfg           config.Collectors
 	telem         *telemetry.Counters
@@ -47,6 +48,7 @@ type Group struct {
 	authenticator Collector
 	kerneler      Collector
 	containerer   Collector
+	resolver      Collector
 }
 
 // NewGroup constructs collectors honouring the enable flags in cfg. The
@@ -80,15 +82,18 @@ func NewGroup(cfg config.Collectors, telem *telemetry.Counters) *Group {
 	if cfg.Container.Enabled {
 		g.containerer = newCgroupCollector(g.Cgroup, telem)
 	}
+	if cfg.DNS.Enabled {
+		g.resolver = newDNSCollector(g.DNS, telem)
+	}
 	return g
 }
 
 // Run starts every enabled collector and returns when ctx is cancelled or
 // any collector returns an error.
 func (g *Group) Run(ctx context.Context) error {
-	errCh := make(chan error, 6)
+	errCh := make(chan error, 7)
 	started := 0
-	for _, c := range []Collector{g.processor, g.filer, g.networker, g.authenticator, g.kerneler, g.containerer} {
+	for _, c := range []Collector{g.processor, g.filer, g.networker, g.authenticator, g.kerneler, g.containerer, g.resolver} {
 		if c == nil {
 			continue
 		}

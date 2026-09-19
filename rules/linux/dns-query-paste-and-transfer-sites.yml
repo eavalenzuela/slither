@@ -1,0 +1,36 @@
+title: DNS lookup of a paste or file-transfer service
+id: 8b7c4d00-0001-4000-8000-00000000005d
+status: experimental
+description: |
+  A process resolved a paste site or anonymous file-transfer service.
+  These are the standard drop points for staged payloads (T1102.001,
+  Web Service: Dead Drop Resolver) and for exfiltration (T1567.002).
+  On a workstation this is a person; on a server it is worth a look
+  every time, which is why the rule is low rather than off — searchable
+  and correlatable with the process that asked, not a page.
+level: low
+tags:
+  - attack.command_and_control
+  - attack.exfiltration
+  - attack.t1102.001
+  - attack.t1567.002
+logsource:
+  product: linux
+  category: dns_query
+detection:
+  query:
+    EventCode: dns_query
+    QueryName|endswith:
+      - pastebin.com
+      - paste.ee
+      - hastebin.com
+      - ghostbin.com
+      - rentry.co
+      - transfer.sh
+      - file.io
+      - anonfiles.com
+      - gofile.io
+      - bashupload.com
+      - 0x0.st
+      - temp.sh
+  condition: query

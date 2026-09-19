@@ -7,7 +7,7 @@
  *                                           server-side view of the client)
  *   - udp_sendmsg(struct sock *sk, ...)   — outbound UDP datagram
  *
- * DNS is deferred to Phase 3 per §3.2. We emit raw endpoint addresses only;
+ * DNS lives in dns.bpf.c (Phase 7). We emit raw endpoint addresses only;
  * orientation (inbound vs outbound) and v4/v6 stringification happen in the
  * userspace enricher, which is cheaper than doing it in BPF and keeps the
  * verifier happy with simpler programs.

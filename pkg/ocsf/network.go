@@ -85,6 +85,11 @@ type DnsActivity struct {
 	Answers     []DnsAnswer   `json:"answers,omitempty"`
 	RCode       string        `json:"rcode,omitempty"`
 	RCodeID     uint16        `json:"rcode_id,omitempty"`
+	SrcEndpoint *NetEndpoint  `json:"src_endpoint,omitempty"`
+	DstEndpoint *NetEndpoint  `json:"dst_endpoint,omitempty"`
+	// TransactionID is the DNS message id, so a query and its response
+	// from the same process can be paired. slither extension.
+	TransactionID uint16 `json:"x_transaction_id,omitempty"`
 }
 
 type DnsActivityID uint8
@@ -98,9 +103,10 @@ const (
 )
 
 type DnsQuery struct {
-	Name  string `json:"hostname,omitempty"`
-	Type  string `json:"type,omitempty"`
-	Class string `json:"class,omitempty"`
+	Name   string `json:"hostname,omitempty"`
+	Type   string `json:"type,omitempty"`
+	Class  string `json:"class,omitempty"`
+	Opcode string `json:"opcode,omitempty"`
 }
 
 type DnsAnswer struct {

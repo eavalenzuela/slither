@@ -58,6 +58,11 @@ type EventNode struct {
 	// Container-only.
 	ContainerID string
 	Runtime     string
+
+	// DNS-only.
+	QueryName string
+	QueryType string
+	RCode     string
 }
 
 // GetEventNode looks up a single event across every class table. Class
@@ -382,6 +387,18 @@ func (s *Store) lookupByEventID(ctx context.Context, classUID uint32, table stri
 		if err != nil {
 			return EventNode{}, false, err
 		}
+	case "ocsf_dns_activity_4003":
+		err := row.Scan(
+			&n.EventID, &n.HostID, &n.ObservedAt,
+			&n.EventCode, &n.QueryName, &n.QueryType, &n.RCode, &n.DstIP,
+			&n.ActorPID, &n.ActorName,
+		)
+		if isNoRows(err) {
+			return EventNode{}, false, nil
+		}
+		if err != nil {
+			return EventNode{}, false, err
+		}
 	default:
 		return EventNode{}, false, fmt.Errorf("classProjection: unsupported table %q", table)
 	}
@@ -408,6 +425,9 @@ func classProjection(table string) string {
 	case "ocsf_container_lifecycle_6000":
 		return `toString(event_id), toString(host_id), observed_at,
 			event_code, container_id, runtime, actor_pid, actor_name`
+	case "ocsf_dns_activity_4003":
+		return `toString(event_id), toString(host_id), observed_at,
+			event_code, query_name, query_type, rcode, dst_ip, actor_pid, actor_name`
 	case "ocsf_detection_finding_2004":
 		// Detection findings store rule metadata as columns in the
 		// CH writer (#39). The list summary projection uses these

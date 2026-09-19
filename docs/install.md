@@ -515,6 +515,55 @@ directly under runc / conmon — the shape of `docker exec -it`).
 
 Requires a restart — this is not in the SIGHUP hot-reload scope.
 
+### DNS telemetry (`collectors.dns`)
+
+On by default in the sample config. UDP/53 datagrams are read from the
+kernel socket buffer on the IP send path (queries) and the UDP receive
+path (responses), so every resolver — glibc, musl, Go's pure resolver,
+systemd-resolved, dnsmasq, a malware's own — is seen, and each query is
+attributed to the process that sent it. OCSF DNS Activity (4003).
+
+```yaml
+collectors:
+  dns:
+    enabled: true
+```
+
+**What is captured.** Query name, type and class; for responses the
+rcode and every answer's rdata (addresses, CNAME targets, TXT strings,
+up to 32 answers); the 5-tuple; the message id (`x_transaction_id`) so
+a query and its response from the same process can be paired; and the
+process as the actor, with its container id when it has one.
+
+**Stub resolvers.** With systemd-resolved at 127.0.0.53 (or dnsmasq /
+unbound locally) each lookup is seen twice — the application's query to
+the stub and the stub's query upstream. Both are kept: the first says
+who asked, the second says what actually went to the wire. The shipped
+rules exclude the stub resolvers by image so they fire on the
+application, and stateful rules do not double-count.
+
+**Not seen.** DNS over TCP (large responses, zone transfers), DoT and
+DoH — none of them are UDP/53. Payloads past 1024 bytes are truncated;
+that cuts only EDNS padding and very long answer sets.
+
+**Sigma** (`logsource: {product: linux, category: dns_query}`, alias
+`dns`): Sysmon 22's vocabulary — `QueryName`, `QueryType`, `QueryClass`,
+`QueryResults` (multi-valued rdata, so `QueryResults|cidr` works),
+`QueryStatus` / `RCode` — plus `EventCode` (`dns_query` /
+`dns_response`), `DestinationIp` / `DestinationPort` / `SourceIp`, and
+the actor fields `Image` / `CommandLine` / `User` / `ProcessId` /
+`ContainerId`. `QueryName|ioc: <feed>` matches a domain IOC feed.
+
+**Shipped rules.** `dns-query-long-label` (medium: a 40+ char label —
+tunnels), `dns-query-txt-burst` (high: >20 TXT queries from one process
+in 60 s, MTAs excluded), `dns-response-nxdomain-burst` (medium: >30
+NXDOMAIN to one process in 60 s — DGA) and
+`dns-query-paste-and-transfer-sites` (low, audit). The existing
+`proc-dns-*` rules on dig / nslookup command lines stay as the
+command-line complement.
+
+Requires a restart — this is not in the SIGHUP hot-reload scope.
+
 ### Environment variable overrides
 
 The config loader honours a small set of `SLITHER_*` env vars as
@@ -531,6 +580,7 @@ late-binding overrides (see `agent/internal/config/config.go`):
 | `SLITHER_COLLECTORS_AUTH_ENABLED`    | `collectors.auth.enabled`          |
 | `SLITHER_COLLECTORS_KERNEL_ENABLED`  | `collectors.kernel.enabled`        |
 | `SLITHER_COLLECTORS_CONTAINER_ENABLED` | `collectors.container.enabled`   |
+| `SLITHER_COLLECTORS_DNS_ENABLED`     | `collectors.dns.enabled`           |
 | `SLITHER_RULES_PATHS`                | `rules.paths` (comma-separated)    |
 
 Set them in a systemd drop-in (`/etc/systemd/system/slither-agent.service.d/override.conf`):

@@ -29,6 +29,8 @@ func CategoryToClass(c ruleast.Category) (ocsf.ClassID, bool) {
 		return ocsf.ClassKernelActivity, true
 	case ruleast.CategoryContainerLifecycle:
 		return ocsf.ClassContainerLifecycle, true
+	case ruleast.CategoryDNSQuery:
+		return ocsf.ClassDnsActivity, true
 	}
 	return 0, false
 }
@@ -48,6 +50,8 @@ func AccessorFor(c ruleast.Category) Accessor {
 		return kernelAccessor
 	case ruleast.CategoryContainerLifecycle:
 		return containerAccessor
+	case ruleast.CategoryDNSQuery:
+		return dnsAccessor
 	}
 	return nil
 }
@@ -194,6 +198,33 @@ var containerAccessor = Accessor{
 	"PID":         func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
 }
 
+// dnsAccessor maps Sigma dns_query fields onto ocsf.DnsActivity. The
+// vocabulary is Sysmon 22's (QueryName, QueryResults, QueryStatus) plus
+// the endpoint fields shared with network_connection.
+var dnsAccessor = Accessor{
+	"QueryName":  dnsQueryName,
+	"Query":      dnsQueryName,
+	"QueryType":  dnsQueryType,
+	"QueryClass": dnsQueryClass,
+	// QueryResults is multi-valued: every answer's rdata (an address, a
+	// CNAME target, a TXT string) — so `QueryResults|cidr` and
+	// `QueryResults|contains` both do what a Sysmon rule expects.
+	"QueryResults":    dnsQueryResults,
+	"QueryStatus":     dnsRCode,
+	"RCode":           dnsRCode,
+	"EventCode":       dnsEventCode,
+	"EventType":       dnsEventCode,
+	"DestinationIp":   dnsDstIP,
+	"DestinationPort": dnsDstPort,
+	"SourceIp":        dnsSrcIP,
+	"Image":           func(e ocsf.Event) []string { return procExePath(actorProcess(e)) },
+	"CommandLine":     func(e ocsf.Event) []string { return nonEmpty(actorProcess(e).Cmdline) },
+	"User":            actorUserName,
+	"ProcessId":       func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
+	"PID":             func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
+	"ContainerId":     actorContainerID,
+}
+
 // --- helpers (kept tiny and boring; they are the glue, not the logic) -------
 
 func procOf(e ocsf.Event) ocsf.Process {
@@ -253,6 +284,8 @@ func actorProcess(e ocsf.Event) ocsf.Process {
 		return v.Actor.Process
 	case *ocsf.ContainerLifecycle:
 		return v.Actor.Process
+	case *ocsf.DnsActivity:
+		return v.Actor.Process
 	case *ocsf.ProcessActivity:
 		return v.Actor.Process
 	}
@@ -271,6 +304,8 @@ func actorUserName(e ocsf.Event) []string {
 	case *ocsf.KernelActivity:
 		u = v.Actor.User
 	case *ocsf.ContainerLifecycle:
+		u = v.Actor.User
+	case *ocsf.DnsActivity:
 		u = v.Actor.User
 	case *ocsf.ProcessActivity:
 		u = v.Actor.User
@@ -596,4 +631,89 @@ func containerCgroupPath(e ocsf.Event) []string {
 		return nil
 	}
 	return nonEmpty(c.Container.CgroupPath)
+}
+
+// --- dns activity (4003) accessors -----------------------------------------
+
+func dnsOf(e ocsf.Event) (*ocsf.DnsActivity, bool) {
+	d, ok := e.(*ocsf.DnsActivity)
+	return d, ok
+}
+
+func dnsQueryName(e ocsf.Event) []string {
+	d, ok := dnsOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(d.Query.Name)
+}
+
+func dnsQueryType(e ocsf.Event) []string {
+	d, ok := dnsOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(d.Query.Type)
+}
+
+func dnsQueryClass(e ocsf.Event) []string {
+	d, ok := dnsOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(d.Query.Class)
+}
+
+func dnsQueryResults(e ocsf.Event) []string {
+	d, ok := dnsOf(e)
+	if !ok || len(d.Answers) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(d.Answers))
+	for _, a := range d.Answers {
+		if a.RData != "" {
+			out = append(out, a.RData)
+		}
+	}
+	return out
+}
+
+func dnsRCode(e ocsf.Event) []string {
+	d, ok := dnsOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(d.RCode)
+}
+
+func dnsEventCode(e ocsf.Event) []string {
+	d, ok := dnsOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(d.Metadata.EventCode)
+}
+
+func dnsDstIP(e ocsf.Event) []string {
+	d, ok := dnsOf(e)
+	if !ok || d.DstEndpoint == nil {
+		return nil
+	}
+	return nonEmpty(d.DstEndpoint.IP)
+}
+
+func dnsDstPort(e ocsf.Event) []string {
+	d, ok := dnsOf(e)
+	if !ok || d.DstEndpoint == nil || d.DstEndpoint.Port == 0 {
+		return nil
+	}
+	return []string{strconv.FormatUint(uint64(d.DstEndpoint.Port), 10)}
+}
+
+func dnsSrcIP(e ocsf.Event) []string {
+	d, ok := dnsOf(e)
+	if !ok || d.SrcEndpoint == nil {
+		return nil
+	}
+	return nonEmpty(d.SrcEndpoint.IP)
 }

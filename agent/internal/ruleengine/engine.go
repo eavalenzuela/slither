@@ -330,6 +330,8 @@ func isFollowup(ev ocsf.Event) bool {
 		labels = v.Metadata.Labels
 	case *ocsf.ContainerLifecycle:
 		labels = v.Metadata.Labels
+	case *ocsf.DnsActivity:
+		labels = v.Metadata.Labels
 	default:
 		return false
 	}

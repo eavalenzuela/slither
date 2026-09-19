@@ -130,6 +130,8 @@ func envelope(e ocsf.Event) (ocsf.Device, ocsf.Product, string) {
 		return v.Device, v.Metadata.Product, v.Metadata.UID
 	case *ocsf.ContainerLifecycle:
 		return v.Device, v.Metadata.Product, v.Metadata.UID
+	case *ocsf.DnsActivity:
+		return v.Device, v.Metadata.Product, v.Metadata.UID
 	}
 	return ocsf.Device{}, ocsf.Product{}, ""
 }

@@ -1,0 +1,36 @@
+title: DNS query with an unusually long label
+id: 8b7c4d00-0001-4000-8000-00000000005a
+status: experimental
+description: |
+  A DNS lookup with a single label of 40 or more characters. Real
+  hostnames rarely need that; DNS tunnels (iodine, dnscat2, dns2tcp)
+  and exfiltration-over-DNS encode their payload into long labels
+  because a label is the only place a query carries data. T1071.004
+  (Application Layer Protocol: DNS), T1048.003.
+
+  Known long-label legitimate traffic: some CDN and SaaS hostnames
+  carry 32-hex identifiers (still under 40), DKIM selectors, and
+  certificate-transparency probes. Tune by Image where a fleet has a
+  regular offender. Keyed on the application's own query, not the
+  stub resolver's upstream copy, so the process is the right one to
+  look at.
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.exfiltration
+  - attack.t1071.004
+  - attack.t1048.003
+logsource:
+  product: linux
+  category: dns_query
+detection:
+  query:
+    EventCode: dns_query
+    QueryName|re: '(^|\.)[A-Za-z0-9_-]{40,}\.'
+  stub_resolver:
+    Image|endswith:
+      - /systemd-resolved
+      - /dnsmasq
+      - /unbound
+      - /named
+  condition: query and not stub_resolver

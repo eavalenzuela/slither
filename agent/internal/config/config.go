@@ -99,6 +99,7 @@ type Collectors struct {
 	Auth      AuthCollector      `yaml:"auth"`
 	Kernel    KernelCollector    `yaml:"kernel"`
 	Container ContainerCollector `yaml:"container"`
+	DNS       DNSCollector       `yaml:"dns"`
 }
 
 // ProcessCollector configures the process lifecycle collector.
@@ -164,6 +165,16 @@ type KernelCollector struct {
 // container / image names live in the runtime, not the kernel, and are
 // not covered.
 type ContainerCollector struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+// DNSCollector configures DNS telemetry: UDP/53 queries and responses
+// read from the socket buffer on the kernel send / receive paths, so
+// every resolver (glibc, musl, Go, systemd-resolved, dnsmasq) is seen
+// and each query is attributed to the asking process. Emits OCSF DNS
+// Activity (4003). DNS over TCP, DoT and DoH are not UDP/53 and are
+// not covered.
+type DNSCollector struct {
 	Enabled bool `yaml:"enabled"`
 }
 
@@ -335,7 +346,7 @@ func (c *Config) Validate() error {
 			g.BufferSize = 4096
 		}
 	}
-	if !c.Collectors.Process.Enabled && !c.Collectors.File.Enabled && !c.Collectors.Net.Enabled && !c.Collectors.Auth.Enabled && !c.Collectors.Kernel.Enabled && !c.Collectors.Container.Enabled {
+	if !c.Collectors.Process.Enabled && !c.Collectors.File.Enabled && !c.Collectors.Net.Enabled && !c.Collectors.Auth.Enabled && !c.Collectors.Kernel.Enabled && !c.Collectors.Container.Enabled && !c.Collectors.DNS.Enabled {
 		return fmt.Errorf("%w: no collectors enabled", ErrInvalidConfig)
 	}
 	for i, p := range c.Rules.Paths {
@@ -441,6 +452,11 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("SLITHER_COLLECTORS_CONTAINER_ENABLED"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			c.Collectors.Container.Enabled = b
+		}
+	}
+	if v := os.Getenv("SLITHER_COLLECTORS_DNS_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			c.Collectors.DNS.Enabled = b
 		}
 	}
 	if v := os.Getenv("SLITHER_RULES_PATHS"); v != "" {

@@ -209,3 +209,29 @@ const (
 	CgroupMkdir
 	CgroupRmdir
 )
+
+// RawDNSEvent is the decoded form of a dns.bpf.c ringbuffer record: one
+// UDP/53 datagram, outbound (query) or inbound (response), with the
+// raw DNS payload for the enricher to parse.
+type RawDNSEvent struct {
+	Kind RawDNSKind
+	// PID is the tgid of the process that sent or received the datagram.
+	PID       uint32
+	UID       uint32
+	SrcAddr   string
+	SrcPort   uint16
+	DstAddr   string
+	DstPort   uint16
+	Payload   []byte
+	Comm      string
+	Timestamp time.Time
+}
+
+// RawDNSKind distinguishes direction.
+type RawDNSKind uint8
+
+const (
+	DNSUnknown RawDNSKind = iota
+	DNSQuery
+	DNSResponse
+)

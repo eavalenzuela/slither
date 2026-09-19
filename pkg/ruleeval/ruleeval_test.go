@@ -16,6 +16,7 @@ func TestCategoryToClassCoversPhase1(t *testing.T) {
 		ruleast.CategoryAuthentication:     ocsf.ClassAuthentication,
 		ruleast.CategoryDriverLoad:         ocsf.ClassKernelActivity,
 		ruleast.CategoryContainerLifecycle: ocsf.ClassContainerLifecycle,
+		ruleast.CategoryDNSQuery:           ocsf.ClassDnsActivity,
 	}
 	for cat, want := range cases {
 		got, ok := CategoryToClass(cat)
@@ -241,5 +242,37 @@ func TestEnvLookupContainerIdAcrossClasses(t *testing.T) {
 		if got, ok := env.Lookup(field); !ok || got[0] != w {
 			t.Errorf("container_lifecycle %s = %v, %v; want %q", field, got, ok, w)
 		}
+	}
+}
+
+func TestEnvLookupOnDnsActivity(t *testing.T) {
+	ev := &ocsf.DnsActivity{
+		Metadata:    ocsf.Metadata{EventCode: "dns_response"},
+		ClassUID:    ocsf.ClassDnsActivity,
+		ActivityID:  ocsf.DnsActivityResponse,
+		Time:        1,
+		Query:       ocsf.DnsQuery{Name: "www.example.com", Type: "A", Class: "IN"},
+		Answers:     []ocsf.DnsAnswer{{Type: "CNAME", RData: "edge.example.net"}, {Type: "A", RData: "203.0.113.9"}},
+		RCode:       "NOERROR",
+		SrcEndpoint: &ocsf.NetEndpoint{IP: "127.0.0.53", Port: 53},
+		DstEndpoint: &ocsf.NetEndpoint{IP: "10.0.0.5", Port: 41000},
+		Actor:       ocsf.Actor{Process: ocsf.Process{PID: 700, File: &ocsf.File{Path: "/usr/bin/curl"}, ContainerID: "abc"}, User: ocsf.User{Name: "alice"}},
+	}
+	env := EnvFor(ev, AccessorFor(ruleast.CategoryDNSQuery))
+	for field, w := range map[string]string{
+		"QueryName": "www.example.com", "QueryType": "A", "QueryClass": "IN", "QueryStatus": "NOERROR", "RCode": "NOERROR",
+		"EventCode": "dns_response", "DestinationIp": "10.0.0.5", "DestinationPort": "41000", "SourceIp": "127.0.0.53",
+		"Image": "/usr/bin/curl", "User": "alice", "ProcessId": "700", "ContainerId": "abc",
+	} {
+		if got, ok := env.Lookup(field); !ok || len(got) != 1 || got[0] != w {
+			t.Errorf("Lookup(%q) = %v, %v; want [%q]", field, got, ok, w)
+		}
+	}
+	if got, ok := env.Lookup("QueryResults"); !ok || len(got) != 2 || got[1] != "203.0.113.9" {
+		t.Errorf("QueryResults = %v, %v", got, ok)
+	}
+	ev.Answers = nil
+	if _, ok := EnvFor(ev, AccessorFor(ruleast.CategoryDNSQuery)).Lookup("QueryResults"); ok {
+		t.Error("no answers → QueryResults absent")
 	}
 }

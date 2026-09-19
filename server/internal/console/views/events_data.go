@@ -82,6 +82,8 @@ func classLabel(uid uint32) string {
 		return "kernel"
 	case 6000:
 		return "container"
+	case 4003:
+		return "dns"
 	case 4001:
 		return "network"
 	}

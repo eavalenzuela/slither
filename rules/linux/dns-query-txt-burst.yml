@@ -1,0 +1,41 @@
+title: Burst of DNS TXT queries from one process
+id: 8b7c4d00-0001-4000-8000-00000000005b
+status: experimental
+description: |
+  More than twenty TXT lookups from one process inside 60 seconds. TXT
+  is the record type DNS tunnels and DNS-based C2 (dnscat2, Cobalt
+  Strike DNS beacons) use to carry data back, and almost nothing else
+  on an endpoint asks for TXT in volume. T1071.004.
+
+  Mail infrastructure is the exception — SPF, DKIM and DMARC are TXT —
+  so MTAs and mail filters are excluded, as are the local stub
+  resolvers whose upstream copies would otherwise double-count.
+  Bounded-stateful and edge-eligible.
+level: high
+tags:
+  - attack.command_and_control
+  - attack.t1071.004
+logsource:
+  product: linux
+  category: dns_query
+detection:
+  txt:
+    EventCode: dns_query
+    QueryType: TXT
+  expected_txt_user:
+    Image|endswith:
+      - /systemd-resolved
+      - /dnsmasq
+      - /unbound
+      - /named
+      - /smtpd
+      - /postfix
+      - /exim4
+      - /exim
+      - /opendkim
+      - /opendmarc
+      - /rspamd
+      - /spamd
+      - /amavisd
+  condition: (txt and not expected_txt_user) | count() by ProcessId > 20
+timeframe: 60s

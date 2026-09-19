@@ -16,3 +16,4 @@ package bpf
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -target bpfel -type auth_event -go-package bpf -output-dir . -output-stem auth Auth src/auth.bpf.c -- -I./src/headers -Wall -O2 -g
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -target bpfel -type kernel_event -go-package bpf -output-dir . -output-stem kernel Kernel src/kernel.bpf.c -- -I./src/headers -Wall -O2 -g
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -target bpfel -type cgroup_event -go-package bpf -output-dir . -output-stem cgroup Cgroup src/cgroup.bpf.c -- -I./src/headers -Wall -O2 -g
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -target bpfel -type dns_event -go-package bpf -output-dir . -output-stem dns Dns src/dns.bpf.c -- -I./src/headers -Wall -O2 -g

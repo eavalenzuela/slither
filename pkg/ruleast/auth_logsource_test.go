@@ -76,3 +76,16 @@ func TestLogSourceContainerLifecycleAndAlias(t *testing.T) {
 		}
 	}
 }
+
+func TestLogSourceDNSQueryAndAlias(t *testing.T) {
+	for _, cat := range []string{"dns_query", "dns"} {
+		src := "title: t\nid: 11111111-1111-4111-8111-111111111111\nlevel: low\nlogsource:\n  product: linux\n  category: " + cat + "\ndetection:\n  sel:\n    QueryName|endswith: .evil.example\n  condition: sel\n"
+		art, _, _, err := Compile([]byte(src))
+		if err != nil {
+			t.Fatalf("category %s: Compile: %v", cat, err)
+		}
+		if art.Rule.Category != CategoryDNSQuery {
+			t.Errorf("category %s → %q", cat, art.Rule.Category)
+		}
+	}
+}

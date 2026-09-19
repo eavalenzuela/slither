@@ -80,6 +80,16 @@ collectors:
   # runtime state, not kernel state, and are not covered.
   container:
     enabled: true
+  # DNS: UDP/53 queries and responses read from the socket buffer on the
+  # kernel send / receive paths, so every resolver (glibc, musl, Go,
+  # systemd-resolved, dnsmasq) is seen and each query is attributed to
+  # the asking process. OCSF DNS Activity (4003). Feeds
+  # rules/linux/dns-*.yml. With a local stub resolver each lookup is
+  # seen twice — the app's query to the stub and the stub's upstream
+  # query — and the shipped rules key on the app's. DNS over TCP, DoT
+  # and DoH are not UDP/53 and are not covered.
+  dns:
+    enabled: true
 
 rules:
   paths:

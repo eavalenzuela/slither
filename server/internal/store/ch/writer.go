@@ -114,6 +114,7 @@ func NewWriter(store *Store, bus *ingest.Bus, telem *telemetry.Counters, opts Wr
 			pb.OcsfClassId_OCSF_CLASS_ID_AUTHENTICATION:       {tableName: "ocsf_authentication_3002"},
 			pb.OcsfClassId_OCSF_CLASS_ID_KERNEL_ACTIVITY:      {tableName: "ocsf_kernel_activity_1003"},
 			pb.OcsfClassId_OCSF_CLASS_ID_CONTAINER_LIFECYCLE:  {tableName: "ocsf_container_lifecycle_6000"},
+			pb.OcsfClassId_OCSF_CLASS_ID_DNS_ACTIVITY:         {tableName: "ocsf_dns_activity_4003"},
 			pb.OcsfClassId_OCSF_CLASS_ID_DETECTION_FINDING:    {tableName: "ocsf_detection_finding_2004"},
 		},
 	}
@@ -260,6 +261,8 @@ func decode(env *pb.Envelope) (chRow, error) {
 		return decodeKernel(env)
 	case pb.OcsfClassId_OCSF_CLASS_ID_CONTAINER_LIFECYCLE:
 		return decodeContainer(env)
+	case pb.OcsfClassId_OCSF_CLASS_ID_DNS_ACTIVITY:
+		return decodeDNS(env)
 	case pb.OcsfClassId_OCSF_CLASS_ID_DETECTION_FINDING:
 		return decodeFinding(env)
 	}
@@ -639,6 +642,65 @@ func (r containerRow) bind(batch driver.Batch) error {
 		r.shared.classUID, r.shared.severityID,
 		r.activityID, r.eventCode, r.containerID, r.runtime, r.cgroupPath,
 		r.actorPID, r.actorName, r.actorCmdline,
+		r.shared.raw,
+	)
+}
+
+func decodeDNS(env *pb.Envelope) (chRow, error) {
+	var ev ocsf.DnsActivity
+	if err := json.Unmarshal(env.GetPayload(), &ev); err != nil {
+		return nil, err
+	}
+	row := dnsRow{shared: sharedFromEnvelope(env)}
+	row.activityID = uint8(ev.ActivityID)
+	row.eventCode = ev.Metadata.EventCode
+	row.queryName = ev.Query.Name
+	row.queryType = ev.Query.Type
+	row.rcode = ev.RCode
+	if len(ev.Answers) > 0 {
+		parts := make([]string, 0, len(ev.Answers))
+		for _, a := range ev.Answers {
+			if a.RData != "" {
+				parts = append(parts, a.RData)
+			}
+		}
+		row.answers = strings.Join(parts, ",")
+	}
+	if ev.SrcEndpoint != nil {
+		row.srcIP = ev.SrcEndpoint.IP
+	}
+	if ev.DstEndpoint != nil {
+		row.dstIP = ev.DstEndpoint.IP
+		row.dstPort = ev.DstEndpoint.Port
+	}
+	row.actorPID = ev.Actor.Process.PID
+	row.actorName = ev.Actor.Process.Name
+	return row, nil
+}
+
+// dnsRow mirrors ocsf_dns_activity_4003 (migration 00010) column for
+// column; bind order must match the DDL exactly.
+type dnsRow struct {
+	shared     sharedRow
+	activityID uint8
+	eventCode  string
+	queryName  string
+	queryType  string
+	rcode      string
+	answers    string
+	srcIP      string
+	dstIP      string
+	dstPort    uint16
+	actorPID   uint32
+	actorName  string
+}
+
+func (r dnsRow) bind(batch driver.Batch) error {
+	return batch.Append(
+		r.shared.eventID, r.shared.hostID, r.shared.observedAt, r.shared.collectedAt,
+		r.shared.classUID, r.shared.severityID,
+		r.activityID, r.eventCode, r.queryName, r.queryType, r.rcode, r.answers,
+		r.srcIP, r.dstIP, r.dstPort, r.actorPID, r.actorName,
 		r.shared.raw,
 	)
 }

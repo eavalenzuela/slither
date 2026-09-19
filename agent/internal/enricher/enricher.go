@@ -303,6 +303,7 @@ func (e *enricher) Run(ctx context.Context) error {
 	var authIn <-chan pipeline.RawAuthEvent = e.cg.Auth
 	var kernelIn <-chan pipeline.RawKernelEvent = e.cg.Kernel
 	var cgroupIn <-chan pipeline.RawCgroupEvent = e.cg.Cgroup
+	var dnsIn <-chan pipeline.RawDNSEvent = e.cg.DNS
 
 	for {
 		select {
@@ -344,6 +345,12 @@ func (e *enricher) Run(ctx context.Context) error {
 				continue
 			}
 			e.handleCgroup(ctx, raw)
+		case raw, ok := <-dnsIn:
+			if !ok {
+				dnsIn = nil
+				continue
+			}
+			e.handleDNS(ctx, raw)
 		}
 	}
 }

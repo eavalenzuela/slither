@@ -1,0 +1,30 @@
+title: Burst of NXDOMAIN responses to one process
+id: 8b7c4d00-0001-4000-8000-00000000005c
+status: experimental
+description: |
+  More than thirty NXDOMAIN answers to one process inside 60 seconds.
+  Domain-generation algorithms (T1568.002) try many candidate names
+  until one resolves, and the failures are the tell: a normal
+  application resolves a handful of names and they exist. Stub
+  resolvers are excluded (their upstream copies would double-count);
+  a browser doing prefetch on a page of dead links can trip this once,
+  which is what the threshold is set to ignore.
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1568.002
+logsource:
+  product: linux
+  category: dns_query
+detection:
+  nxdomain:
+    EventCode: dns_response
+    RCode: NXDOMAIN
+  stub_resolver:
+    Image|endswith:
+      - /systemd-resolved
+      - /dnsmasq
+      - /unbound
+      - /named
+  condition: (nxdomain and not stub_resolver) | count() by ProcessId > 30
+timeframe: 60s

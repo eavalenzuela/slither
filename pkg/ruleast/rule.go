@@ -30,6 +30,11 @@ const (
 	// Lifecycle (6000): container create / start / stop as observed from
 	// the container's cgroup. `container_event` is accepted as an alias.
 	CategoryContainerLifecycle Category = "container_lifecycle"
+	// CategoryDNSQuery is Sigma's taxonomy name for DNS lookups (Sysmon
+	// event 22 on Windows). slither binds it to OCSF DNS Activity (4003):
+	// UDP/53 queries and responses attributed to the process. `dns` is
+	// accepted as an alias.
+	CategoryDNSQuery Category = "dns_query"
 )
 
 // Level maps Sigma's severity vocabulary to slither's own enum. We keep

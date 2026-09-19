@@ -8,7 +8,7 @@
 //   - logsource.product must be "linux"; category must be one of
 //     "process_creation", "file_event", "network_connection",
 //     "authentication" (or `service: auth` with no category), "driver_load",
-//     "container_lifecycle".
+//     "container_lifecycle", "dns_query".
 //   - detection is a map of named selections plus a final "condition" string.
 //     No aggregation (count, near, timeframe, pipe operators).
 //   - Field modifiers supported: equals (default), contains, startswith,
