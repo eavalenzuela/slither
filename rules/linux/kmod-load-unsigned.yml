@@ -1,0 +1,32 @@
+title: Unsigned or force-loaded kernel module
+id: 8b7c4d00-0001-4000-8000-000000000053
+status: experimental
+description: |
+  A module loaded and tainted the kernel with E (unsigned module) or F
+  (forced load — version check bypassed). On a host without signature
+  enforcement this is the load that enforcement would have rejected;
+  with enforcement on it cannot happen at all, so either way it is a
+  module the distro did not ship. T1014 (Rootkit), T1547.006.
+
+  Distinct from kmod-load-out-of-tree (taint O), which fires for DKMS
+  builds that are unsigned-by-construction on most distros and is
+  therefore low. This rule is the high-signal half: unsigned *and* not
+  built by the local DKMS pipeline is rare outside an intrusion — but
+  check the loader command line before acting, because a hand-built
+  driver on a lab box looks identical.
+level: high
+tags:
+  - attack.persistence
+  - attack.defense_evasion
+  - attack.t1014
+  - attack.t1547.006
+logsource:
+  product: linux
+  category: driver_load
+detection:
+  loaded:
+    EventCode: module_load
+    Taints:
+      - unsigned_module
+      - forced_module
+  condition: loaded

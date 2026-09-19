@@ -140,7 +140,10 @@ The agent runs as root with a bounded capability set
 (CAP_BPF, CAP_PERFMON, CAP_SYS_PTRACE, CAP_DAC_READ_SEARCH,
 CAP_DAC_OVERRIDE, CAP_KILL, CAP_NET_ADMIN), holds open BPF program
 FDs + tracepoint perf events + uprobes on the host's libpam.so.0 (the
-auth collector; no additional capability — uprobes ride CAP_PERFMON),
+auth collector; no additional capability — uprobes ride CAP_PERFMON) +
+tracepoints on the module, bpf and perf_event_open paths (the kernel
+collector, which is also how the agent would see its own hooks being
+removed or a rootkit's being added),
 reads /proc, hashes executables, writes telemetry to ClickHouse via the
 server. The libpam probes read PAM_USER / PAM_TTY / PAM_RHOST and never
 PAM_AUTHTOK, so a password cannot enter the event stream by

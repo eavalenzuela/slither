@@ -1,0 +1,36 @@
+title: Kernel module load rejected by signature enforcement or lockdown
+id: 8b7c4d00-0001-4000-8000-000000000052
+status: experimental
+description: |
+  init_module / finit_module returned a key or permission error: the
+  kernel refused a module because its signature was missing, unverifiable
+  or revoked (EKEYREJECTED, ENOKEY, EKEYREVOKED, EKEYEXPIRED, EBADMSG),
+  or because kernel lockdown forbids module loading (EPERM). On a host
+  with signature enforcement on, this is exactly what a rootkit drop
+  (T1014, T1547.006) looks like when the control works — the module never
+  loads, so the module_load tracepoint never fires and this rejection is
+  the only trace.
+
+  No module name is available for a rejected load; the loader's command
+  line (`insmod /tmp/x.ko`) is the path. modprobe-by-name of a distro
+  module never trips this — those are signed.
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.persistence
+  - attack.t1014
+  - attack.t1547.006
+logsource:
+  product: linux
+  category: driver_load
+detection:
+  rejected:
+    EventCode: module_load_rejected
+    StatusDetail:
+      - EKEYREJECTED
+      - ENOKEY
+      - EKEYREVOKED
+      - EKEYEXPIRED
+      - EBADMSG
+      - EPERM
+  condition: rejected

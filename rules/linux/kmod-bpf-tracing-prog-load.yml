@@ -1,0 +1,53 @@
+title: Tracing or packet-path BPF program loaded by an unexpected process
+id: 8b7c4d00-0001-4000-8000-000000000055
+status: experimental
+description: |
+  bpf(BPF_PROG_LOAD) for a program type that can observe or alter kernel
+  execution — kprobe, tracepoint, raw_tracepoint, tracing, lsm,
+  perf_event — or sit in the packet path — xdp, sched_cls, sched_act,
+  netfilter — from a process that is not one of the tools expected to do
+  that. BPF rootkits (ebpfkit, TripleCross, boopkit) are the modern
+  replacement for an LKM: no module, no taint, no signature check, and
+  they all start with exactly this call. T1014, T1620 (Reflective Code
+  Loading).
+
+  Deliberately excludes the cgroup / socket program types systemd loads
+  for every unit, and excludes the observability tools an operator runs
+  by hand. Extend the filter for the fleet's own tracing agents.
+level: medium
+tags:
+  - attack.defense_evasion
+  - attack.persistence
+  - attack.t1014
+  - attack.t1620
+logsource:
+  product: linux
+  category: driver_load
+detection:
+  prog_load:
+    EventCode: bpf_prog_load
+    ProgType:
+      - kprobe
+      - tracepoint
+      - raw_tracepoint
+      - raw_tracepoint_writable
+      - tracing
+      - lsm
+      - perf_event
+      - xdp
+      - sched_cls
+      - sched_act
+      - netfilter
+  expected_loader:
+    Image|endswith:
+      - /slither-agent
+      - /bpftool
+      - /bpftrace
+      - /perf
+      - /trace-cmd
+      - /tetragon
+      - /falco
+      - /cilium-agent
+      - /tc
+      - /ip
+  condition: prog_load and not expected_loader

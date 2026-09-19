@@ -144,7 +144,7 @@ func Events(d EventsPageData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" placeholder=\"1007 / 1001 / 4001 / 3002 / 2004\"></label> <label>severity ≥ <input type=\"text\" name=\"severity_id\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" placeholder=\"1007 / 1001 / 4001 / 3002 / 1003 / 2004\"></label> <label>severity ≥ <input type=\"text\" name=\"severity_id\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

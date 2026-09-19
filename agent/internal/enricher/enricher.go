@@ -125,6 +125,10 @@ type enricher struct {
 	// handleProcess. Sharding by pid preserves per-pid event order (exec
 	// before exit) while parallelising /proc backfill across workers.
 	procInboxes []chan pipeline.RawProcessEvent
+	// selfPID is the agent's own pid; kernel-activity events it caused
+	// (its BPF loads, its probe attaches) are dropped in handleKernel.
+	// Zero disables the filter (tests).
+	selfPID uint32
 }
 
 // New constructs an Enricher that reads from the given collector group.
@@ -146,6 +150,7 @@ func New(cg *collector.Group, telem *telemetry.Counters, opts Options) Enricher 
 		hasher:         newHasher(opts.HashWorkers),
 		reloadFilterCh: make(chan config.FileCollector, 1),
 		procInboxes:    inboxes,
+		selfPID:        uint32(os.Getpid()), //nolint:gosec // G115: pids fit in 32 bits on Linux
 	}
 }
 
@@ -276,6 +281,7 @@ func (e *enricher) Run(ctx context.Context) error {
 	var fileIn <-chan pipeline.RawFileEvent = e.cg.File
 	var netIn <-chan pipeline.RawNetEvent = e.cg.Net
 	var authIn <-chan pipeline.RawAuthEvent = e.cg.Auth
+	var kernelIn <-chan pipeline.RawKernelEvent = e.cg.Kernel
 
 	for {
 		select {
@@ -305,6 +311,12 @@ func (e *enricher) Run(ctx context.Context) error {
 				continue
 			}
 			e.handleAuth(ctx, raw)
+		case raw, ok := <-kernelIn:
+			if !ok {
+				kernelIn = nil
+				continue
+			}
+			e.handleKernel(ctx, raw)
 		}
 	}
 }

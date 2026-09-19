@@ -44,12 +44,16 @@ type EventNode struct {
 	RuleUID  string
 	RuleName string
 
-	// Authentication-only.
+	// Authentication-only (EventCode + StatusID shared with kernel).
 	EventCode string
 	Service   string
 	UserName  string
 	SrcHost   string
 	StatusID  uint8
+
+	// Kernel-only.
+	KernelType string
+	KernelName string
 }
 
 // GetEventNode looks up a single event across every class table. Class
@@ -350,6 +354,18 @@ func (s *Store) lookupByEventID(ctx context.Context, classUID uint32, table stri
 		if err != nil {
 			return EventNode{}, false, err
 		}
+	case "ocsf_kernel_activity_1003":
+		err := row.Scan(
+			&n.EventID, &n.HostID, &n.ObservedAt,
+			&n.EventCode, &n.KernelType, &n.KernelName, &n.StatusID,
+			&n.ActorPID, &n.ActorName,
+		)
+		if isNoRows(err) {
+			return EventNode{}, false, nil
+		}
+		if err != nil {
+			return EventNode{}, false, err
+		}
 	default:
 		return EventNode{}, false, fmt.Errorf("classProjection: unsupported table %q", table)
 	}
@@ -370,6 +386,9 @@ func classProjection(table string) string {
 	case "ocsf_authentication_3002":
 		return `toString(event_id), toString(host_id), observed_at,
 			event_code, service, user_name, src_ip, src_hostname, status_id, actor_pid, actor_name`
+	case "ocsf_kernel_activity_1003":
+		return `toString(event_id), toString(host_id), observed_at,
+			event_code, kernel_type, kernel_name, status_id, actor_pid, actor_name`
 	case "ocsf_detection_finding_2004":
 		// Detection findings store rule metadata as columns in the
 		// CH writer (#39). The list summary projection uses these

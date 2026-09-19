@@ -1,0 +1,33 @@
+title: Kernel or user probe attached by an unexpected process
+id: 8b7c4d00-0001-4000-8000-000000000056
+status: experimental
+description: |
+  perf_event_open on the kprobe or uprobe PMU — a process asked the
+  kernel to run code when a given kernel function or userspace symbol
+  executes. That is how tracing tools work, and also how BPF rootkits
+  hook syscalls and how credential stealers hook libssl / libpam from
+  outside the process. T1014, T1056 (Input Capture). Fires for probes
+  from anything other than the observability tools an operator runs by
+  hand; extend the filter for the fleet's own tracing agents.
+level: medium
+tags:
+  - attack.defense_evasion
+  - attack.credential_access
+  - attack.t1014
+  - attack.t1056
+logsource:
+  product: linux
+  category: driver_load
+detection:
+  probe:
+    EventCode: probe_attach
+  expected_tracer:
+    Image|endswith:
+      - /slither-agent
+      - /bpftrace
+      - /perf
+      - /bpftool
+      - /trace-cmd
+      - /tetragon
+      - /falco
+  condition: probe and not expected_tracer

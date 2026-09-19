@@ -329,7 +329,7 @@ Data flow: `collector → enricher → ruleengine → output` as an in-process c
 
 ### 3.2 eBPF programs
 
-Four C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs are CO-RE (BPF type format) compatible via `vmlinux.h` embedded in the build. Sources live in a `src/` subdirectory (not the package root) so the Go toolchain doesn't reject `.c` files in a non-cgo package — `gen.go` references them as `src/*.bpf.c -I./src/headers`, and bpf2go writes the generated Go + `.o` back into the package root.
+Five C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs are CO-RE (BPF type format) compatible via `vmlinux.h` embedded in the build. Sources live in a `src/` subdirectory (not the package root) so the Go toolchain doesn't reject `.c` files in a non-cgo package — `gen.go` references them as `src/*.bpf.c -I./src/headers`, and bpf2go writes the generated Go + `.o` back into the package root.
 
 **`process.bpf.c`** — process lifecycle.
 - Hooks: `tracepoint/sched/sched_process_exec`, `tracepoint/sched/sched_process_exit`, `tracepoint/sched/sched_process_fork`.
@@ -354,6 +354,13 @@ Four C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs a
 - Not seen, by design: rejected SSH public keys (sshd enters libpam only after a key or password is accepted), a libpam inside a container image (a uprobe binds to one inode), statically linked authenticators.
 - 1 MB ringbuf — auth events are rare. Classified high-priority by the backpressure shedder (never dropped ahead of process events).
 
+**`kernel.bpf.c`** — kernel-module and probe-attach events (added 2026-09-19, Phase 7 §9; PROJECT.md §3.1 "kernel/module events" line item).
+- Hooks: `tracepoint/module/module_load` (name + taint mask; authoritative for init_module and finit_module alike), `tracepoint/module/module_free` (unload), `tracepoint/syscalls/sys_exit_init_module` + `sys_exit_finit_module` (only when `ret < 0` — a *rejected* load, the case `module_load` never reports; EKEYREJECTED is signature enforcement, EPERM is lockdown), `tracepoint/syscalls/sys_enter_bpf` (`BPF_PROG_LOAD` only: prog_type + prog_name — BPF rootkits all start here), `tracepoint/syscalls/sys_enter_perf_event_open` (every dynamic-PMU open, `attr.type >= PERF_TYPE_MAX`; userspace keeps the kprobe and uprobe PMU ids read from `/sys/bus/event_source/devices/{kprobe,uprobe}/type` and drops the rest — the ids are only known at runtime).
+- Emits: kind, tgid, real uid, -errno (rejected), taint mask (load), prog_type (bpf), perf attr type / config (retprobe bit) / config2 (address or offset), name (module / prog_name), target (kprobe symbol or uprobe path from config1).
+- Not covered: probes created through tracefs `kprobe_events` / `uprobe_events` writes (ordinary file writes; a file_event rule on the tracefs path is the tool), and `BPF_LINK_CREATE` / `BPF_RAW_TRACEPOINT_OPEN`, which always follow a `BPF_PROG_LOAD` already reported.
+- The agent's own BPF loads and probe attaches (start-up, collector restart) are dropped in the enricher by pid.
+- 1 MB ringbuf; high-priority in the backpressure shedder.
+
 **Portability.**
 - Target kernel floor: **5.15** (Ubuntu 22.04 LTS / RHEL 10). Raised from 5.10 on 2026-04-22 after RHEL 9's 5.14 verifier rejected our per-syscall tracepoint programs with `max_ctx_offset`/`PTR_TO_CTX` checks that 5.15+ handles cleanly. RHEL 9 support is deferred; users should deploy on RHEL 10 (6.12) instead.
 - Tracepoints preferred over kprobes where available (ABI-stable). Kprobes are used for net hooks because the tracepoints there don't carry the data we need.
@@ -365,7 +372,7 @@ Four C files in `agent/internal/bpf/src/`, compiled via `bpf2go`. All programs a
 - Uses `cilium/ebpf` to load compiled programs from embedded bytecode.
 - On load failure, emits a diagnostic log with kernel version, kernel features probed, and exits with nonzero. No fallback to audit or other primitives in Phase 1.
 - Opens ringbuffers with `ringbuf.NewReader()`; each program has its own reader goroutine.
-- Decodes raw binary events into typed Go structs (`RawProcessEvent`, `RawFileEvent`, `RawNetEvent`, `RawAuthEvent`). These are internal types, not OCSF — OCSF conversion happens in the enricher.
+- Decodes raw binary events into typed Go structs (`RawProcessEvent`, `RawFileEvent`, `RawNetEvent`, `RawAuthEvent`, `RawKernelEvent`). These are internal types, not OCSF — OCSF conversion happens in the enricher.
 
 ### 3.4 Enricher
 
@@ -380,7 +387,7 @@ Ingests raw events, produces OCSF events.
 ### 3.5 Edge rule engine (stateless)
 
 - Rules are YAML files; Phase 1 supports a **strict subset of Sigma**:
-  - `logsource` restricted to `product: linux` + a `category` we recognize (`process_creation`, `file_event`, `network_connection`, `authentication` — the last also accepted as `service: auth` with no category, the spelling public Sigma packs use).
+  - `logsource` restricted to `product: linux` + a `category` we recognize (`process_creation`, `file_event`, `network_connection`, `authentication` — also accepted as `service: auth` with no category, the spelling public Sigma packs use — and `driver_load`, Sigma's taxonomy name for module loads, bound to OCSF Kernel Activity 1003 with `kernel_module` as an alias).
   - `detection` restricted to named selections and a final `condition` that is a boolean combination of selections. No `count()`, no `timeframe`, no `near`, no aggregation.
   - Supported field operators: `equals`, `contains`, `startswith`, `endswith`, `regex`, and list forms.
 - Compiler lives in `pkg/ruleast/` with a `CompileSigma([]byte) (Rule, error)` entrypoint. Compilation is ahead-of-time at agent startup; hot reload deferred.
@@ -422,6 +429,8 @@ collectors:
   auth:
     enabled: true
     # libpam_path: /usr/lib/x86_64-linux-gnu/libpam.so.0   # only for unusual layouts
+  kernel:
+    enabled: true
 rules:
   paths:
     - /etc/slither/rules/*.yml
@@ -2147,6 +2156,59 @@ measure UX across distros — PCR 7 semantics differ subtly between
 Secure Boot implementations).
 
 ## 9. Phase 7 — Platform Expansion (bullet, demand-driven)
+
+- ✅ **Kernel-module and probe-attach telemetry (2026-09-19).** Closes
+  the PROJECT.md §3.1 "kernel/module events: module load, kprobe/uprobe
+  attach (defense-in-depth for rootkit detection)" line item, the second
+  of the deferred-and-forgotten Phase 1 items.
+
+  **Hooks.** `kernel.bpf.c` — `tracepoint/module/module_load` (name +
+  taint mask; authoritative for init_module and finit_module alike),
+  `module_free`, `sys_exit_{init,finit}_module` only when `ret < 0`
+  (a *rejected* load, which `module_load` never reports — EKEYREJECTED
+  is signature enforcement working, EPERM is lockdown; no name is
+  available, the loader's cmdline in the actor carries the path),
+  `sys_enter_bpf` for `BPF_PROG_LOAD` (prog_type + prog_name — every
+  BPF rootkit starts here), and `sys_enter_perf_event_open` for every
+  dynamic-PMU open. The kprobe / uprobe PMU ids are only known at
+  runtime (`/sys/bus/event_source/devices/{kprobe,uprobe}/type`), so the
+  BPF side emits `attr.type >= PERF_TYPE_MAX` and the collector keeps
+  the two it wants; config bit 0 is the retprobe flag, config1 the
+  symbol or path, config2 the address or offset. The agent's own BPF
+  loads and probe attaches are dropped in the enricher by pid.
+
+  **Not covered, by design:** tracefs `kprobe_events` / `uprobe_events`
+  writes (a file_event on the tracefs path is the tool) and
+  `BPF_LINK_CREATE` / `BPF_RAW_TRACEPOINT_OPEN`, which always follow a
+  reported `BPF_PROG_LOAD`.
+
+  **Landed:** `RawKernelEvent`; the Linux `kernelCollector` (module
+  tracepoints optional for a CONFIG_MODULES=n kernel); `collectors.kernel`
+  + `SLITHER_COLLECTORS_KERNEL_ENABLED`; the OCSF `KernelActivity` (1003)
+  builder — `status*` for rejected loads, `kernel.type` in {Module,
+  Kprobe, Kretprobe, Uprobe, Uretprobe, BPF Program}, `x_taints` by name
+  (TAINT_* bit table), `x_bpf_prog_type` by name, `x_probe_offset`; the
+  `driver_load` Sigma category (Sigma's taxonomy name, alias
+  `kernel_module`) with `ImageLoaded` / `Module` / `Type` / `EventCode` /
+  `Taints` (multi-valued) / `ProgType` / `Status*` bindings; ClickHouse
+  migration 00008 with flat hunt columns incl. `actor_cmdline`; writer,
+  search summary, lookup projection, flow-graph node, console label;
+  five rules (pack 70 → 75): `kmod-load-rejected-signature` (high),
+  `kmod-load-unsigned` (high, E/F taint), `kmod-load-out-of-tree` (low —
+  every DKMS driver fires it at boot; inventory, not a page),
+  `kmod-bpf-tracing-prog-load` (medium, tracing / packet-path program
+  types minus known tools) and `kmod-probe-attach-unexpected` (medium).
+  The existing `proc-kmod-load-from-staging` stays the path-based
+  complement.
+
+  **Tests:** 16 unit tests (collector decode incl. PMU classification
+  and the absent-PMU case, enricher taint / prog-type / errno tables,
+  module / rejected / probe / bpf builders, self-pid filter, Sigma
+  bindings, all five rules incl. the `not` filters), a ClickHouse
+  round-trip pinning `kernelRow.bind` against migration 00008 (run
+  locally against Docker), and a privileged integration test that loads
+  a second copy of the object set and expects its own `BPF_PROG_LOAD`
+  back through the hook (first run is CI's privileged job).
 
 - ✅ **Authentication telemetry via libpam uprobes (2026-09-19).**
   Closes the first of the PROJECT.md §3.1 line items that Phase 1

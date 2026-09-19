@@ -50,3 +50,16 @@ func TestLogSourceUnknownServiceStillRejected(t *testing.T) {
 		t.Errorf("error should list the accepted categories: %v", err)
 	}
 }
+
+func TestLogSourceDriverLoadAndAlias(t *testing.T) {
+	for _, cat := range []string{"driver_load", "kernel_module"} {
+		src := "title: t\nid: 11111111-1111-4111-8111-111111111111\nlevel: low\nlogsource:\n  product: linux\n  category: " + cat + "\ndetection:\n  sel:\n    EventCode: module_load\n  condition: sel\n"
+		art, _, _, err := Compile([]byte(src))
+		if err != nil {
+			t.Fatalf("category %s: Compile: %v", cat, err)
+		}
+		if art.Rule.Category != CategoryDriverLoad {
+			t.Errorf("category %s → %q", cat, art.Rule.Category)
+		}
+	}
+}

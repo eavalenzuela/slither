@@ -326,6 +326,8 @@ func isFollowup(ev ocsf.Event) bool {
 		labels = v.Metadata.Labels
 	case *ocsf.Authentication:
 		labels = v.Metadata.Labels
+	case *ocsf.KernelActivity:
+		labels = v.Metadata.Labels
 	default:
 		return false
 	}

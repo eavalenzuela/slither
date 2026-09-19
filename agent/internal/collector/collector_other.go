@@ -38,6 +38,10 @@ func newAuthCollector(_ chan<- pipeline.RawAuthEvent, _ config.AuthCollector, _ 
 	return &noopCollector{name: "auth"}
 }
 
+func newKernelCollector(_ chan<- pipeline.RawKernelEvent, _ *telemetry.Counters) Collector {
+	return &noopCollector{name: "kernel"}
+}
+
 // noopCollector satisfies Collector without producing events. It exists so
 // the agent compiles and runs on non-Linux platforms before native
 // telemetry is implemented.

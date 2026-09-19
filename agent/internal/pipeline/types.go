@@ -133,3 +133,45 @@ const (
 	// AuthSessionClose is a pam_close_session return.
 	AuthSessionClose
 )
+
+// RawKernelEvent is the decoded form of a kernel.bpf.c ringbuffer record:
+// a module load / unload / rejected load, a BPF program load, or a
+// kprobe / uprobe attach through perf_event_open.
+type RawKernelEvent struct {
+	Kind RawKernelKind
+	// PID is the tgid of the process that made the request; the
+	// enricher's process-cache key.
+	PID uint32
+	UID uint32
+	// Errno is the positive errno of a rejected module load; 0 otherwise.
+	Errno int32
+	// Taints is the taint mask a loaded module added (module_load only).
+	Taints uint32
+	// Name is the module name, the BPF program name, or — for a probe —
+	// the kprobe symbol or uprobe path.
+	Name string
+	// ProgType is bpf_attr.prog_type for a BPF program load.
+	ProgType uint32
+	// Probe is "kprobe" or "uprobe" for a probe attach, "" otherwise.
+	Probe string
+	// Retprobe is set when the probe fires on function return.
+	Retprobe bool
+	// Offset is the kprobe address or uprobe file offset.
+	Offset uint64
+	// SystemCall names the syscall that produced the event.
+	SystemCall string
+	Comm       string
+	Timestamp  time.Time
+}
+
+// RawKernelKind distinguishes what the kernel reported.
+type RawKernelKind uint8
+
+const (
+	KernelUnknown RawKernelKind = iota
+	KernelModuleLoad
+	KernelModuleUnload
+	KernelModuleLoadRejected
+	KernelBPFProgLoad
+	KernelProbeAttach
+)

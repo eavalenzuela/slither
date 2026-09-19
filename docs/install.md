@@ -412,6 +412,61 @@ collector off.
 
 Requires a restart — this is not in the SIGHUP hot-reload scope.
 
+### Kernel activity telemetry (`collectors.kernel`)
+
+On by default in the sample config. Five tracepoints report what
+changes the kernel itself: module load (with the taint flags the module
+added), module unload, *rejected* module loads with the errno (the case
+the module_load tracepoint never sees — `EKEYREJECTED` is signature
+enforcement working, `EPERM` is lockdown), `bpf(BPF_PROG_LOAD)` with the
+program type and name, and kprobe / uprobe attaches through
+`perf_event_open` with the symbol or file being hooked. Together they
+are the rootkit defence-in-depth PROJECT.md §3.1 asks for: an LKM
+rootkit trips the module hooks, a BPF rootkit trips the program-load and
+probe hooks, and neither can hide the call that created it from a probe
+that was already there.
+
+```yaml
+collectors:
+  kernel:
+    enabled: true
+```
+
+**Self-noise.** The agent loads BPF programs and attaches probes at
+start-up and on every collector restart. Those are dropped by pid in the
+enricher, so a fleet running only slither sees nothing in this class
+until something else touches the kernel. `bpftrace`, `perf` and the
+like do show up — the shipped rules filter the common tools by image
+path; extend the filter for a fleet's own tracing agents.
+
+**Not seen.** Probes created by writing tracefs `kprobe_events` /
+`uprobe_events` (a file write — watch the tracefs path with the file
+collector if that matters), and a module's file path at load time (the
+kernel does not have it; the loader's command line in the event's
+actor usually does).
+
+**Sigma fields** (`logsource: {product: linux, category: driver_load}`,
+alias `kernel_module`): `EventCode` (`module_load`, `module_unload`,
+`module_load_rejected`, `bpf_prog_load`, `probe_attach`), `Module` /
+`Name` / `Symbol`, `ImageLoaded` (uprobe path, else the name), `Type`
+(`Module`, `Kprobe`, `Kretprobe`, `Uprobe`, `Uretprobe`, `BPF Program`),
+`Taints` (multi-valued: `unsigned_module`, `out_of_tree`,
+`proprietary_module`, `forced_module`, `staging`, ...), `ProgType`
+(`kprobe`, `tracepoint`, `xdp`, `cgroup_skb`, ...), `SystemCall`,
+`Status`, `StatusCode`, `StatusDetail`, plus `Image` / `CommandLine` /
+`User` / `ProcessId` for the requesting process.
+
+**Shipped rules.** `kmod-load-rejected-signature` (high),
+`kmod-load-unsigned` (high: E or F taint), `kmod-load-out-of-tree` (low:
+O or C taint — every DKMS driver fires this at boot, so it is an
+inventory signal, not a page), `kmod-bpf-tracing-prog-load` (medium:
+tracing / packet-path program types from a process that is not a known
+tool) and `kmod-probe-attach-unexpected` (medium). The existing
+`proc-kmod-load-from-staging` process rule stays the path-based
+complement.
+
+Requires a restart — this is not in the SIGHUP hot-reload scope.
+
 ### Environment variable overrides
 
 The config loader honours a small set of `SLITHER_*` env vars as
@@ -426,6 +481,7 @@ late-binding overrides (see `agent/internal/config/config.go`):
 | `SLITHER_COLLECTORS_FILE_ENABLED`    | `collectors.file.enabled`          |
 | `SLITHER_COLLECTORS_NET_ENABLED`     | `collectors.net.enabled`           |
 | `SLITHER_COLLECTORS_AUTH_ENABLED`    | `collectors.auth.enabled`          |
+| `SLITHER_COLLECTORS_KERNEL_ENABLED`  | `collectors.kernel.enabled`        |
 | `SLITHER_RULES_PATHS`                | `rules.paths` (comma-separated)    |
 
 Set them in a systemd drop-in (`/etc/systemd/system/slither-agent.service.d/override.conf`):

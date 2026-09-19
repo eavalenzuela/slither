@@ -20,6 +20,12 @@ const (
 	// public packs use `service: auth` with no category — so the compiler
 	// also accepts that spelling (see checkLogSource).
 	CategoryAuthentication Category = "authentication"
+	// CategoryDriverLoad is Sigma's taxonomy name for kernel-module loads
+	// (Sysmon event 6 on Windows). slither binds it to OCSF Kernel
+	// Activity (1003): module load / unload / rejected load, BPF program
+	// load, kprobe / uprobe attach. `kernel_module` is accepted as an
+	// alias.
+	CategoryDriverLoad Category = "driver_load"
 )
 
 // Level maps Sigma's severity vocabulary to slither's own enum. We keep

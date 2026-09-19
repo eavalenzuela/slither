@@ -1,0 +1,26 @@
+title: Out-of-tree or staging kernel module loaded
+id: 8b7c4d00-0001-4000-8000-000000000054
+status: experimental
+description: |
+  A module loaded with the O (out-of-tree) or C (staging) taint: it was
+  not built as part of the running kernel. Every DKMS driver — nvidia,
+  virtualbox, zfs, wireguard on older kernels — does this at boot, so on
+  the hosts that have them this fires once per module per boot and is
+  noise; on a server that has no business loading third-party modules it
+  is the inventory signal that something new arrived. Low so it is
+  searchable rather than paged; raise it per-fleet where the baseline is
+  "no out-of-tree modules ever".
+level: low
+tags:
+  - attack.persistence
+  - attack.t1547.006
+logsource:
+  product: linux
+  category: driver_load
+detection:
+  loaded:
+    EventCode: module_load
+    Taints:
+      - out_of_tree
+      - staging
+  condition: loaded

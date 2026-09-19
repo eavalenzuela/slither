@@ -98,6 +98,7 @@ var classTables = map[uint32]string{
 	1001: "ocsf_file_system_activity_1001",
 	1007: "ocsf_process_activity_1007",
 	2004: "ocsf_detection_finding_2004",
+	1003: "ocsf_kernel_activity_1003",
 	3002: "ocsf_authentication_3002",
 	4001: "ocsf_network_activity_4001",
 }
@@ -336,6 +337,8 @@ func summaryExpr(table string) string {
 		return `concat(protocol, ' ', src_ip, ':', toString(src_port), '->', dst_ip, ':', toString(dst_port))`
 	case "ocsf_authentication_3002":
 		return `concat(event_code, ' ', service, ' user=', user_name, if(src_ip != '', concat(' from=', src_ip), if(src_hostname != '', concat(' from=', src_hostname), '')), ' ', if(status_id = 1, 'ok', status_detail))`
+	case "ocsf_kernel_activity_1003":
+		return `concat(event_code, ' ', kernel_type, ' ', kernel_name, if(taints != '', concat(' taints=', taints), ''), if(prog_type != '', concat(' ', prog_type), ''), ' by ', actor_name, if(status_id = 1, '', concat(' ', status_detail)))`
 	case "ocsf_detection_finding_2004":
 		return `concat(rule_uid, ' ', rule_name)`
 	}

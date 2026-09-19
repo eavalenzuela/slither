@@ -62,6 +62,13 @@ collectors:
   auth:
     enabled: true
     # libpam_path: /usr/lib/x86_64-linux-gnu/libpam.so.0
+  # Kernel activity: module load / unload / rejected load (init_module,
+  # finit_module), BPF program load (bpf), kprobe / uprobe attach
+  # (perf_event_open). OCSF Kernel Activity (1003). Feeds
+  # rules/linux/kmod-*.yml. The agent's own BPF loads and probe
+  # attaches are filtered out by pid.
+  kernel:
+    enabled: true
 
 rules:
   paths:

@@ -97,6 +97,7 @@ type Collectors struct {
 	File    FileCollector    `yaml:"file"`
 	Net     NetCollector     `yaml:"net"`
 	Auth    AuthCollector    `yaml:"auth"`
+	Kernel  KernelCollector  `yaml:"kernel"`
 }
 
 // ProcessCollector configures the process lifecycle collector.
@@ -143,6 +144,15 @@ type AuthCollector struct {
 	// distro with an unusual library layout. A libpam inside a container
 	// image is never covered — a uprobe binds to one inode.
 	LibpamPath string `yaml:"libpam_path"`
+}
+
+// KernelCollector configures the kernel-activity collector: module
+// load / unload / rejected load, BPF program load, and kprobe / uprobe
+// attach. Feeds OCSF Kernel Activity (1003) events for rootkit
+// defence-in-depth. No knobs beyond enabled: the hooks are fixed and
+// the event rate is negligible.
+type KernelCollector struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // Rules configures rule loading.
@@ -313,7 +323,7 @@ func (c *Config) Validate() error {
 			g.BufferSize = 4096
 		}
 	}
-	if !c.Collectors.Process.Enabled && !c.Collectors.File.Enabled && !c.Collectors.Net.Enabled && !c.Collectors.Auth.Enabled {
+	if !c.Collectors.Process.Enabled && !c.Collectors.File.Enabled && !c.Collectors.Net.Enabled && !c.Collectors.Auth.Enabled && !c.Collectors.Kernel.Enabled {
 		return fmt.Errorf("%w: no collectors enabled", ErrInvalidConfig)
 	}
 	for i, p := range c.Rules.Paths {
@@ -409,6 +419,11 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("SLITHER_COLLECTORS_AUTH_ENABLED"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			c.Collectors.Auth.Enabled = b
+		}
+	}
+	if v := os.Getenv("SLITHER_COLLECTORS_KERNEL_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			c.Collectors.Kernel.Enabled = b
 		}
 	}
 	if v := os.Getenv("SLITHER_RULES_PATHS"); v != "" {

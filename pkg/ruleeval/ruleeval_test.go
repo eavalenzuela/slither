@@ -14,6 +14,7 @@ func TestCategoryToClassCoversPhase1(t *testing.T) {
 		ruleast.CategoryFileEvent:         ocsf.ClassFileSystemActivity,
 		ruleast.CategoryNetworkConnection: ocsf.ClassNetworkActivity,
 		ruleast.CategoryAuthentication:    ocsf.ClassAuthentication,
+		ruleast.CategoryDriverLoad:        ocsf.ClassKernelActivity,
 	}
 	for cat, want := range cases {
 		got, ok := CategoryToClass(cat)
@@ -164,5 +165,42 @@ func TestEnvLookupAuthRemoteHostFallsBackToHostname(t *testing.T) {
 	env = EnvFor(ev, AccessorFor(ruleast.CategoryAuthentication))
 	if _, ok := env.Lookup("RemoteHost"); ok {
 		t.Error("RemoteHost must be absent for a local client")
+	}
+}
+
+func TestEnvLookupOnKernelActivity(t *testing.T) {
+	ev := &ocsf.KernelActivity{
+		Metadata:   ocsf.Metadata{EventCode: "module_load"},
+		ClassUID:   ocsf.ClassKernelActivity,
+		ActivityID: ocsf.KernelActivityCreate,
+		Time:       1,
+		Kernel: ocsf.KernelObject{
+			Name: "rk", Type: "Module", SystemCall: "init_module",
+			Taints: []string{"out_of_tree", "unsigned_module"},
+		},
+		Status: "Success", StatusID: 1,
+		Actor: ocsf.Actor{
+			Process: ocsf.Process{PID: 500, Cmdline: "insmod /tmp/rk.ko", File: &ocsf.File{Path: "/usr/sbin/insmod"}},
+			User:    ocsf.User{Name: "root"},
+		},
+	}
+	env := EnvFor(ev, AccessorFor(ruleast.CategoryDriverLoad))
+	want := map[string]string{
+		"ImageLoaded": "rk", "Module": "rk", "Type": "Module",
+		"EventCode": "module_load", "SystemCall": "init_module", "Status": "Success",
+		"Image": "/usr/sbin/insmod", "CommandLine": "insmod /tmp/rk.ko", "User": "root", "ProcessId": "500",
+	}
+	for field, w := range want {
+		got, ok := env.Lookup(field)
+		if !ok || len(got) != 1 || got[0] != w {
+			t.Errorf("Lookup(%q) = %v, %v; want [%q]", field, got, ok, w)
+		}
+	}
+	if got, ok := env.Lookup("Taints"); !ok || len(got) != 2 || got[1] != "unsigned_module" {
+		t.Errorf("Taints = %v, %v", got, ok)
+	}
+	ev.Kernel.Path = "/usr/lib/libssl.so.3"
+	if got, _ := EnvFor(ev, AccessorFor(ruleast.CategoryDriverLoad)).Lookup("ImageLoaded"); got[0] != "/usr/lib/libssl.so.3" {
+		t.Errorf("ImageLoaded should prefer the path: %v", got)
 	}
 }

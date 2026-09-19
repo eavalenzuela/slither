@@ -6,6 +6,8 @@
 //   - net.bpf.c     — tcp_connect, inet_csk_accept, udp_sendmsg kprobes.
 //   - auth.bpf.c    — libpam uprobes: pam_start/set_item/end entry,
 //     pam_authenticate/open_session/close_session return (Phase 7).
+//   - kernel.bpf.c  — module_load/module_free tracepoints, init_module/
+//     finit_module exit, bpf(BPF_PROG_LOAD), perf_event_open (Phase 7).
 //
 // Bindings are produced by bpf2go at `make gen` time and embedded into the
 // slither-agent binary via go:embed. No handwritten Go should live here except

@@ -25,6 +25,8 @@ func CategoryToClass(c ruleast.Category) (ocsf.ClassID, bool) {
 		return ocsf.ClassNetworkActivity, true
 	case ruleast.CategoryAuthentication:
 		return ocsf.ClassAuthentication, true
+	case ruleast.CategoryDriverLoad:
+		return ocsf.ClassKernelActivity, true
 	}
 	return 0, false
 }
@@ -40,6 +42,8 @@ func AccessorFor(c ruleast.Category) Accessor {
 		return netAccessor
 	case ruleast.CategoryAuthentication:
 		return authAccessor
+	case ruleast.CategoryDriverLoad:
+		return kernelAccessor
 	}
 	return nil
 }
@@ -135,6 +139,34 @@ var authAccessor = Accessor{
 	"PID":         func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
 }
 
+// kernelAccessor maps Sigma driver_load fields onto ocsf.KernelActivity.
+// ImageLoaded is Sigma's own name for the loaded object; for a Linux
+// module only the name is known at load time, so ImageLoaded falls back
+// to it when there is no path (uprobes are the one type with a path).
+var kernelAccessor = Accessor{
+	"ImageLoaded":  kernelImageLoaded,
+	"Module":       kernelName,
+	"ModuleName":   kernelName,
+	"Name":         kernelName,
+	"Symbol":       kernelName,
+	"Type":         kernelType,
+	"EventCode":    kernelEventCode,
+	"EventType":    kernelEventCode,
+	"SystemCall":   kernelSystemCall,
+	"Status":       kernelStatus,
+	"StatusCode":   kernelStatusCode,
+	"StatusDetail": kernelStatusDetail,
+	// Taints is multi-valued: one name per taint flag the module added,
+	// so `Taints: unsigned_module` is a membership test.
+	"Taints":      kernelTaints,
+	"ProgType":    kernelProgType,
+	"Image":       func(e ocsf.Event) []string { return procExePath(actorProcess(e)) },
+	"CommandLine": func(e ocsf.Event) []string { return nonEmpty(actorProcess(e).Cmdline) },
+	"User":        actorUserName,
+	"ProcessId":   func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
+	"PID":         func(e ocsf.Event) []string { return u32Str(actorProcess(e).PID) },
+}
+
 // --- helpers (kept tiny and boring; they are the glue, not the logic) -------
 
 func procOf(e ocsf.Event) ocsf.Process {
@@ -190,6 +222,8 @@ func actorProcess(e ocsf.Event) ocsf.Process {
 		return v.Actor.Process
 	case *ocsf.Authentication:
 		return v.Actor.Process
+	case *ocsf.KernelActivity:
+		return v.Actor.Process
 	case *ocsf.ProcessActivity:
 		return v.Actor.Process
 	}
@@ -204,6 +238,8 @@ func actorUserName(e ocsf.Event) []string {
 	case *ocsf.NetworkActivity:
 		u = v.Actor.User
 	case *ocsf.Authentication:
+		u = v.Actor.User
+	case *ocsf.KernelActivity:
 		u = v.Actor.User
 	case *ocsf.ProcessActivity:
 		u = v.Actor.User
@@ -394,4 +430,94 @@ func authTTY(e ocsf.Event) []string {
 		return nil
 	}
 	return nonEmpty(a.TTY)
+}
+
+// --- kernel activity (1003) accessors --------------------------------------
+
+func kernelOf(e ocsf.Event) (*ocsf.KernelActivity, bool) {
+	k, ok := e.(*ocsf.KernelActivity)
+	return k, ok
+}
+
+func kernelImageLoaded(e ocsf.Event) []string {
+	k, ok := kernelOf(e)
+	if !ok {
+		return nil
+	}
+	if k.Kernel.Path != "" {
+		return []string{k.Kernel.Path}
+	}
+	return nonEmpty(k.Kernel.Name)
+}
+
+func kernelName(e ocsf.Event) []string {
+	k, ok := kernelOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(k.Kernel.Name)
+}
+
+func kernelType(e ocsf.Event) []string {
+	k, ok := kernelOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(k.Kernel.Type)
+}
+
+func kernelEventCode(e ocsf.Event) []string {
+	k, ok := kernelOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(k.Metadata.EventCode)
+}
+
+func kernelSystemCall(e ocsf.Event) []string {
+	k, ok := kernelOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(k.Kernel.SystemCall)
+}
+
+func kernelStatus(e ocsf.Event) []string {
+	k, ok := kernelOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(k.Status)
+}
+
+func kernelStatusCode(e ocsf.Event) []string {
+	k, ok := kernelOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(k.StatusCode)
+}
+
+func kernelStatusDetail(e ocsf.Event) []string {
+	k, ok := kernelOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(k.StatusDetail)
+}
+
+func kernelTaints(e ocsf.Event) []string {
+	k, ok := kernelOf(e)
+	if !ok {
+		return nil
+	}
+	return k.Kernel.Taints
+}
+
+func kernelProgType(e ocsf.Event) []string {
+	k, ok := kernelOf(e)
+	if !ok {
+		return nil
+	}
+	return nonEmpty(k.Kernel.ProgType)
 }

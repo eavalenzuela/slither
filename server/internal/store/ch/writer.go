@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -111,6 +112,7 @@ func NewWriter(store *Store, bus *ingest.Bus, telem *telemetry.Counters, opts Wr
 			pb.OcsfClassId_OCSF_CLASS_ID_FILE_SYSTEM_ACTIVITY: {tableName: "ocsf_file_system_activity_1001"},
 			pb.OcsfClassId_OCSF_CLASS_ID_NETWORK_ACTIVITY:     {tableName: "ocsf_network_activity_4001"},
 			pb.OcsfClassId_OCSF_CLASS_ID_AUTHENTICATION:       {tableName: "ocsf_authentication_3002"},
+			pb.OcsfClassId_OCSF_CLASS_ID_KERNEL_ACTIVITY:      {tableName: "ocsf_kernel_activity_1003"},
 			pb.OcsfClassId_OCSF_CLASS_ID_DETECTION_FINDING:    {tableName: "ocsf_detection_finding_2004"},
 		},
 	}
@@ -253,6 +255,8 @@ func decode(env *pb.Envelope) (chRow, error) {
 		return decodeNet(env)
 	case pb.OcsfClassId_OCSF_CLASS_ID_AUTHENTICATION:
 		return decodeAuth(env)
+	case pb.OcsfClassId_OCSF_CLASS_ID_KERNEL_ACTIVITY:
+		return decodeKernel(env)
 	case pb.OcsfClassId_OCSF_CLASS_ID_DETECTION_FINDING:
 		return decodeFinding(env)
 	}
@@ -535,6 +539,62 @@ func (r authRow) bind(batch driver.Batch) error {
 		r.shared.classUID, r.shared.severityID,
 		r.activityID, r.eventCode, r.service, r.userName, r.srcIP, r.srcHostname,
 		r.statusID, r.statusCode, r.statusDetail, r.logonTypeID, r.actorPID, r.actorName,
+		r.shared.raw,
+	)
+}
+
+func decodeKernel(env *pb.Envelope) (chRow, error) {
+	var ev ocsf.KernelActivity
+	if err := json.Unmarshal(env.GetPayload(), &ev); err != nil {
+		return nil, err
+	}
+	row := kernelRow{shared: sharedFromEnvelope(env)}
+	row.activityID = uint8(ev.ActivityID)
+	row.eventCode = ev.Metadata.EventCode
+	row.kernelType = ev.Kernel.Type
+	row.kernelName = ev.Kernel.Name
+	row.kernelPath = ev.Kernel.Path
+	row.systemCall = ev.Kernel.SystemCall
+	row.statusID = ev.StatusID
+	if n, err := strconv.ParseInt(ev.StatusCode, 10, 32); err == nil {
+		row.statusCode = int32(n)
+	}
+	row.statusDetail = ev.StatusDetail
+	row.taints = strings.Join(ev.Kernel.Taints, ",")
+	row.progType = ev.Kernel.ProgType
+	row.actorPID = ev.Actor.Process.PID
+	row.actorName = ev.Actor.Process.Name
+	row.actorCmdline = ev.Actor.Process.Cmdline
+	return row, nil
+}
+
+// kernelRow mirrors ocsf_kernel_activity_1003 (migration 00008) column
+// for column; bind order must match the DDL exactly.
+type kernelRow struct {
+	shared       sharedRow
+	activityID   uint8
+	eventCode    string
+	kernelType   string
+	kernelName   string
+	kernelPath   string
+	systemCall   string
+	statusID     uint8
+	statusCode   int32
+	statusDetail string
+	taints       string
+	progType     string
+	actorPID     uint32
+	actorName    string
+	actorCmdline string
+}
+
+func (r kernelRow) bind(batch driver.Batch) error {
+	return batch.Append(
+		r.shared.eventID, r.shared.hostID, r.shared.observedAt, r.shared.collectedAt,
+		r.shared.classUID, r.shared.severityID,
+		r.activityID, r.eventCode, r.kernelType, r.kernelName, r.kernelPath, r.systemCall,
+		r.statusID, r.statusCode, r.statusDetail, r.taints, r.progType,
+		r.actorPID, r.actorName, r.actorCmdline,
 		r.shared.raw,
 	)
 }
