@@ -32,6 +32,17 @@ type DnsDnsEvent struct {
 	Payload    [1024]uint8
 }
 
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	DnsMapEvents            = "events"
+	DnsProgHandleIp6SendSkb = "handle_ip6_send_skb"
+	DnsProgHandleIpSendSkb  = "handle_ip_send_skb"
+	DnsProgHandleSkbRecvUdp = "handle_skb_recv_udp"
+	DnsVarUnused            = "unused"
+)
+
 // LoadDns returns the embedded CollectionSpec for Dns.
 func LoadDns() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_DnsBytes)
@@ -52,7 +63,7 @@ func LoadDns() (*ebpf.CollectionSpec, error) {
 //	*DnsMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func LoadDnsObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func LoadDnsObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := LoadDns()
 	if err != nil {
 		return err

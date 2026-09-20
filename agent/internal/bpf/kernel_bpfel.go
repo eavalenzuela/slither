@@ -31,6 +31,20 @@ type KernelKernelEvent struct {
 	Comm     [16]int8
 }
 
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	KernelMapEvents                 = "events"
+	KernelProgHandleBpf             = "handle_bpf"
+	KernelProgHandleFinitModuleExit = "handle_finit_module_exit"
+	KernelProgHandleInitModuleExit  = "handle_init_module_exit"
+	KernelProgHandleModuleFree      = "handle_module_free"
+	KernelProgHandleModuleLoad      = "handle_module_load"
+	KernelProgHandlePerfEventOpen   = "handle_perf_event_open"
+	KernelVarUnused                 = "unused"
+)
+
 // LoadKernel returns the embedded CollectionSpec for Kernel.
 func LoadKernel() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_KernelBytes)
@@ -51,7 +65,7 @@ func LoadKernel() (*ebpf.CollectionSpec, error) {
 //	*KernelMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func LoadKernelObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func LoadKernelObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := LoadKernel()
 	if err != nil {
 		return err

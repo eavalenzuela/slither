@@ -32,6 +32,17 @@ type NetNetEvent struct {
 	_      [4]byte
 }
 
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	NetMapEvents               = "events"
+	NetProgHandleInetCskAccept = "handle_inet_csk_accept"
+	NetProgHandleTcpConnect    = "handle_tcp_connect"
+	NetProgHandleUdpSendmsg    = "handle_udp_sendmsg"
+	NetVarUnused               = "unused"
+)
+
 // LoadNet returns the embedded CollectionSpec for Net.
 func LoadNet() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_NetBytes)
@@ -52,7 +63,7 @@ func LoadNet() (*ebpf.CollectionSpec, error) {
 //	*NetMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func LoadNetObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func LoadNetObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := LoadNet()
 	if err != nil {
 		return err

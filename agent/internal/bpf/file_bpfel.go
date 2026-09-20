@@ -31,6 +31,19 @@ type FileFileEvent struct {
 	_       [4]byte
 }
 
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	FileMapEvents           = "events"
+	FileProgHandleFchmodat  = "handle_fchmodat"
+	FileProgHandleFchownat  = "handle_fchownat"
+	FileProgHandleOpenat    = "handle_openat"
+	FileProgHandleRenameat2 = "handle_renameat2"
+	FileProgHandleUnlinkat  = "handle_unlinkat"
+	FileVarUnused           = "unused"
+)
+
 // LoadFile returns the embedded CollectionSpec for File.
 func LoadFile() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_FileBytes)
@@ -51,7 +64,7 @@ func LoadFile() (*ebpf.CollectionSpec, error) {
 //	*FileMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func LoadFileObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func LoadFileObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := LoadFile()
 	if err != nil {
 		return err

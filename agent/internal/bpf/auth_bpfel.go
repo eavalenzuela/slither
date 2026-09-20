@@ -39,6 +39,22 @@ type AuthAuthEvent struct {
 	_       [4]byte
 }
 
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	AuthMapEvents                    = "events"
+	AuthMapPamCtx                    = "pam_ctx"
+	AuthProgHandlePamAuthenticateRet = "handle_pam_authenticate_ret"
+	AuthProgHandlePamCloseSessionRet = "handle_pam_close_session_ret"
+	AuthProgHandlePamEnd             = "handle_pam_end"
+	AuthProgHandlePamOpenSessionRet  = "handle_pam_open_session_ret"
+	AuthProgHandlePamSetItem         = "handle_pam_set_item"
+	AuthProgHandlePamStart           = "handle_pam_start"
+	AuthProgHandlePamStartConfdir    = "handle_pam_start_confdir"
+	AuthVarUnused                    = "unused"
+)
+
 // LoadAuth returns the embedded CollectionSpec for Auth.
 func LoadAuth() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_AuthBytes)
@@ -59,7 +75,7 @@ func LoadAuth() (*ebpf.CollectionSpec, error) {
 //	*AuthMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func LoadAuthObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func LoadAuthObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := LoadAuth()
 	if err != nil {
 		return err

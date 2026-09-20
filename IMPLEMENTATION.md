@@ -2173,6 +2173,21 @@ Secure Boot implementations).
 
 ## 9. Phase 7 — Platform Expansion (bullet, demand-driven)
 
+- ✅ **Reachable dependency advisories cleared (2026-09-19).** The push
+  of the telemetry series surfaced a Dependabot banner (15 alerts). Per
+  the standing rule, `govulncheck ./...` per module separated the three
+  *reachable* module advisories from the stdlib patch-drift noise:
+  `google.golang.org/grpc` GO-2026-6348 (HTTP/2 DATA-frame OOM, reached
+  from the agent sink and the enroll client) and GO-2026-6443 (server
+  panic on a missing authority header, reached from `grpc.Server.Serve`),
+  and `github.com/cilium/ebpf` GO-2026-6238 (integer overflow in BTF
+  parsing, reached from every `Load*Objects`). Bumped grpc v1.82.1 →
+  v1.83.2 across every module and cilium/ebpf v0.21.0 → v0.22.0; the
+  bpf2go bindings regenerated under 0.22 (it now emits name constants and
+  `any` in place of `interface{}`, no behaviour change). All four
+  modules report zero module-level advisories; lint and the unit suite
+  are green.
+
 - **§3 scope reconciliation (2026-09-19).** The completeness review
   found six PROJECT.md §3 line items with no code and no descope
   record: auth events, kernel-module events, container events, DNS

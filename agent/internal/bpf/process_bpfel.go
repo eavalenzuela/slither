@@ -32,6 +32,17 @@ type ProcessProcessEvent struct {
 	Cmdline    [256]int8
 }
 
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	ProcessMapEvents      = "events"
+	ProcessProgHandleExec = "handle_exec"
+	ProcessProgHandleExit = "handle_exit"
+	ProcessProgHandleFork = "handle_fork"
+	ProcessVarUnused      = "unused"
+)
+
 // LoadProcess returns the embedded CollectionSpec for Process.
 func LoadProcess() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_ProcessBytes)
@@ -52,7 +63,7 @@ func LoadProcess() (*ebpf.CollectionSpec, error) {
 //	*ProcessMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func LoadProcessObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func LoadProcessObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := LoadProcess()
 	if err != nil {
 		return err
